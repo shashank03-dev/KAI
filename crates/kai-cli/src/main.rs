@@ -302,6 +302,7 @@ async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow:
             approver: &approver,
             interrupt: &kill,
             sink: &Printer,
+            steering: &kai_core::engine::NoSteering,
             skills: &skills,
             config,
             parallelism: s.parallelism,

@@ -179,6 +179,8 @@ pub struct Orchestrator<'a> {
     pub approver: &'a dyn Approver,
     pub interrupt: &'a dyn Interrupt,
     pub sink: &'a dyn EventSink,
+    /// User messages mid-run; whichever sub-agent steps next reads them.
+    pub steering: &'a dyn crate::engine::Steering,
     pub skills: &'a [Skill],
     pub config: Config,
     /// How many terminal sub-agents may run at once.
@@ -251,7 +253,12 @@ impl Orchestrator<'_> {
                 }],
             }
         });
+        self.run_plan(task, plan).await
+    }
 
+    /// Run an already-made plan (e.g. the one the UI showed), with no second
+    /// planning call.
+    pub async fn run_plan(&self, task: &str, plan: Plan) -> anyhow::Result<Report> {
         let gui_lock = Mutex::new(());
         let slots = Semaphore::new(self.parallelism.max(1));
         let headless = Headless::default();
@@ -321,7 +328,7 @@ impl Orchestrator<'_> {
             approver: self.approver,
             interrupt: self.interrupt,
             sink: self.sink,
-            steering: &crate::engine::NoSteering,
+            steering: self.steering,
             verifier: None,
             skills: self.skills,
             config: self.config,

@@ -100,6 +100,9 @@ fn number(v: &serde_json::Value) -> Option<f64> {
         .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
 }
 
+/// A reply that is only this much whitespace is a degenerate one.
+const WHITESPACE_RUN_MAX: usize = 256;
+
 /// Read an SSE chat-completions stream to the end (or, with `early_stop`, until
 /// the first JSON object in the content is complete, then drop the
 /// connection). `started` is when the request was sent, for TTFT.
@@ -119,6 +122,11 @@ pub async fn read_chat_stream(
             match handle_line(&line, &mut out, started)? {
                 Line::Done => return Ok(out),
                 Line::More => {}
+            }
+            // Gemma sometimes streams a run of whitespace until max_tokens or the
+            // timeout; give up early so the step can be retried.
+            if out.content.len() - out.content.trim_end().len() > WHITESPACE_RUN_MAX {
+                return Err(ClientError::EmptyBody);
             }
             if early_stop && complete_json_prefix(&out.content).is_some() {
                 out.stopped_early = true;

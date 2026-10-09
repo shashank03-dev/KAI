@@ -68,6 +68,10 @@ struct Pending {
     summary: String,
     action: Action,
     expect: String,
+    /// Text typed by this step (or batch), to look for in a tree-only read.
+    typed: Option<String>,
+    /// Keys pressed last; Enter usually submits/navigates, so look properly.
+    keys: Vec<String>,
     /// Indices into `trace.steps` this check confirms.
     records: Vec<usize>,
 }
@@ -307,6 +311,10 @@ impl Engine<'_> {
             summary: HistoryItem::from_decision(&decision).summary,
             action: decision.action,
             expect: decision.expect.clone(),
+            typed: (decision.action == Action::Type)
+                .then(|| decision.text.clone())
+                .flatten(),
+            keys: decision.keys.clone(),
             records: vec![r.trace.steps.len() - 1],
         };
         let mut item = HistoryItem::from_decision(&decision);

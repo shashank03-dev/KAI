@@ -57,6 +57,22 @@ pub(super) fn text_checkable(action: Action, expect: &str) -> bool {
     }
 }
 
+/// Enter/Return usually submits a form or opens something new.
+pub(super) fn submits(keys: &[String]) -> bool {
+    keys.iter().any(|k| {
+        matches!(
+            k.to_ascii_lowercase().as_str(),
+            "enter" | "return" | "kp_enter"
+        )
+    })
+}
+
+/// Whether the element text contains (the start of) what was typed.
+pub(super) fn tree_shows(tree: &str, typed: &str) -> bool {
+    let probe: String = typed.trim().chars().take(24).collect();
+    probe.is_empty() || tree.to_lowercase().contains(&probe.to_lowercase())
+}
+
 /// The grid cell a click aimed at, to zoom on if it changes nothing.
 pub(super) fn grid_click(d: &Decision, g: &Grounding) -> Option<(u32, Rect)> {
     match (g, d.action, d.target) {
@@ -103,7 +119,7 @@ impl Engine<'_> {
             && r.tree_only_streak + 1 < c.full_every
             && r.pending
                 .as_ref()
-                .is_some_and(|p| text_checkable(p.action, &p.expect))
+                .is_some_and(|p| text_checkable(p.action, &p.expect) && !submits(&p.keys))
     }
 
     /// Observe (full or tree-only), verify the last `expect`, update the
@@ -117,7 +133,14 @@ impl Engine<'_> {
         } else {
             self.perceptor.observe().await?
         };
-        if tree_only && !rich(&obs.grounding) {
+        // Typed text that the tree doesn't show (web pages often don't expose
+        // field values) would read as "typing failed": look properly.
+        let typed_hidden = tree_only
+            && r.pending
+                .as_ref()
+                .and_then(|p| p.typed.as_deref())
+                .is_some_and(|t| !tree_shows(&obs.grounding.as_text(), t));
+        if tree_only && (typed_hidden || !rich(&obs.grounding)) {
             // The tree got poor (or turned into a grid): look properly.
             obs = self.perceptor.observe().await?;
             tree_only = false;
@@ -215,6 +238,18 @@ impl Engine<'_> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn enter_submits_and_typed_text_is_looked_for() {
+        assert!(submits(&["Return".to_string()]));
+        assert!(!submits(&["ctrl".to_string(), "s".to_string()]));
+        assert!(tree_shows(
+            "[3] entry \"Gemma 4 model card\"",
+            "gemma 4 model card"
+        ));
+        assert!(!tree_shows("[3] entry \"Search\"", "Gemma 4 model card"));
+    }
+
     use super::*;
 
     #[test]

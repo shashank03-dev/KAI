@@ -11,11 +11,10 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     chat::{CostEstimator, PromptInput, StepState, ThinkingIndicator, TokenCounter, stop_button},
     data_display::{Badge, Tone, UsageBar},
-    feedback::InlineMessage,
     forms::Choice,
     layout::{Panel, ScrollArea, SplitPane},
     navigation::Tabs,
-    primitives::{IconName, Severity},
+    primitives::IconName,
     theme::{ActiveTheme, TextSize},
 };
 use gpui::{AnyElement, Axis, Context, IntoElement, ParentElement, Styled, Window, div, point, px};
@@ -85,14 +84,8 @@ fn plan(r: &RunState) -> Option<AgentPlan> {
 }
 
 /// The steering composer under the transcript.
-fn steer_box(id: u64, app: &KaiApp, r: &RunState, cx: &Context<KaiApp>) -> AnyElement {
-    if r.team {
-        return InlineMessage::new(
-            Severity::Info,
-            "Team runs can't be steered yet: sub-agents don't read messages. Pause or stop instead.",
-        )
-        .into_any_element();
-    }
+fn steer_box(id: u64, app: &KaiApp, _r: &RunState, cx: &Context<KaiApp>) -> AnyElement {
+    // Team runs too: whichever sub-agent steps next reads the message.
     let sender = cx.entity();
     PromptInput::new(("steer", id as usize), &app.steer_draft, move |_, cx| {
         sender.update(cx, |a, cx| a.steer(id, cx))

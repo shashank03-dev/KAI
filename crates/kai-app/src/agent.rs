@@ -235,6 +235,7 @@ async fn drive(
             approver: &approver,
             interrupt: control,
             sink: &sink,
+            steering: control,
             skills: &skills,
             config,
             parallelism: settings.parallelism,
@@ -243,7 +244,11 @@ async fn drive(
         if let Some(p) = &plan {
             let _ = tx.unbounded_send(Ui::Plan(p.clone()));
         }
-        let report = orch.run(&task).await?;
+        // Run the plan the UI shows; plan again only if planning failed.
+        let report = match plan {
+            Some(p) => orch.run_plan(&task, p).await?,
+            None => orch.run(&task).await?,
+        };
         let mut trace = Trace::new(&task);
         for r in &report.results {
             for s in &r.trace.steps {

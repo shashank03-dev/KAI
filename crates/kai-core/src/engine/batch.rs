@@ -111,6 +111,10 @@ impl Engine<'_> {
             pending.records.push(r.trace.steps.len() - 1);
             pending.summary = HistoryItem::from_decision(d).summary;
             pending.action = d.action;
+            pending.keys = d.keys.clone();
+            if d.action == Action::Type {
+                pending.typed = d.text.clone();
+            }
             if !d.expect.trim().is_empty() || d.action == Action::Shell {
                 pending.expect = d.expect.clone();
             }
