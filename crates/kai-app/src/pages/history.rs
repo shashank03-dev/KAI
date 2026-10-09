@@ -290,6 +290,7 @@ mod tests {
                     model_ms: 500,
                     first_token_ms: None,
                     act_ms: 10,
+                    verify_ms: 0,
                 },
                 backend: String::new(),
                 elements: String::new(),
@@ -297,6 +298,7 @@ mod tests {
                 approval: None,
                 verified: true,
                 output: None,
+                path: None,
             });
         }
         let (spans, end) = spans(&t);

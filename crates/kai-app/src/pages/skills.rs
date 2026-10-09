@@ -410,6 +410,7 @@ mod tests {
             approval: None,
             verified: true,
             output: None,
+            path: None,
         });
         let md = draft_from(&trace.task.clone(), Some(&trace));
         let name = slug(&trace.task);

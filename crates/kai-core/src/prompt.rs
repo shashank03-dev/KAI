@@ -23,13 +23,13 @@ pub fn system_prompt(skills: &[Skill]) -> String {
 
 const SYSTEM_BASE: &str = "\
 You are Kai, an agent that operates a computer for the user by looking at the \
-screen and choosing ONE action at a time.
+screen and choosing the next action.
 
-You are given a screenshot with numbered boxes drawn on interactive elements, \
-and a text list of those elements like `#14 button \"Save\" (enabled)`. To act \
-on an element, use its number as `target`. Never guess raw pixel coordinates. \
-If the screen shows a numbered grid instead of boxes, use the cell number as \
-`target`.
+You get a screenshot with numbered boxes on interactive elements, and a text \
+list of them like `#14 button \"Save\"` (state shown only if disabled or \
+secure). To act on an element, use its number as `target`. Never guess pixel \
+coordinates. If the screen shows a numbered grid instead, use the cell number \
+as `target`. Some steps have no screenshot, only the list.
 
 Rules:
 - Reply with ONE JSON object for the next action, and nothing else.
@@ -42,11 +42,30 @@ diagnostics, builds). You will see its output in your last steps. Prefer it over
 clicking when the task is naturally a command.
 - Use `ask_user` when you genuinely need the user to choose or provide input.
 - Use `done` the moment the task is complete.
-- `expect` describes what the screen should show after your action.";
+- `expect` describes what the screen should show after your action.
+- Only when the next actions are certain (e.g. type, then press Enter), list up \
+to 3 of them in `then`, each like {\"action\":\"key\",\"keys\":[\"enter\"]}. \
+They run in order without asking you; never put risky actions or `done` there.
+- With no screenshot, if you must see the screen, reply `wait` with \
+`need_screen` true.";
 
-/// Build the changing user turn: skill body (if one is active), the element
-/// list, the last-3-step history, and the task. No old screenshots are ever
-/// included here — only the current one goes in the image part.
+/// Everything one user turn is built from.
+pub struct TurnInput<'a> {
+    pub task: &'a str,
+    pub grounding: &'a Grounding,
+    pub history: &'a [HistoryItem],
+    pub active_skill: Option<&'a Skill>,
+    pub no_progress: bool,
+    /// Extra lines for this step: steering messages, verifier warnings, the
+    /// zoom note. Each goes on its own line before the task.
+    pub notes: &'a [String],
+    /// False on tree-only steps (no screenshot attached).
+    pub has_screenshot: bool,
+}
+
+/// Build the changing user turn: skill body (if one is active), the compact
+/// element list, the last-3-step history, and the task last. No old
+/// screenshots are ever included — only the current one, if any.
 pub fn user_turn(
     task: &str,
     grounding: &Grounding,
@@ -54,9 +73,22 @@ pub fn user_turn(
     active_skill: Option<&Skill>,
     no_progress: bool,
 ) -> String {
+    build_turn(&TurnInput {
+        task,
+        grounding,
+        history,
+        active_skill,
+        no_progress,
+        notes: &[],
+        has_screenshot: true,
+    })
+}
+
+/// [`user_turn`] with notes and the screenshot flag.
+pub fn build_turn(t: &TurnInput) -> String {
     let mut s = String::new();
 
-    if let Some(sk) = active_skill {
+    if let Some(sk) = t.active_skill {
         s.push_str("Active skill: ");
         s.push_str(&sk.front.name);
         s.push('\n');
@@ -64,49 +96,86 @@ pub fn user_turn(
         s.push_str("\n\n");
     }
 
-    s.push_str("Elements on screen:\n");
-    s.push_str(&grounding.as_text());
+    if !t.has_screenshot {
+        s.push_str("(No screenshot this step.)\n");
+    }
+    s.push_str("Elements:\n");
+    s.push_str(&t.grounding.as_compact_text());
     s.push_str("\n\n");
 
-    if !history.is_empty() {
+    let recent: Vec<&HistoryItem> = t.history.iter().rev().take(3).rev().collect();
+    if !recent.is_empty() {
         s.push_str("Your last steps:\n");
-        for h in history.iter().rev().take(3).rev() {
-            s.push_str(&format!("- {}\n", h.summary));
+        let last = recent.len() - 1;
+        for (i, h) in recent.iter().enumerate() {
+            s.push_str("- ");
+            s.push_str(&h.summary);
+            if let Some(out) = &h.output {
+                // The newest output in full (capped); older ones shortened.
+                let cap = if i == last {
+                    OUTPUT_MAX
+                } else {
+                    OLD_OUTPUT_MAX
+                };
+                s.push_str("\n  output:\n");
+                s.push_str(&truncate(out, cap));
+            }
+            s.push('\n');
         }
         s.push('\n');
     }
 
-    if no_progress {
+    if t.no_progress {
         s.push_str(
             "WARNING: the screen has not changed for two steps. Try a different \
-             approach or ask the user.\n\n",
+             approach or ask the user.\n",
         );
+    }
+    for n in t.notes {
+        s.push_str(n);
+        s.push('\n');
+    }
+    if t.no_progress || !t.notes.is_empty() {
+        s.push('\n');
     }
 
     s.push_str("Task: ");
-    s.push_str(task);
+    s.push_str(t.task);
     s.push_str("\n\nRespond with the next action as JSON.");
     s
 }
 
+const OUTPUT_MAX: usize = 1500;
+const OLD_OUTPUT_MAX: usize = 300;
+
+fn truncate(out: &str, max: usize) -> String {
+    let trimmed: String = out.chars().take(max).collect();
+    if out.chars().count() > max {
+        format!("{trimmed} …(truncated)")
+    } else {
+        trimmed
+    }
+}
+
 /// A compact record of a past step for the history window.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct HistoryItem {
     pub summary: String,
+    /// Command output of a `shell` step, shown under the summary.
+    pub output: Option<String>,
 }
 
 impl HistoryItem {
-    /// Attach command output (truncated) so the model sees what a shell step did.
+    pub fn note(summary: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            output: None,
+        }
+    }
+
+    /// Attach command output so the model sees what a shell step did.
     pub fn push_output(&mut self, out: &str) {
-        const MAX: usize = 1500;
-        let trimmed: String = out.chars().take(MAX).collect();
-        let more = if out.chars().count() > MAX {
-            " …(truncated)"
-        } else {
-            ""
-        };
-        self.summary
-            .push_str(&format!("\n  output:\n{trimmed}{more}"));
+        self.output = Some(out.to_string());
     }
 
     pub fn from_decision(d: &Decision) -> Self {
@@ -120,7 +189,11 @@ impl HistoryItem {
             let short: String = text.chars().take(30).collect();
             summary.push_str(&format!(" \"{short}\""));
         }
-        Self { summary }
+        if !d.keys.is_empty() {
+            summary.push(' ');
+            summary.push_str(&d.keys.join("+"));
+        }
+        Self::note(summary)
     }
 }
 
@@ -204,7 +277,7 @@ mod tests {
             secure: false,
         }]);
         let t = user_turn("click save", &g, &[], None, false);
-        assert!(t.contains("#1 button \"Save\""));
+        assert!(t.contains("#1 button \"Save\"\n"));
         assert!(t.trim_end().ends_with("JSON."));
         assert!(t.contains("Task: click save"));
     }
@@ -232,12 +305,101 @@ mod tests {
     fn history_window_keeps_last_three() {
         let g = Grounding::Marks(vec![]);
         let hist: Vec<HistoryItem> = (0..5)
-            .map(|i| HistoryItem {
-                summary: format!("step{i}"),
-            })
+            .map(|i| HistoryItem::note(format!("step{i}")))
             .collect();
         let t = user_turn("x", &g, &hist, None, false);
         assert!(t.contains("step2") && t.contains("step4"));
         assert!(!t.contains("step0"));
+    }
+
+    /// A typical browser screen: 40 elements, mostly enabled, a few unnamed.
+    fn typical_screen() -> Grounding {
+        let names = [
+            "Back",
+            "Forward",
+            "Reload",
+            "Home",
+            "Address and search bar",
+            "Bookmark this tab",
+            "Extensions",
+            "Downloads",
+            "Open application menu",
+            "New Tab",
+            "Close Tab",
+            "Wikipedia, the free encyclopedia",
+            "Search Wikipedia",
+            "Search",
+            "Main page",
+            "Contents",
+            "Current events",
+            "Random article",
+            "About Wikipedia",
+            "Contact us",
+            "Help",
+            "Learn to edit",
+            "Community portal",
+            "Recent changes",
+            "Upload file",
+            "Create account",
+            "Log in",
+            "Talk",
+            "Read",
+            "View source",
+            "View history",
+            "Tools",
+            "",
+            "",
+            "Language",
+            "Download as PDF",
+            "Printable version",
+            "Permanent link",
+            "Page information",
+            "Cite this page",
+        ];
+        Grounding::Marks(
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| Element {
+                    mark: i as u32 + 1,
+                    role: if i % 3 == 0 { Role::Link } else { Role::Button },
+                    name: n.to_string(),
+                    bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
+                    enabled: i != 7,
+                    secure: false,
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn compact_turn_is_smaller_than_the_old_format() {
+        let g = typical_screen();
+        let hist: Vec<HistoryItem> = [
+            "open_url \"https://wikipedia.org\"",
+            "click #13",
+            "type #13 \"Rust\"",
+        ]
+        .iter()
+        .map(|s| HistoryItem::note(*s))
+        .collect();
+        let task = "Find the Wikipedia article about the Rust programming language";
+        let new = user_turn(task, &g, &hist, None, false);
+        // The pre-compaction layout, rebuilt for comparison.
+        let mut old = format!("Elements on screen:\n{}\n\nYour last steps:\n", g.as_text());
+        for h in &hist {
+            old.push_str(&format!("- {}\n", h.summary));
+        }
+        old.push_str(&format!(
+            "\nTask: {task}\n\nRespond with the next action as JSON."
+        ));
+        eprintln!(
+            "MEASURED user turn, 40 elements: old {} chars (~{} tokens), new {} chars (~{} tokens)",
+            old.len(),
+            old.len() / 4,
+            new.len(),
+            new.len() / 4
+        );
+        assert!(new.len() * 10 < old.len() * 9, "at least 10% smaller");
     }
 }

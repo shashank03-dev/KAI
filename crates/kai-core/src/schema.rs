@@ -213,7 +213,7 @@ fn normalise_key(k: &str) -> String {
 
 /// Find the first balanced `{...}` JSON object in a string, ignoring braces that
 /// appear inside string literals. Robust against code fences and prose.
-fn extract_json_object(s: &str) -> Option<&str> {
+pub(crate) fn extract_json_object(s: &str) -> Option<&str> {
     let bytes = s.as_bytes();
     let start = s.find('{')?;
     let mut depth = 0usize;

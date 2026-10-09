@@ -170,6 +170,13 @@ pub struct Config {
     pub max_tokens: u32,
     /// Stop and ask after this many no-progress / failed steps in a row.
     pub max_failures: u32,
+    /// Tree-only steps: when the Set-of-Marks list is rich and the last
+    /// `expect` is checkable from text, observe without a screenshot.
+    pub tree_only: bool,
+    /// Force a full (screenshot) observation at least every this many steps.
+    pub full_every: u32,
+    /// Max follow-up actions (`then`) run without a model call; 0 disables.
+    pub max_batch: u32,
 }
 
 impl Default for Config {
@@ -180,6 +187,9 @@ impl Default for Config {
             approval: ApprovalLevel::HighRiskOnly,
             max_tokens: 192,
             max_failures: 3,
+            tree_only: true,
+            full_every: 3,
+            max_batch: crate::reply::MAX_THEN as u32,
         }
     }
 }
