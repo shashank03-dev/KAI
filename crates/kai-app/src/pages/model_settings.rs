@@ -1,0 +1,215 @@
+//! Settings › Model & server: the backend, every endpoint and key (keys live
+//! in the OS keychain), a Test per backend, and the fast and careful models.
+
+use crate::AgentHandle;
+use crate::app::KaiApp;
+use crate::pages::settings::row;
+use crate::runs::backend_label;
+use crate::switcher::{backend_from_key, backend_key};
+use ely_gpui_component::{
+    buttons::{Button, ButtonVariant, SegmentedControl},
+    feedback::{ErrorView, InlineMessage, Toast},
+    forms::{Choice, PasswordInput, Select, TextInput, UrlInput},
+    primitives::{IconName, Severity},
+    settings::SettingsSection,
+};
+use gpui::{AnyElement, Context, Entity, IntoElement, ParentElement, Styled, div};
+use kai_core::settings::{BackendChoice, MODELS};
+
+/// Store any keys typed into the fields, and the endpoint.
+pub fn save_keys(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
+    app.settings.vllm_endpoint = app.pages.endpoint.read(cx).text().trim().to_string();
+    for (field, name) in [
+        (app.pages.vllm_key.clone(), kai_os::secrets::VLLM),
+        (app.pages.gemini_key.clone(), kai_os::secrets::GEMINI),
+        (app.pages.gateway_key.clone(), kai_os::secrets::GATEWAY),
+        (app.pages.openai_key.clone(), kai_os::secrets::OPENAI),
+    ] {
+        let v = field.read(cx).text().trim().to_string();
+        if !v.is_empty() {
+            match kai_os::secrets::set(name, &v) {
+                Ok(()) => field.update(cx, |f, cx| f.set_text("", cx)),
+                Err(e) => app.toast(
+                    Toast::new("Key not saved")
+                        .body(e.to_string())
+                        .severity(Severity::Danger),
+                    cx,
+                ),
+            }
+        }
+    }
+    app.save_settings(cx);
+}
+
+/// Send one real image request through `backend` (the chosen one when None).
+pub fn test(app: &mut KaiApp, backend: Option<BackendChoice>, cx: &mut Context<KaiApp>) {
+    save_keys(app, cx);
+    let mut settings = app.settings.clone();
+    if let Some(b) = backend {
+        settings.backend = b;
+    }
+    let key = backend_key(settings.backend).to_string();
+    app.pages.testing = key.clone();
+    app.pages.test_results.retain(|(k, _)| *k != key);
+    let rx = cx
+        .global::<AgentHandle>()
+        .0
+        .test_connection(settings, kai_os::secrets::keys());
+    cx.spawn(async move |this, cx| {
+        let r = rx
+            .await
+            .unwrap_or_else(|_| Err("Kai's agent stopped.".into()));
+        let _ = this.update(cx, |a, cx| {
+            a.pages.testing.clear();
+            let r =
+                r.map(|(d, b)| format!("{b} answered an image request in {} ms.", d.as_millis()));
+            a.pages.test_results.push((key, r));
+            cx.notify();
+        });
+    })
+    .detach();
+}
+
+fn result(app: &KaiApp, key: &str) -> Option<AnyElement> {
+    app.pages
+        .test_results
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, r)| match r {
+            Ok(m) => InlineMessage::new(Severity::Success, m.clone()).into_any_element(),
+            Err(e) => ErrorView::new(
+                gpui::SharedString::from(format!("test-err-{key}")),
+                IconName::TriangleAlert,
+                "The test didn't pass",
+            )
+            .detail(e.clone())
+            .into_any_element(),
+        })
+}
+
+/// A key field with its own Test button and result.
+fn key_row(
+    app: &KaiApp,
+    label: &str,
+    field: &Entity<TextInput>,
+    stored: bool,
+    backend: BackendChoice,
+    cx: &Context<KaiApp>,
+) -> AnyElement {
+    let hint = if stored {
+        "A key is stored in the OS keychain (or set in the environment). Type a new one to replace it."
+    } else {
+        "No key stored yet."
+    };
+    let key = backend_key(backend);
+    let tester = cx.entity();
+    let control = div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(PasswordInput::new(field))
+        .child(
+            div().child(
+                Button::new(
+                    gpui::SharedString::from(format!("test-{key}")),
+                    format!("Test {}", backend_label(backend)),
+                )
+                .variant(ButtonVariant::Secondary)
+                .loading(app.pages.testing == key)
+                .on_click(move |_, _, cx| tester.update(cx, |a, cx| test(a, Some(backend), cx))),
+            ),
+        )
+        .children(result(app, key));
+    row(label, hint, control, cx).into_any_element()
+}
+
+pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
+    let (backend, fast, careful, saver, tester) = (
+        cx.entity(),
+        cx.entity(),
+        cx.entity(),
+        cx.entity(),
+        cx.entity(),
+    );
+    let keys = kai_os::secrets::keys();
+    let models = || MODELS.iter().map(|m| Choice::new(m.id, m.label));
+    let mut segments = SegmentedControl::new("backend", backend_key(app.settings.backend));
+    for (b, label) in [
+        (BackendChoice::Both, "Both"),
+        (BackendChoice::Vllm, "DigitalOcean"),
+        (BackendChoice::Gemini, "Gemini"),
+        (BackendChoice::Gateway, "AI Gateway"),
+        (BackendChoice::OpenAi, "OpenAI"),
+    ] {
+        segments = segments.segment(backend_key(b), label, None);
+    }
+    let segments = segments.on_change(move |v, window, cx| {
+        backend.update(cx, |a, cx| {
+            crate::switcher::set_backend(a, backend_from_key(v.as_ref()), cx);
+            a.check_connection(window, cx);
+        })
+    });
+    let tested = backend_key(app.settings.backend);
+    SettingsSection::new("Model & server")
+        .description("Where the model runs. Screenshots go only to these endpoints.")
+        .row(row(
+            "Backend",
+            "Both tries your DigitalOcean server first and falls back to Gemini for a step. AI Gateway (Vercel) and OpenAI run Gemma 4 or GPT models for comparison.",
+            segments,
+            cx,
+        ))
+        .row(row(
+            "DigitalOcean server",
+            "The address deploy/digitalocean/up.sh printed, ending in /v1.",
+            UrlInput::new(&app.pages.endpoint),
+            cx,
+        ))
+        .row(key_row(app, "Server API key", &app.pages.vllm_key, keys.vllm.is_some(), BackendChoice::Vllm, cx))
+        .row(key_row(app, "Gemini API key", &app.pages.gemini_key, keys.gemini.is_some(), BackendChoice::Gemini, cx))
+        .row(key_row(app, "Vercel AI Gateway key", &app.pages.gateway_key, keys.gateway.is_some(), BackendChoice::Gateway, cx))
+        .row(key_row(app, "OpenAI API key", &app.pages.openai_key, keys.openai.is_some(), BackendChoice::OpenAi, cx))
+        .row(row(
+            "Fast model",
+            "Used for every step. Gemma runs on every backend; GPT models need AI Gateway or OpenAI.",
+            Select::new("fast", models())
+                .selected(app.settings.fast_model.clone())
+                .on_change(move |v, _, cx| {
+                    fast.update(cx, |a, cx| crate::switcher::set_model(a, v.as_ref(), cx))
+                }),
+            cx,
+        ))
+        .row(row(
+            "Careful model",
+            "Used for one step after a failed one, then Kai drops back.",
+            Select::new("careful", models())
+                .selected(app.settings.careful_model.clone())
+                .on_change(move |v, _, cx| {
+                    careful.update(cx, |a, cx| {
+                        a.settings.careful_model = v.to_string();
+                        a.save_settings(cx);
+                    })
+                }),
+            cx,
+        ))
+        .row(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    Button::new("save-model", "Save")
+                        .variant(ButtonVariant::Secondary)
+                        .on_click(move |_, _, cx| saver.update(cx, save_keys)),
+                )
+                .child(
+                    Button::new("test-model", "Save and test the chosen backend")
+                        .variant(ButtonVariant::Primary)
+                        .loading(app.pages.testing == tested)
+                        .on_click(move |_, _, cx| tester.update(cx, |a, cx| test(a, None, cx))),
+                ),
+        )
+        .row(div().children(
+            (app.settings.backend == BackendChoice::Both)
+                .then(|| result(app, tested))
+                .flatten(),
+        ))
+}

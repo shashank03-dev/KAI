@@ -4,6 +4,7 @@
 
 use crate::AgentHandle;
 use crate::agent::Agent;
+use crate::control::RunControl;
 use crate::i18n::t;
 use crate::pages::running::agent_state;
 use crate::state::{Phase, RunState};
@@ -20,26 +21,29 @@ use gpui::{
     Render, Styled, Window, WindowHandle, div, px, size,
 };
 use kai_core::{ApprovalChoice, Rect};
+use std::sync::Arc;
 
 struct Open(Option<WindowHandle<MiniWindow>>);
 impl Global for Open {}
 
 pub struct MiniView {
     run: Entity<RunState>,
+    control: Arc<RunControl>,
     focus: FocusHandle,
 }
 
-pub fn open(run: Entity<RunState>, cx: &mut App) {
+pub fn open(run: Entity<RunState>, control: Arc<RunControl>, cx: &mut App) {
     let view = cx.new(|cx| {
         cx.observe(&run, |_, _, cx| cx.notify()).detach();
         MiniView {
             run,
+            control,
             focus: cx.focus_handle(),
         }
     });
     match MiniWindow::open(
         "Kai is working",
-        size(px(340.), px(196.)),
+        size(px(340.), px(212.)),
         Some(Corner::TopRight),
         view.into(),
         cx,
@@ -176,7 +180,11 @@ impl Render for MiniView {
                 div()
                     .text_size(theme.text_size(TextSize::Sm))
                     .line_clamp(2)
-                    .child(r.caption.clone()),
+                    .child(if r.held {
+                        "Paused. Kai waits before its next step.".to_string()
+                    } else {
+                        r.caption.clone()
+                    }),
             )
             .children(
                 r.thinking.then(|| {
@@ -186,12 +194,35 @@ impl Render for MiniView {
             .child(div().flex_1())
             .children(answers)
             .children((!waiting).then(|| {
-                stop_button("mini-stop")
-                    .full_width()
-                    .on_click(move |_, _, cx| {
-                        cx.global::<AgentHandle>().0.stop();
-                        Self::answer(&stop_run, ApprovalChoice::Stop, cx);
-                    })
+                let (control, run) = (self.control.clone(), self.run.clone());
+                let paused = r.paused;
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("mini-pause", if paused { "Resume" } else { "Pause" })
+                            .variant(ButtonVariant::Secondary)
+                            .on_click(move |_, _, cx| {
+                                control.set_paused(!paused);
+                                run.update(cx, |r, cx| {
+                                    r.paused = !paused;
+                                    if paused {
+                                        r.held = false;
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(stop_button("mini-stop").full_width().on_click(
+                                move |_, _, cx| {
+                                    cx.global::<AgentHandle>().0.stop();
+                                    Self::answer(&stop_run, ApprovalChoice::Stop, cx);
+                                },
+                            )),
+                    )
             }))
     }
 }

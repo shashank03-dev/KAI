@@ -7,11 +7,15 @@ mod approval;
 mod assets;
 mod brand;
 mod chrome;
+mod control;
 mod i18n;
 mod mini;
 mod onboarding;
 mod pages;
+mod runs;
 mod state;
+mod switcher;
+mod team;
 
 use ely_gpui_component::{
     Assets,
@@ -26,6 +30,20 @@ use std::sync::Arc;
 /// The agent, reachable from every view.
 pub struct AgentHandle(pub Arc<agent::Agent>);
 impl Global for AgentHandle {}
+
+/// Keeps the global stop shortcut registered; holds the shortcut in use
+/// (the fallback when the chosen one is taken), or None if none could be.
+pub struct StopHotkey(pub Option<kai_os::kill::Hotkey>);
+impl Global for StopHotkey {}
+
+impl StopHotkey {
+    /// "ctrl-alt-escape" for the status bar, or None.
+    pub fn label(cx: &App) -> Option<String> {
+        cx.try_global::<StopHotkey>()
+            .and_then(|h| h.0.as_ref())
+            .map(|h| onboarding::gh_to_gpui(&h.shortcut))
+    }
+}
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -52,6 +70,12 @@ fn main() {
             };
             Theme::set_mode_now(mode, cx);
             cx.set_global(AgentHandle(agent.clone()));
+            // The global stop shortcut, registered on the UI thread (Windows
+            // needs it on the thread that runs the event loop).
+            let hotkey = kai_os::kill::install_hotkey(&agent.kill, &settings.kill_hotkey)
+                .map_err(|e| log::error!("stop shortcut not registered: {e:#}"))
+                .ok();
+            cx.set_global(StopHotkey(hotkey));
             app::bind_keys(cx);
 
             let splash = SplashScreen::new(i18n::t(cx, "app.name", &[]))

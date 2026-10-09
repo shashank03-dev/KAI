@@ -6,7 +6,7 @@ use crate::agent::{Pending, Ui};
 use crate::app::{Conn, KaiApp, Page};
 use crate::state::RunState;
 use ely_gpui_component::theme::{Mode, Theme};
-use gpui::{Context, Window};
+use gpui::{AppContext, Context, Window};
 use kai_core::engine::EngineEvent;
 use kai_core::trace::{Outcome, StepRecord, Timings, Trace};
 use kai_core::{Decision, Rect};
@@ -23,6 +23,10 @@ const SHOTS: &[&str] = &[
     "11-home-offline",
     "20-running",
     "21-approval",
+    "22-run-terminal",
+    "23-run-team",
+    "24-run-steered",
+    "25-run-queued",
     "30-done-success",
     "31-done-failure",
     "40-skills",
@@ -118,6 +122,7 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
         false,
         40,
     );
+    r.model = "Gemma 4 26B A4B · AI Gateway".into();
     let screen = Some(Rect::new(0.0, 0.0, 1280.0, 720.0));
     if let Some(f) = sample_frame() {
         for step in 0..3 {
@@ -192,8 +197,74 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
     }
 }
 
+/// Replace the sessions list with made-up runs: one finished, the given one
+/// (selected, and active when live), and one queued behind it.
+fn fake_runs(app: &mut KaiApp, cx: &mut Context<KaiApp>, f: impl FnOnce(&mut RunState)) {
+    app.runs.clear();
+    app.active = None;
+    app.queue_held = false;
+    let kill = cx.global::<crate::AgentHandle>().0.kill.clone();
+    let add = |app: &mut KaiApp, cx: &mut Context<KaiApp>, f: &mut dyn FnMut(&mut RunState)| {
+        let state = cx.new(|_| RunState::default());
+        state.update(cx, |r, _| f(r));
+        app.next_id += 1;
+        let id = app.next_id;
+        app.runs.push(crate::runs::RunEntry {
+            id,
+            state,
+            control: std::sync::Arc::new(crate::control::RunControl::new(kill.clone())),
+            stopped_alone: false,
+        });
+        id
+    };
+    add(app, cx, &mut |r| {
+        fake_run(r, Some(Outcome::Success));
+        r.task = "Find the 5 biggest files in my Downloads folder".into();
+    });
+    let mut f = Some(f);
+    let id = add(app, cx, &mut |r| {
+        if let Some(f) = f.take() {
+            f(r)
+        }
+    });
+    add(app, cx, &mut |r| {
+        r.queue(
+            "Switch my computer to dark mode".into(),
+            false,
+            40,
+            "Gemma 4 26B A4B · AI Gateway".into(),
+        )
+    });
+    if app.entry(id).is_some_and(|e| e.state.read(cx).is_live()) {
+        app.active = Some(id);
+    }
+    app.select(Some(id), cx);
+}
+
+fn add_outputs(r: &mut RunState) {
+    for (step, command, output) in [
+        (
+            1,
+            "du -ah ~/Downloads | sort -rh | head -5",
+            "1.2G\t/home/kai/Downloads\n700M\t/home/kai/Downloads/ubuntu.iso\n[exit 0]",
+        ),
+        (
+            2,
+            "ls ~/Downloads/missing",
+            "ls: cannot access '/home/kai/Downloads/missing': No such file or directory\n[exit 2]",
+        ),
+    ] {
+        r.apply(Ui::Event(EngineEvent::Output {
+            step,
+            command: command.into(),
+            output: output.into(),
+        }));
+    }
+}
+
 fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
     app.palette = false;
+    app.run_tab = "steps".into();
     app.shortcuts = false;
     app.pages.open_skill = None;
     app.pages.drafting = false;
@@ -207,21 +278,61 @@ fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
     if app.onboarding.is_some() {
         app.onboarding = None;
     }
-    let run = app.run.clone();
     match SHOTS[i] {
         "10-home" | "11-home-offline" => {
-            run.update(cx, |r, _| *r = RunState::default());
+            app.runs.clear();
+            app.active = None;
+            app.select(None, cx);
             if SHOTS[i] == "11-home-offline" {
                 app.conn = Conn::Offline("Kai couldn't reach the model server. Check the address and your internet connection.".into());
             }
             app.go(Page::Run, cx);
         }
-        "20-running" => {
-            run.update(cx, |r, _| fake_run(r, None));
-            app.go(Page::Run, cx);
+        "20-running" => fake_runs(app, cx, |r| fake_run(r, None)),
+        "22-run-terminal" => {
+            fake_runs(app, cx, |r| {
+                fake_run(r, None);
+                add_outputs(r);
+            });
+            app.run_tab = "terminal".into();
+        }
+        "23-run-team" => {
+            fake_runs(app, cx, |r| {
+                fake_run(r, None);
+                r.team = true;
+                let plan = kai_core::orchestrator::Plan::parse(
+                    r#"{"subtasks":[
+                        {"id":"1","goal":"Check the firewall status","kind":"shell"},
+                        {"id":"2","goal":"List pending updates","kind":"shell"},
+                        {"id":"3","goal":"Open Settings and check screen lock","kind":"gui"},
+                        {"id":"4","goal":"Write the summary","kind":"shell","depends_on":["1","2"]}]}"#,
+                )
+                .expect("capture plan is valid");
+                r.apply(Ui::Plan(plan));
+                r.apply(Ui::Event(EngineEvent::Finished {
+                    outcome: Outcome::Success,
+                }));
+            });
+            app.run_tab = "team".into();
+        }
+        "24-run-steered" => fake_runs(app, cx, |r| {
+            fake_run(r, None);
+            r.sent("Use Firefox, not Chrome".into());
+            r.apply(Ui::Event(EngineEvent::Steered {
+                step: 2,
+                message: "Use Firefox, not Chrome".into(),
+            }));
+            r.sent("Then close the tab".into());
+            r.paused = true;
+            r.held = true;
+        }),
+        "25-run-queued" => {
+            fake_runs(app, cx, |r| fake_run(r, None));
+            let queued = app.runs.last().map(|e| e.id);
+            app.select(queued, cx);
         }
         "21-approval" => {
-            run.update(cx, |r, _| {
+            fake_runs(app, cx, |r| {
                 fake_run(r, None);
                 // The receiver is dropped: answering in a capture does nothing.
                 let (reply, _) = futures::channel::oneshot::channel();
@@ -231,17 +342,19 @@ fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
                     reply,
                 }));
             });
-            app.go(Page::Run, cx);
         }
-        "30-done-success" => run.update(cx, |r, _| fake_run(r, Some(Outcome::Success))),
-        "31-done-failure" => run.update(cx, |r, _| fake_run(r, Some(Outcome::StepLimit))),
+        "30-done-success" => fake_runs(app, cx, |r| {
+            fake_run(r, Some(Outcome::Success));
+            add_outputs(r);
+        }),
+        "31-done-failure" => fake_runs(app, cx, |r| fake_run(r, Some(Outcome::StepLimit))),
         "40-skills" => app.go(Page::Skills, cx),
         "41-skill-detail" => {
             app.pages.open_skill = app.skills.first().map(|s| s.front.name.clone());
             app.go(Page::Skills, cx);
         }
         "42-save-as-skill" => {
-            run.update(cx, |r, _| fake_run(r, Some(Outcome::Success)));
+            fake_runs(app, cx, |r| fake_run(r, Some(Outcome::Success)));
             crate::pages::skills::open_draft(app, cx);
         }
         "50-history" => {
@@ -263,8 +376,9 @@ fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
             app.go(Page::Settings, cx);
         }
         "80-palette" => {
-            app.go(Page::Run, cx);
-            run.update(cx, |r, _| *r = RunState::default());
+            app.runs.clear();
+            app.active = None;
+            app.select(None, cx);
             app.palette = true;
         }
         "81-shortcuts" => app.shortcuts = true,
