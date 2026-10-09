@@ -223,6 +223,22 @@ impl OpenAiClient {
     }
 }
 
+/// How many times a 429 is waited out before giving up.
+const MAX_RATE_LIMIT_TRIES: u32 = 8;
+
+/// `Retry-After` in seconds, capped at a minute.
+fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
+    let secs: f64 = resp
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_secs_f64(secs.clamp(1.0, 60.0)))
+}
+
 /// OpenAI strict mode wants every property listed in `required` and no
 /// additional properties. Optional fields in Kai's schemas are already
 /// nullable (or arrays/strings that may be empty), so this keeps meaning.
@@ -284,6 +300,14 @@ impl ModelClient for OpenAiClient {
             let started = Instant::now();
             let resp = self.send(&self.body(req, mode, effort)).await?;
             let status = resp.status();
+            if status.as_u16() == 429 && attempts < MAX_RATE_LIMIT_TRIES {
+                // Free tiers allow a few requests a minute: wait and retry.
+                // The wait is not model time (`started` resets next loop).
+                let wait = retry_after(&resp).unwrap_or(Duration::from_secs(15));
+                log::warn!("{} rate-limited; retrying in {wait:?}", self.model);
+                tokio::time::sleep(wait).await;
+                continue;
+            }
             if !status.is_success() {
                 let txt = resp.text().await.unwrap_or_default();
                 if status.as_u16() == 400 && attempts < 4 {
