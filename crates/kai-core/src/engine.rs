@@ -21,6 +21,8 @@ pub struct Observation {
     pub screen_hash: u64,
     /// Where the observe time went (capture and tree run in parallel).
     pub timing: ObserveTiming,
+    /// The captured display in global screen pixels, when known.
+    pub screen: Option<crate::element::Rect>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -90,6 +92,7 @@ pub enum EngineEvent {
         elements: String,
         /// The marked JPEG the model sees (empty for terminal sub-agents).
         screenshot: std::sync::Arc<[u8]>,
+        screen: Option<crate::element::Rect>,
     },
     Thinking {
         step: u32,
@@ -97,6 +100,8 @@ pub enum EngineEvent {
     Decided {
         step: u32,
         decision: Box<Decision>,
+        /// The box the action points at, in global screen pixels.
+        target: Option<crate::element::Rect>,
     },
     AwaitingApproval {
         step: u32,
@@ -227,6 +232,7 @@ impl Engine<'_> {
                 step,
                 elements: elements.clone(),
                 screenshot: obs.images.screenshot_jpeg.as_slice().into(),
+                screen: obs.screen,
             });
 
             // No-progress detection: same screen two steps running.
@@ -286,6 +292,7 @@ impl Engine<'_> {
             self.sink.emit(&EngineEvent::Decided {
                 step,
                 decision: Box::new(decision.clone()),
+                target: decision.target.and_then(|t| obs.grounding.target_rect(t)),
             });
 
             // ---- done / ask_user terminate ----

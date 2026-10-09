@@ -41,12 +41,11 @@ do, and how to stop it.
 
 - **Mark:** an open hand of five rounded strokes (`assets/icons/kai-hand.svg`),
   registered as an icon through Ely's asset source (`Assets::before`).
-- **Name:** "Kai ಕೈ" in the title bar and on the splash.
+- **Name:** "Kai" in the title bar and on the splash.
 - **Accent:** saffron. Light `#B45309` on Ely's light background, dark
   `#F59E0B` on Ely's dark background — both checked for WCAG AA (4.5:1 for
   text) with Ely's contrast checker; the numbers are in `DECISIONS.md`.
-- **Language:** English and Kannada catalogs through `i18n::I18n`. The greeting
-  reads "ನಮಸ್ಕಾರ · Good evening".
+- **Language:** English. UI strings live in one table (`i18n.rs`).
 
 ## Information architecture
 
@@ -69,7 +68,7 @@ light and dark; dark is designed (surfaces lift, accents lighten), not
 inverted — Ely's palettes do this per mode.
 
 ### 1. Splash
-`shell::SplashScreen` with the hand mark, "Kai ಕೈ", tagline "Gemma 4's hands
+`shell::SplashScreen` with the hand mark, "Kai", tagline "Gemma 4's hands
 on your computer", and status `typography::ShimmerText` "Waking Gemma…". Under
 one second: it closes as soon as settings load; the model warm-up continues in
 the background and reports into the status bar.
@@ -87,7 +86,7 @@ States: each step's empty/filled; Test idle / loading / passed / failed (with
 the fix); permissions polling.
 
 ### 3. Home — `layout::AppShell`
-- **Title bar:** `shell::TitleBar` "Kai ಕೈ" (it draws `WindowControls` per OS
+- **Title bar:** `shell::TitleBar` "Kai" (it draws `WindowControls` per OS
   and its own drag region), theme toggle and palette button as actions.
 - **Sidebar:** `shell::ActivityBar` — Run, Skills, History, Benchmarks;
   Settings in the footer.

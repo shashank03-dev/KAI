@@ -68,7 +68,6 @@ pub struct Settings {
     /// Droplet price for the cost estimator (US$ per hour).
     pub droplet_hourly_usd: f32,
     pub theme: String,
-    pub locale: String,
     pub onboarded: bool,
 }
 
@@ -88,7 +87,6 @@ impl Default for Settings {
             team_mode: true,
             droplet_hourly_usd: 3.39,
             theme: "system".to_string(),
-            locale: "en".to_string(),
             onboarded: false,
         }
     }

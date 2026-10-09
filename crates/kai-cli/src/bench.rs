@@ -131,6 +131,7 @@ impl Perceptor for ScriptedScreen {
             grounding: Grounding::Marks(els),
             screen_hash: self.frame.load(Ordering::SeqCst),
             timing: Default::default(),
+            screen: None,
         })
     }
 }

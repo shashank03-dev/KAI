@@ -15,7 +15,7 @@ use std::process::ExitCode;
 #[command(
     name = "kai",
     version,
-    about = "Kai (ಕೈ): Gemma 4's hands on your computer"
+    about = "Kai: Gemma 4's hands on your computer"
 )]
 struct Cli {
     #[command(subcommand)]
