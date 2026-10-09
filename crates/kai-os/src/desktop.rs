@@ -133,6 +133,7 @@ impl Perceptor for DesktopPerceptor {
                 tree_ms: tree_time.as_millis() as u64,
                 encode_ms: t_enc.elapsed().as_millis() as u64,
             },
+            screen: Some(at),
         })
     }
 

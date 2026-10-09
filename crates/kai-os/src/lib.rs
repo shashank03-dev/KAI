@@ -5,6 +5,7 @@
 
 pub mod a11y;
 pub mod desktop;
+pub mod exclude;
 pub mod frame;
 pub mod input;
 pub mod kill;
