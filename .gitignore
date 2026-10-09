@@ -1,0 +1,19 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Secrets — never commit
+.env
+*.pem
+deploy/digitalocean/.secrets
+deploy/digitalocean/*.secret
+hf_token*
+api_key*
+
+# Local trace output and captures that are too big for git
+/traces
+screenshots/*.local.png
+
+# OS cruft
+.DS_Store
+Thumbs.db

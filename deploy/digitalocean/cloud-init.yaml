@@ -1,0 +1,119 @@
+#cloud-config
+# Provisions the Gemma 4 vLLM server on a fresh GPU Droplet.
+# Secrets (__HF_TOKEN__, __VLLM_API_KEY__, __HOSTNAME_MODE__) are substituted by
+# up.sh into a rendered copy kept under .secrets/ and never committed.
+
+package_update: true
+packages:
+  - docker.io
+  - curl
+  - debian-keyring
+  - debian-archive-keyring
+  - apt-transport-https
+
+write_files:
+  - path: /etc/kai/vllm.env
+    permissions: "0600"
+    content: |
+      HF_TOKEN=__HF_TOKEN__
+      VLLM_API_KEY=__VLLM_API_KEY__
+      MODEL_ID=google/gemma-4-26B-A4B-it
+      SERVED_NAME=gemma-4-26b-a4b-it
+
+  - path: /etc/systemd/system/vllm.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=vLLM Gemma 4 (OpenAI-compatible, localhost only)
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      EnvironmentFile=/etc/kai/vllm.env
+      TimeoutStartSec=0
+      Restart=always
+      RestartSec=5
+      ExecStartPre=-/usr/bin/docker rm -f kai-vllm
+      ExecStartPre=/usr/bin/docker pull vllm/vllm-openai:v0.25.0
+      ExecStart=/usr/bin/docker run --rm --name kai-vllm \
+        --gpus all --ipc=host --shm-size 16g \
+        -p 127.0.0.1:8000:8000 \
+        -e HF_TOKEN=${HF_TOKEN} \
+        -e VLLM_API_KEY=${VLLM_API_KEY} \
+        -v /root/.cache/huggingface:/root/.cache/huggingface \
+        vllm/vllm-openai:v0.25.0 \
+        --model ${MODEL_ID} \
+        --served-model-name ${SERVED_NAME} \
+        --host 0.0.0.0 --port 8000 \
+        --api-key ${VLLM_API_KEY} \
+        --max-model-len 16384 \
+        --gpu-memory-utilization 0.90 \
+        --limit-mm-per-prompt.image 2 \
+        --enable-prefix-caching \
+        --async-scheduling
+      ExecStop=/usr/bin/docker stop kai-vllm
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/kai-health
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Returns ready ONLY after the model has answered a warm-up request with an image.
+      set -euo pipefail
+      source /etc/kai/vllm.env
+      PX=/etc/kai/warm.b64
+      # 1x1 white JPEG, base64, generated once.
+      if [[ ! -f "$PX" ]]; then
+        printf '%s' "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AfwAf/9k=" > "$PX"
+      fi
+      IMG="data:image/jpeg;base64,$(cat "$PX")"
+      body=$(cat <<JSON
+      {"model":"${SERVED_NAME}","max_tokens":1,"temperature":0,
+       "messages":[{"role":"user","content":[
+         {"type":"text","text":"ok"},
+         {"type":"image_url","image_url":{"url":"${IMG}"}}]}]}
+      JSON
+      )
+      code=$(curl -s -o /dev/null -w '%{http_code}' \
+        -H "Authorization: Bearer ${VLLM_API_KEY}" \
+        -H 'Content-Type: application/json' \
+        --max-time 20 -d "$body" \
+        http://127.0.0.1:8000/v1/chat/completions || echo 000)
+      [[ "$code" == "200" ]] && echo ready || { echo "not-ready ($code)"; exit 1; }
+
+  - path: /etc/caddy/Caddyfile
+    permissions: "0644"
+    content: |
+      {
+        admin off
+      }
+      # __HOSTNAME_MODE__ is "sslip" (auto IP host) or your real domain.
+      :443 {
+        tls internal
+        # Only expose the health check and the OpenAI API surface.
+        handle /health {
+          exec /usr/local/bin/kai-health
+        }
+        handle /v1/* {
+          rate_limit {
+            zone kai { key {remote_host} events 60 window 1m }
+          }
+          reverse_proxy 127.0.0.1:8000
+        }
+        respond 404
+      }
+
+runcmd:
+  - mkdir -p /root/.cache/huggingface /etc/kai
+  # NVIDIA container toolkit so docker can see the GPU.
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update
+  - apt-get install -y nvidia-container-toolkit caddy
+  - nvidia-ctk runtime configure --runtime=docker
+  - systemctl restart docker
+  - systemctl daemon-reload
+  - systemctl enable --now vllm.service
+  - systemctl enable --now caddy
