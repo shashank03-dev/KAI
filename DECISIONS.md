@@ -223,22 +223,18 @@ billing.
   composer has no voice button (as the prompt requires).
 - **Zoomed crop** on a missed grid click is still not requested automatically.
 
-## Screenshots — not captured here (honest)
+## Screenshots — captured (correction, 2026-10-09)
 
-The app builds, runs and passes its tests here, and `KAI_CAPTURE=<dir>
-kai-app` walks all 21 screens/states in light and dark. But in this headless
-container **GPUI cannot present frames to Xvfb**: every capture, and even a
-root-window grab with ImageMagick, is black — and Ely's own `docs_start`
-example behaves the same, with default Vulkan, Mesa's software Vulkan
-(lavapipe) and GLX enabled. So `screenshots/` has no PNGs from this build. On
-a real Linux or Windows desktop run:
-
-```sh
-KAI_CAPTURE=screenshots cargo run --release -p kai-app
-```
-
-and review/commit the 42 PNGs. Keyboard-only and mouse-only walkthroughs of the
-flow were likewise not performed here.
+The earlier note here blamed Xvfb/Vulkan/GLX for black frames. That was wrong.
+The real cause: `kai-app` built `gpui_platform` **without its `x11` and
+`wayland` features**, so gpui-pre-linux ran its headless-only platform and
+never opened a window at all (`xwininfo -root -tree` showed no children). It
+also means the earlier Linux builds of the app never showed a window. With the
+features on (`crates/kai-app/Cargo.toml`), the app renders on TigerVNC's Xvnc
+with Mesa's llvmpipe Vulkan driver, picked by wgpu with no env vars. All 25
+screens/states in light and dark are in `screenshots/` (made-up run data, see
+`screenshots/README.md`). Keyboard-only and mouse-only walkthroughs were still
+not performed.
 
 ## Phase 5 — ship
 
@@ -252,3 +248,79 @@ flow were likewise not performed here.
   public — flip it before submission.
 - Commits are authored by the repo owner's account with no co-author lines, at
   the owner's request.
+
+## Round 2 (2026-10-09) — speed, comparison, control centre
+
+### "JEV" = Jev, not V-JEPA 2
+The owner confirmed "JEV" is **Jev** (`typesafe-ai/jev`), TypeSafe AI's
+"System One" decision model on the Vercel AI Gateway: text-only, typed answers
+(boolean/"noul" probability, choice, score), $0.042 per M input tokens. Kai
+implements it as a `Verifier` (`client/jev.rs`). **It could not be measured:**
+the supplied Gateway key is free tier and every Jev call returns 403 ("Free
+tier users do not have access to this model"). The verifier turns itself off on
+that error. It stays **off by default** until it can be measured on a paid key.
+The fallback judge (`LlmVerifier`, `openai/gpt-4.1-nano`) was measured at p50
+803 ms / p95 1494 ms per call (n = 10): slower than what it would save per
+step, so it is also off by default.
+
+### Vercel AI Gateway
+- Used for **(a)** the GPT comparison models and **(b)** Gemma 4 26B-A4B
+  itself, because no Droplet and no Gemini key were available. Not used for a
+  per-step router model (latency above).
+- Free-tier access measured 2026-10-09: works — `google/gemma-4-26b-a4b-it`,
+  `openai/gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5.2`, `gpt-4.1(-mini/-nano)`,
+  `gpt-4o(-mini)`, `o4-mini`, `google/gemini-2.5-flash(-lite)`; 403 —
+  `gemma-4-31b-it`, `typesafe-ai/jev`, `gpt-5.4+`, `gemini-3+`. Rate limit
+  5 requests/minute/model; the client waits out 429s and does not count the
+  wait as model time (task wall time does include it — see the bench notes).
+- `computer-use-preview` is **not** served by the Gateway (404), so OpenAI's
+  native loop (`--backend openai-native`) needs a direct OpenAI key. It is
+  implemented and tested against a mock server only. **Not run.**
+- On the free tier, the careful slot (31B) is unavailable; Kai treats the 403
+  as "unavailable" and stays on the fast model instead of failing the run.
+- Gemma via the Gateway accepts `response_format: json_schema` but does not
+  enforce it (it also wraps replies in code fences), so the schema goes into
+  the prompt too and every reply is validated as before.
+
+### Frames
+Default frame size changed from "1280 px wide" to "≤ 645,120 px" (Gemma 4's
+280-soft-token budget at 48x48 px per token): 1070x602 at 16:9. Measured: JPEG
+148 → 117 KB with 81 marks; marks drawn at the final size stay crisp, while a
+1280 frame downscaled by the server blurs the digits. Whether Gemma 4's
+processor rounds to whole patches is undocumented; `KAI_FRAME_MAX_SIDE=1024`
+gives an exactly patch-aligned 1024x576 if needed. `KAI_FRAME_MAX_PIXELS=0`
+restores the old behaviour.
+
+### Engine
+- Multi-action steps via an optional `then` list (≤ 3) on the same JSON object,
+  not an array reply, so old replies and both structured-output backends keep
+  working. Follow-up fields are nullable so OpenAI strict mode can't force a
+  bogus `target`.
+- Tree-only steps on by default (full frame at least every 3rd step).
+- Accessibility-first actions on by default; `type` through accessibility only
+  fills **empty** fields (Kai's mouse path types at the caret, which equals
+  "set contents" only when the field is empty).
+- Plan cache used by `kai run` (and the app), **not** by `kai bench`, so
+  benchmark runs never benefit from earlier runs of the same task.
+- Live-run fix found with real Gemma: the history cut every command to 30
+  characters, so the model saw `echo 'Hello from Kai' > ~/kai-` and re-ran the
+  command 20+ times. Shell commands are now kept whole (≤ 300 chars) and a
+  silent success is shown as `(no output) [exit 0 = success]`.
+- Not done: sub-grid answers on the zoom crop are drawn but the prompt has no
+  sub-cell answer format yet; screen-diff crops; a planner/executor split.
+
+### App
+- One run has the screen at a time; other runs queue. Pause holds between
+  actions (never inside one). Steering goes into the run's queue and shows when
+  Kai read it. Team runs can't be steered yet (the orchestrator gives
+  sub-agents `NoSteering`).
+- No file-change view: guessing touched files from command lines would be
+  unreliable.
+- Fixed: the global stop hotkey was never registered in the app; opening the
+  shortcuts dialog crashed (double lease).
+
+### Branches and commits
+Work is pushed to both `ccr-904952eb-q0l216` (the owner's branch) and
+`ccr-fc874938-ukt9kz` (this session's branch); they are identical. Commits are
+authored by the repo owner's account with no co-author lines, at the owner's
+request, so GitHub shows them as unverified (unsigned).

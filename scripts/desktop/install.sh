@@ -36,7 +36,8 @@ if [ "${KAI_SKIP_FIREFOX:-0}" != "1" ] && [ ! -x /opt/firefox/firefox ]; then
 fi
 
 # Firefox only exposes its tree over AT-SPI when told to. A policy file makes
-# that hold for every profile.
+# that hold for every profile. It also trusts the system CA store (p11-kit), so
+# a TLS-inspecting proxy whose CA the system trusts doesn't break every page.
 if [ -d /opt/firefox ]; then
   $SUDO mkdir -p /opt/firefox/distribution
   $SUDO tee /opt/firefox/distribution/policies.json >/dev/null <<'JSON'
@@ -45,6 +46,9 @@ if [ -d /opt/firefox ]; then
     "DisableAppUpdate": true,
     "DontCheckDefaultBrowser": true,
     "OverrideFirstRunPage": "",
+    "SecurityDevices": {
+      "Add": { "System trust": "/usr/lib/x86_64-linux-gnu/pkcs11/p11-kit-trust.so" }
+    },
     "Preferences": {
       "accessibility.force_disabled": { "Value": -1, "Status": "locked" }
     }

@@ -85,11 +85,33 @@ required fields enforced per action (`click` needs `target`, `type` needs
 JSON schema, so replies are always valid; on Gemini, JSON mode plus **one
 repair retry** that tells the model what was wrong.
 
+**Multi-action steps.** The reply may carry `then`: up to 3 follow-up actions
+the model is certain of (type, then Enter; open a URL, then type), plus an
+optional `need_screen: true` to ask for a screenshot next step. Follow-ups run
+without a model call (`reply.rs`, `engine/batch.rs`). The batch stops early on
+the kill switch, a steering message, anything that would need approval (the
+model proposes it again and it is asked for normally), a failed step, or a
+target whose element (role + name) is no longer there on a fresh tree read.
+Batched steps are recorded as `batched (no model call)` and verified by the
+next observation. Old single-object replies still parse.
+
 `shell` is Kai's addition: terminal work (files, diagnostics, builds) runs as a
 command and its output is fed back into the next step, which is faster and
 more exact than clicking through a file manager.
 
 ### 4. Act
+**Accessibility first.** For a click or type on a marked element, Kai first
+tries the element's own accessibility pattern — AT-SPI `Action` (by name:
+click/press/toggle…) and `EditableText` on Linux; UIA `Invoke`, `Toggle`,
+`ExpandCollapse`, `SelectionItem` and `Value.SetValue` on Windows — with no
+mouse move. It works when the window is covered (tested with a GTK checkbox
+and a Mousepad field under another window) and costs 1–16 ms instead of ~60 ms
+for the mouse path. A mark is matched to its live object by mark, bounds and
+role, so a stale frame never reaches the wrong control. Anything uncertain
+(double/right click, list items, cells, password or disabled fields, non-empty
+text fields, Firefox web inputs, which ignore AT-SPI text edits) falls back to
+the mouse. The path used is saved per step (`a11y`, `mouse`, `keyboard`, …).
+
 `DesktopActuator` clicks the centre of the target's box through `enigo` on a
 dedicated input thread. Text longer than 32 characters is pasted through the
 clipboard, and the user's clipboard is restored afterwards. `open_app` and
@@ -107,6 +129,33 @@ step without change adds a warning to the next prompt; two in a row stop the
 run and ask the user. Three undecodable replies or failed actions in a row also
 stop and ask. `wait` and `shell` steps don't count as "no progress".
 
+**Tree-only steps.** When the last frame had a rich Set-of-Marks list (≥ 8
+elements) and the last action's `expect` can be checked from text, the next
+observation reads only the accessibility tree and sends no image (35–150 ms
+instead of 140–270 ms on Mousepad/pcmanfm/Firefox, plus a smaller request). A
+full frame is forced on the first step, every 3rd step, after any failure or
+no-progress, after steering, `open_app`/`open_url`/scroll/wait, or when the
+model sets `need_screen`. `Config.tree_only` turns it off (`--no-tree-only`).
+
+**Verifier (optional).** A cheap text-only judge can rate "did `expect` hold?"
+from the element list: Jev (`typesafe-ai/jev`, Vercel AI Gateway) or a small
+LLM (`LlmVerifier`). p ≥ 0.85 marks the step verified; p ≤ 0.15 forces a full
+frame and the careful model next step. It never touches approvals. It is off by
+default: Jev is not available on a free-tier Gateway key, and the small-LLM
+judge measured p50 803 ms, which costs more than it saves per step.
+
+**Zoomed crop.** After a grid click that changed nothing, the next request
+carries a 2x crop around the clicked cell with its own numbered sub-grid.
+
+**Plan cache.** After a successful `kai run`, the leading deterministic steps
+(open URL/app, safe shell, keys/typing without a target) are saved under the
+normalised task. A repeat of the same task (or ≥ 0.85 word overlap with
+identical names, numbers and URLs) replays them with no model call, stopping
+at anything that needs approval, then hands over to the model.
+
+**Steering.** Messages typed into a running task are folded into the next
+step's prompt as "User says (mid-run): …" and force a full frame.
+
 ## Speed — what makes it fast
 
 | Technique | Where |
@@ -120,6 +169,13 @@ stop and ask. `wait` and `shell` steps don't count as "no progress".
 | Capture and tree read in parallel; SIMD downscale; bitmap-font marks | `desktop.rs`, `frame.rs`, `marks.rs` |
 | Shell steps return the moment the command exits (no polling delay) | `shell.rs` |
 | Sub-agents: independent terminal subtasks run concurrently | `orchestrator.rs` |
+| Several certain actions per model call (`then`), checked against a fresh tree | `reply.rs`, `engine/batch.rs` |
+| Accessibility actions instead of mouse moves (1–16 ms vs ~60 ms) | `kai-os/src/a11y/*_act.rs` |
+| Tree-only steps: no capture/encode/image tokens when text is enough | `engine/observe.rs`, `kai-os/src/perceive.rs` |
+| Frames sized to Gemma 4's 280-soft-token budget (≈ 645 k px, 1070×602 at 16:9) instead of 1280 px, so the server doesn't resample the marks again | `kai-os/src/frame.rs` |
+| Compact element list (state only when disabled/secure, names ≤ 60 chars): per-step user turn −26 % | `element.rs`, `prompt.rs` |
+| Plan cache: repeated tasks replay their known-good opening | `plan_cache.rs` |
+| Streaming replies with measured time-to-first-token | `client/stream.rs` |
 | Every step records capture · tree · encode · model · act timings | `trace.rs`, shown in the UI and saved |
 
 Measured here (Xvfb, 4 vCPU, no GPU): observe ≈ 200 ms; **Kai's own per-step
@@ -162,8 +218,20 @@ All behind `ModelClient`:
 - `VllmClient` — OpenAI-compatible `/v1/chat/completions` with image parts and
   `response_format: json_schema`, to the DigitalOcean Droplet.
 - `GeminiClient` — `generateContent` with `inlineData`, `systemInstruction`,
-  `responseMimeType: application/json`, `thinkingLevel: low`; if the model
-  rejects the thinking field, it retries without it once and remembers.
+  `responseMimeType: application/json`, `thinkingLevel: minimal` and `responseJsonSchema`; if the model rejects either
+  field, it retries without it once and remembers.
+- `OpenAiClient` — any OpenAI-compatible endpoint: Vercel AI Gateway
+  (`google/gemma-4-26b-a4b-it`, `openai/gpt-5-mini`, …) or OpenAI. Streams and
+  measures time-to-first-token; sends the schema as strict `json_schema`,
+  stepping down to non-strict and then a prompt hint if the endpoint refuses
+  (and remembering); low `reasoning_effort` for GPT reasoning models; waits out
+  429s (free tier: 5 requests/minute/model) without counting the wait as model
+  time. Gemma via the Gateway accepts `response_format` but does not enforce
+  it, so the schema also goes in the prompt and the reply is validated.
+- `CuaRunner` (`cua.rs`) — OpenAI's *own* computer-use loop (Responses API,
+  `computer-use-preview`) driven through Kai's eyes and hands, for a labelled
+  comparison. Needs a direct OpenAI key (the Gateway answers 404 for that model).
+- `DecisionClient` / `JevVerifier`, `LlmVerifier` — the optional verifiers above.
 - `FailoverClient` — Droplet first; on timeout, transport error or 5xx it uses
   Gemini for the step and stays there for 30 s, then tries the Droplet again.
   The status bar says which one answered.
