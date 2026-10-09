@@ -11,6 +11,9 @@ use tokio::sync::OnceCell;
 /// Most nodes visited per read; deep web pages are cut here.
 const MAX_VISITS: usize = 2500;
 const MAX_DEPTH: usize = 40;
+/// A descendant-managing container with more children than this is not
+/// walked (LibreOffice Calc's sheet reports 2^34 cells).
+const MAX_MANAGED_CHILDREN: i32 = 500;
 /// Apps whose top level is a panel/taskbar rather than a window.
 const PANELS: &[&str] = &[
     "gnome-shell",
@@ -26,7 +29,7 @@ const PANELS: &[&str] = &[
 static CONN: OnceCell<AccessibilityConnection> = OnceCell::const_new();
 static ENABLED: OnceLock<()> = OnceLock::new();
 
-async fn conn() -> anyhow::Result<&'static AccessibilityConnection> {
+pub(super) async fn conn() -> anyhow::Result<&'static AccessibilityConnection> {
     if ENABLED.get().is_none() {
         // Asks GTK/Qt apps to expose their trees; harmless if already on.
         if let Err(e) = atspi::connection::set_session_accessibility(true).await {
@@ -91,9 +94,15 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
                 enabled: state.contains(State::Enabled) || state.contains(State::Sensitive),
                 visible: state.contains(State::Visible),
                 secure: arole == A::PasswordText,
+                handle: Some(obj.clone()),
             });
         }
-        if depth < MAX_DEPTH && p.child_count().await.unwrap_or(0) > 0 {
+        // Containers that manage their descendants (a spreadsheet grid, huge
+        // lists) report millions of children; enumerating them stalls the
+        // read past its budget, so they are kept as one node.
+        let manages = state.contains(State::ManagesDescendants);
+        let n = p.child_count().await.unwrap_or(0);
+        if depth < MAX_DEPTH && n > 0 && !(manages && n > MAX_MANAGED_CHILDREN) {
             for c in p.get_children().await.unwrap_or_default() {
                 stack.push((c, depth + 1));
             }
@@ -116,7 +125,7 @@ async fn label(p: &AccessibleProxy<'_>) -> String {
     p.description().await.unwrap_or_default()
 }
 
-fn map_role(r: A) -> Role {
+pub(super) fn map_role(r: A) -> Role {
     match r {
         A::Button | A::ToggleButton | A::PushButtonMenu => Role::Button,
         A::Link => Role::Link,

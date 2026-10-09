@@ -1,158 +1,12 @@
-//! The real eyes and hands: [`DesktopPerceptor`] and [`DesktopActuator`]
-//! implement kai-core's traits for the machine Kai runs on.
+//! The real hands: [`DesktopActuator`] implements kai-core's Actuator for the
+//! machine Kai runs on (the eyes, [`DesktopPerceptor`], live in `perceive`).
 
-use crate::{a11y, frame, input::Input, kill::KillSwitch, launch, marks, shell::Shell};
+use crate::{a11y, input::Input, kill::KillSwitch, launch, shell::Shell};
 use async_trait::async_trait;
-use image::RgbaImage;
-use kai_core::{
-    Action, Actuator, Decision, Grounding, Images, Observation, ObserveTiming, Perceptor, Rect,
-};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use kai_core::{Action, Actuator, Decision, Grounding};
+use std::time::Duration;
 
-/// The primary display and its place in global coordinates.
-fn primary() -> anyhow::Result<xcap::Monitor> {
-    let all = xcap::Monitor::all()?;
-    let primary = all
-        .iter()
-        .position(|m| m.is_primary().unwrap_or(false))
-        .unwrap_or(0);
-    all.into_iter()
-        .nth(primary)
-        .ok_or_else(|| anyhow::anyhow!("no display found"))
-}
-
-fn grab() -> anyhow::Result<(RgbaImage, Rect)> {
-    let m = primary()?;
-    let img = m.capture_image()?;
-    let at = Rect::new(
-        m.x()? as f32,
-        m.y()? as f32,
-        img.width() as f32,
-        img.height() as f32,
-    );
-    Ok((img, at))
-}
-
-/// Captures the primary display, reads the accessibility tree and grounds it.
-#[derive(Default)]
-pub struct DesktopPerceptor {
-    /// Kai's own windows, painted over where the OS cannot exclude them.
-    excluded: Mutex<Vec<Rect>>,
-}
-
-impl DesktopPerceptor {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The app reports its visible windows here (global screen pixels).
-    pub fn set_excluded(&self, rects: Vec<Rect>) {
-        *self.excluded.lock().expect("not poisoned") = rects;
-    }
-
-    async fn hash_now(&self) -> Option<u64> {
-        let excluded = self.excluded.lock().ok()?.clone();
-        tokio::task::spawn_blocking(move || {
-            let (mut img, at) = grab().ok()?;
-            frame::mask(&mut img, &local(&excluded, at));
-            Some(frame::dhash(&frame::downscale(&img).image))
-        })
-        .await
-        .ok()?
-    }
-}
-
-fn local(rects: &[Rect], at: Rect) -> Vec<Rect> {
-    rects
-        .iter()
-        .map(|r| Rect::new(r.x - at.x, r.y - at.y, r.w, r.h))
-        .collect()
-}
-
-/// Shift a grounding from global coordinates into the captured image's.
-fn shifted(g: &Grounding, at: Rect) -> Grounding {
-    match g {
-        Grounding::Marks(els) => Grounding::Marks(
-            els.iter()
-                .map(|e| {
-                    let mut e = e.clone();
-                    e.bounds =
-                        Rect::new(e.bounds.x - at.x, e.bounds.y - at.y, e.bounds.w, e.bounds.h);
-                    e
-                })
-                .collect(),
-        ),
-        Grounding::Grid { cols, rows, .. } => Grounding::Grid {
-            cols: *cols,
-            rows: *rows,
-            screen: Rect::new(0.0, 0.0, at.w, at.h),
-        },
-    }
-}
-
-#[async_trait]
-impl Perceptor for DesktopPerceptor {
-    async fn observe(&self) -> anyhow::Result<Observation> {
-        let excluded = self.excluded.lock().expect("not poisoned").clone();
-
-        // Capture and the tree read run in parallel, both off the UI thread.
-        let capture = tokio::task::spawn_blocking(move || {
-            let t = Instant::now();
-            grab().map(|g| (g, t.elapsed()))
-        });
-        let tree = async {
-            let t = Instant::now();
-            (a11y::read_tree().await, t.elapsed())
-        };
-        let (shot, (nodes, tree_time)) = tokio::join!(capture, tree);
-        let ((mut img, at), capture_time) = shot??;
-
-        let t_enc = Instant::now();
-        let (images, grounding, hash) = tokio::task::spawn_blocking(move || {
-            frame::mask(&mut img, &local(&excluded, at));
-            let grounding = a11y::ground(&nodes, at);
-            let f = frame::downscale(&img);
-            let hash = frame::dhash(&f.image);
-            let mut marked = f.image;
-            marks::draw(&mut marked, &shifted(&grounding, at), f.scale);
-            let images = Images {
-                screenshot_jpeg: frame::encode_jpeg(&marked),
-                crop_jpeg: None,
-            };
-            (images, grounding, hash)
-        })
-        .await?;
-
-        Ok(Observation {
-            images,
-            grounding,
-            screen_hash: hash,
-            timing: ObserveTiming {
-                capture_ms: capture_time.as_millis() as u64,
-                tree_ms: tree_time.as_millis() as u64,
-                encode_ms: t_enc.elapsed().as_millis() as u64,
-            },
-            screen: Some(at),
-        })
-    }
-
-    /// Wait until two captures in a row match, or `max` passes.
-    async fn settle(&self, max: Duration) {
-        let deadline = Instant::now() + max;
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        let mut last = self.hash_now().await;
-        while Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            let now = self.hash_now().await;
-            match (last, now) {
-                (Some(a), Some(b)) if frame::same_screen(a, b) => return,
-                (_, None) => return,
-                _ => last = now,
-            }
-        }
-    }
-}
+pub use crate::perceive::DesktopPerceptor;
 
 /// Mouse, keyboard, launcher and terminal.
 pub struct DesktopActuator {
@@ -220,6 +74,14 @@ impl Actuator for DesktopActuator {
         }
     }
 
+    /// Accessibility-first: AT-SPI Action/EditableText on Linux, UI
+    /// Automation patterns on Windows, for the element the latest observation
+    /// grounded under this mark. `Ok(false)` means "use `act`". The caller
+    /// asks for approval before calling this, exactly as before `act`.
+    async fn a11y_act(&self, d: &Decision, g: &Grounding) -> anyhow::Result<bool> {
+        a11y::act(d, g).await
+    }
+
     async fn open_app(&self, app: &str) -> anyhow::Result<()> {
         let app = app.to_string();
         tokio::task::spawn_blocking(move || launch::open_app(&app)).await?
@@ -238,23 +100,7 @@ impl Actuator for DesktopActuator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kai_core::{Element, Role};
-
-    #[test]
-    fn grounding_shifts_into_image_space() {
-        let g = Grounding::Marks(vec![Element {
-            mark: 1,
-            role: Role::Button,
-            name: "x".into(),
-            bounds: Rect::new(2020.0, 30.0, 10.0, 10.0),
-            enabled: true,
-            secure: false,
-        }]);
-        let Grounding::Marks(m) = shifted(&g, Rect::new(1920.0, 0.0, 1920.0, 1080.0)) else {
-            panic!()
-        };
-        assert_eq!(m[0].bounds.x, 100.0);
-    }
+    use kai_core::{Element, Rect, Role};
 
     #[test]
     fn click_point_is_element_centre() {

@@ -11,6 +11,23 @@ use windows::core::w;
 
 const MAX_NODES: usize = 3000;
 
+/// A live UI Automation element kept for accessibility-first actions.
+#[derive(Clone)]
+pub struct UiaRef(pub UIElement);
+
+// SAFETY: `UIAutomation::new` joins the multithreaded apartment, and UI
+// Automation client objects created in the MTA are free-threaded: any MTA
+// thread may call them. Kai only touches them on blocking-pool threads that
+// also call `UIAutomation::new` first (see `windows_act`).
+unsafe impl Send for UiaRef {}
+unsafe impl Sync for UiaRef {}
+
+impl std::fmt::Debug for UiaRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("UiaRef")
+    }
+}
+
 pub fn read() -> anyhow::Result<Vec<RawNode>> {
     let auto = UIAutomation::new()?;
     let cache = auto.create_cache_request()?;
@@ -69,6 +86,7 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
                 enabled: el.is_cached_enabled().unwrap_or(true),
                 visible: !el.is_cached_offscreen().unwrap_or(false),
                 secure,
+                handle: Some(UiaRef(el.clone())),
             });
         }
     }
