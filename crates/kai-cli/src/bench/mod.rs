@@ -118,9 +118,6 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
     let s = backend::settings_for(b, args.backend.model.as_deref())?;
     let (config, applied) = backend::config(&s, &args.backend.ab)?;
     let keys = kai_os::secrets::keys();
-    if b == BackendArg::OpenaiNative {
-        return Err(backend::native_unavailable(&keys));
-    }
     let prices = match (args.usd_per_mtok_in, args.usd_per_mtok_out) {
         (None, None) => None,
         (i, o) => Some(Prices {
@@ -140,6 +137,21 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 auto_yes: args.yes,
                 bench_dir: &bench_dir,
                 force: args.force,
+                native: None,
+            };
+            runner::run_live(&list, &live).await?
+        }
+        BackendArg::OpenaiNative => {
+            let cfg = backend::native_config(&keys, args.backend.model.as_deref(), &config)?;
+            let live = runner::Live {
+                client: None,
+                careful: None,
+                skills,
+                config,
+                auto_yes: args.yes,
+                bench_dir: &bench_dir,
+                force: args.force,
+                native: Some(cfg),
             };
             runner::run_live(&list, &live).await?
         }
@@ -154,6 +166,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 auto_yes: args.yes,
                 bench_dir: &bench_dir,
                 force: args.force,
+                native: None,
             };
             runner::run_live(&list, &live).await?
         }

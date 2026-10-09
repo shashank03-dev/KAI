@@ -32,7 +32,8 @@ impl Engine<'_> {
             }
             _ => {
                 // Accessibility first: invoke/set-value/toggle with no mouse.
-                if let Some(t) = decision.target
+                if self.config.a11y_actions
+                    && let Some(t) = decision.target
                     && grounding.element(t).is_some()
                 {
                     match self.actuator.a11y_act(decision, grounding).await {

@@ -212,10 +212,9 @@ fn live_settings(
     );
     let s = backend::settings_for(b, o.model.as_deref())?;
     let keys = kai_os::secrets::keys();
-    if b == BackendArg::OpenaiNative {
-        return Err(backend::native_unavailable(&keys));
+    if b != BackendArg::OpenaiNative {
+        backend::require_key(b, &keys)?;
     }
-    backend::require_key(b, &keys)?;
     Ok((b, s, keys))
 }
 
@@ -247,9 +246,19 @@ async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
 }
 
 async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow::Result<ExitCode> {
-    let (_, s, keys) = live_settings(o)?;
+    let (b, s, keys) = live_settings(o)?;
     let (config, _) = backend::config(&s, &o.ab)?;
-    let (fast, careful) = s.clients(&keys)?;
+    let native = match b {
+        BackendArg::OpenaiNative => {
+            Some(backend::native_config(&keys, o.model.as_deref(), &config)?)
+        }
+        _ => None,
+    };
+    let (fast, careful) = if native.is_some() {
+        (backend::placeholder_client(), None)
+    } else {
+        s.clients(&keys)?
+    };
     let skills = all_skills();
     let kill = kai_os::KillSwitch::new();
     let _hotkey = kai_os::kill::install_hotkey(&kill, &s.kill_hotkey)
@@ -270,7 +279,21 @@ async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow:
     ));
     let approver = TerminalApprover { auto_yes: yes };
 
-    let ok = if team {
+    let ok = if let Some(cfg) = native {
+        let runner = kai_core::cua::CuaRunner {
+            config: cfg,
+            perceptor: &screen,
+            actuator: &hands,
+            interrupt: &kill,
+            sink: &Printer,
+        };
+        let run = runner.run(task).await?;
+        if let Some(e) = &run.error {
+            eprintln!("native loop error: {e}");
+        }
+        save_trace(&run.trace);
+        run.trace.outcome == Some(kai_core::Outcome::Success)
+    } else if team {
         let orch = kai_core::orchestrator::Orchestrator {
             client: fast.as_ref(),
             careful: careful.as_deref(),
@@ -306,7 +329,19 @@ async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow:
             skills: &skills,
             config,
         };
-        let trace = engine.run(task).await;
+        // The plan cache replays the known-good opening of a repeated task.
+        let cache =
+            o.ab.plan_cache()
+                .then(|| kai_core::PlanCache::load(Settings::dir().join("plans")).ok())
+                .flatten();
+        let trace = engine
+            .run_with(
+                task,
+                kai_core::RunOptions {
+                    plan_cache: cache.as_ref(),
+                },
+            )
+            .await;
         save_trace(&trace);
         let (p50, p95) = trace.step_percentiles();
         println!(

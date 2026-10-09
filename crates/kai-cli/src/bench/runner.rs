@@ -226,6 +226,8 @@ pub struct Live<'a> {
     pub bench_dir: &'a Path,
     /// Run tasks even when this machine lacks what they need.
     pub force: bool,
+    /// Run OpenAI's own computer-use loop instead of Kai's engine.
+    pub native: Option<kai_core::cua::CuaConfig>,
 }
 
 pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run>> {
@@ -286,7 +288,10 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             config: live.config,
         };
         let started = Instant::now();
-        let trace = engine.run(&t.prompt).await;
+        let trace = match &live.native {
+            Some(cfg) => native_trace(cfg, &t.prompt, &screen, &hands, &kill).await,
+            None => engine.run(&t.prompt).await,
+        };
         let took = started.elapsed();
         let calls = std::mem::take(&mut *log.lock().unwrap());
         let check = match t.check.here() {
@@ -306,4 +311,35 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         });
     }
     Ok(out)
+}
+
+/// One task through OpenAI's native computer-use loop, as a Kai trace.
+async fn native_trace(
+    cfg: &kai_core::cua::CuaConfig,
+    task: &str,
+    screen: &kai_os::DesktopPerceptor,
+    hands: &kai_os::DesktopActuator,
+    kill: &kai_os::KillSwitch,
+) -> kai_core::Trace {
+    let runner = kai_core::cua::CuaRunner {
+        config: cfg.clone(),
+        perceptor: screen,
+        actuator: hands,
+        interrupt: kill,
+        sink: &Printer,
+    };
+    match runner.run(task).await {
+        Ok(run) => {
+            if let Some(e) = &run.error {
+                eprintln!("  native loop error: {e}");
+            }
+            run.trace
+        }
+        Err(e) => {
+            eprintln!("  native loop could not start: {e}");
+            let mut t = kai_core::Trace::new(task);
+            t.finish(kai_core::Outcome::Failed);
+            t
+        }
+    }
 }

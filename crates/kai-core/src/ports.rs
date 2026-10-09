@@ -177,6 +177,8 @@ pub struct Config {
     pub full_every: u32,
     /// Max follow-up actions (`then`) run without a model call; 0 disables.
     pub max_batch: u32,
+    /// Try the element's accessibility pattern before the mouse.
+    pub a11y_actions: bool,
 }
 
 impl Default for Config {
@@ -190,6 +192,7 @@ impl Default for Config {
             tree_only: true,
             full_every: 3,
             max_batch: crate::reply::MAX_THEN as u32,
+            a11y_actions: true,
         }
     }
 }

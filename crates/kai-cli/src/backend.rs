@@ -132,20 +132,29 @@ pub fn config(s: &Settings, ab: &Ab) -> anyhow::Result<(Config, bool)> {
     Ok((c, applied))
 }
 
-/// OpenAI's native computer-use loop.
-///
-/// TODO(merge): `kai_core::cua` is being written in parallel. Once it lands,
-/// run it here (one task -> one `Trace`) and return the trace; `kai run` and
-/// `kai bench` already route `--backend openai-native` to this function.
-pub fn native_unavailable(keys: &Keys) -> anyhow::Error {
-    if keys.openai.is_none() {
-        return anyhow::anyhow!(
+/// Settings for OpenAI's native computer-use loop (`--backend openai-native`).
+/// Needs a direct OpenAI key: the AI Gateway does not serve
+/// `computer-use-preview` (404, measured 2026-10-09).
+pub fn native_config(
+    keys: &Keys,
+    model: Option<&str>,
+    config: &Config,
+) -> anyhow::Result<kai_core::cua::CuaConfig> {
+    let key = keys.openai.clone().ok_or_else(|| {
+        anyhow::anyhow!(
             "--backend openai-native needs an OpenAI key: run `kai key openai` or set OPENAI_API_KEY"
-        );
+        )
+    })?;
+    let mut c = kai_core::cua::CuaConfig {
+        api_key: Some(key),
+        max_steps: config.max_steps,
+        max_time: config.max_time,
+        ..Default::default()
+    };
+    if let Some(m) = model {
+        c.model = m.trim_start_matches("openai/").to_string();
     }
-    anyhow::anyhow!(
-        "--backend openai-native: the native OpenAI computer-use runner (kai_core::cua) is not wired into this build yet"
-    )
+    Ok(c)
 }
 
 /// One line per key slot for `kai doctor`. Never prints a key.
@@ -182,6 +191,14 @@ pub fn key_report() -> Vec<String> {
     .collect()
 }
 
+/// A stand-in model client for paths that never call Kai's model (the native
+/// OpenAI loop drives itself).
+pub fn placeholder_client() -> Box<dyn kai_core::ModelClient> {
+    Box::new(kai_core::client::MockClient::always(
+        r#"{"thought":"unused","action":"done","risk":"none"}"#,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,12 +225,14 @@ mod tests {
             .to_string();
         assert!(e.contains("kai key gateway") && e.contains("AI_GATEWAY_API_KEY"));
         assert!(require_key(BackendArg::Mock, &keys).is_ok());
-        let e = native_unavailable(&keys).to_string();
+        let c = Config::default();
+        let e = native_config(&keys, None, &c).unwrap_err().to_string();
         assert!(e.contains("OPENAI_API_KEY"));
         let keys = Keys {
             openai: Some("x".into()),
             ..Default::default()
         };
-        assert!(native_unavailable(&keys).to_string().contains("not wired"));
+        let n = native_config(&keys, Some("openai/computer-use-preview"), &c).unwrap();
+        assert_eq!(n.model, "computer-use-preview");
     }
 }

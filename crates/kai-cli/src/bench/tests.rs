@@ -43,6 +43,7 @@ fn trace(steps: &[(u64, u64, u64)], outcome: Outcome) -> Trace {
             screenshot: None,
             approval: None,
             verified: true,
+            path: None,
             output: None,
         });
     }
