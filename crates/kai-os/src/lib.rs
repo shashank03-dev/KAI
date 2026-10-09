@@ -11,9 +11,11 @@ pub mod input;
 pub mod kill;
 pub mod launch;
 pub mod marks;
+pub mod perceive;
 pub mod permissions;
 pub mod secrets;
 pub mod shell;
+pub mod zoom;
 
 pub use desktop::{DesktopActuator, DesktopPerceptor};
 pub use kill::KillSwitch;

@@ -41,7 +41,8 @@ accessibility tree **in parallel**, both off the UI thread. Kai's own windows
 never reach the model: Windows excludes them with
 `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`; Linux has no such API, so
 the app reports its window rectangles and they are painted over before the
-frame is hashed or encoded. The frame is downscaled to 1280 px on the long side
+frame is hashed or encoded. The frame is downscaled to Gemma 4's 280-soft-token
+budget (~645K px: 1070x602 for 16:9, never over 1280 px on the long side)
 with SIMD resize and JPEG-encoded at quality 75.
 
 ### 2. Ground (Set-of-Marks)

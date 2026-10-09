@@ -62,7 +62,8 @@ Full explanation with a diagram: [docs/HARNESS.md](docs/HARNESS.md).
 - **Skip the model when possible.** `open_app`, `open_url` and skills'
   deterministic steps go straight to the OS.
 - **Cheap eyes.** Capture and accessibility tree in parallel, SIMD downscale to
-  1280 px, a built-in bitmap font for the marks.
+  Gemma 4's 280-token budget (1070x602 for 16:9), a built-in bitmap font for
+  the marks.
 - **Parallel sub-agents** for independent terminal work.
 
 **Measured** (this repo's Linux CI container, 4 vCPU, no GPU, virtual display):

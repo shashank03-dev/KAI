@@ -5,11 +5,25 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "linux")]
+mod linux_act;
+pub mod live;
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "windows")]
+mod windows_act;
 
 use kai_core::{Element, Grounding, Rect, Role};
 use std::time::Duration;
+
+/// A handle back to the live accessible object a node came from: bus name +
+/// object path on AT-SPI, the UI Automation element on Windows.
+#[cfg(target_os = "linux")]
+pub type NodeRef = atspi::ObjectRefOwned;
+#[cfg(target_os = "windows")]
+pub type NodeRef = windows::UiaRef;
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+pub type NodeRef = ();
 
 /// One node as the OS reported it.
 #[derive(Debug, Clone)]
@@ -20,6 +34,8 @@ pub struct RawNode {
     pub enabled: bool,
     pub visible: bool,
     pub secure: bool,
+    /// The live object, for accessibility-first actions. `None` in tests.
+    pub handle: Option<NodeRef>,
 }
 
 /// Budget for one tree read; a slow app yields what was read so far.
@@ -64,26 +80,71 @@ fn interactive(role: Role) -> bool {
     !matches!(role, Role::Other | Role::Image)
 }
 
+/// Perform a decision through the element's accessibility interface. `Ok(true)`
+/// when done that way; `Ok(false)` whenever anything is uncertain (no live
+/// handle for this mark, element gone, disabled, secure, no matching action,
+/// field not empty) so the caller falls back to mouse and keyboard.
+pub async fn act(decision: &kai_core::Decision, grounding: &Grounding) -> anyhow::Result<bool> {
+    let Some((el, plan)) = live::resolve(decision, grounding) else {
+        return Ok(false);
+    };
+    let Some(node) = live::lookup(&el) else {
+        return Ok(false);
+    };
+    platform_act(node, plan, el.role).await
+}
+
+#[cfg(target_os = "linux")]
+async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Result<bool> {
+    linux_act::act(&node, &plan, role).await
+}
+
+#[cfg(target_os = "windows")]
+async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Result<bool> {
+    tokio::task::spawn_blocking(move || windows_act::act(&node, &plan, role)).await?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+async fn platform_act(_: NodeRef, _: live::Plan, _: Role) -> anyhow::Result<bool> {
+    Ok(false)
+}
+
 /// Turn raw nodes into numbered marks, or a grid if there is nothing useful.
 pub fn ground(nodes: &[RawNode], screen: Rect) -> Grounding {
-    let keep: Vec<&RawNode> = nodes
+    ground_picked(nodes, screen).0
+}
+
+/// Like [`ground`], and remember which live object each mark is, so a later
+/// [`act`] on this grounding can reach it.
+pub fn ground_live(nodes: &[RawNode], screen: Rect) -> Grounding {
+    let (g, picked) = ground_picked(nodes, screen);
+    live::remember(&g, nodes, &picked);
+    g
+}
+
+/// The grounding plus, for each mark in order, the index of its raw node.
+fn ground_picked(nodes: &[RawNode], screen: Rect) -> (Grounding, Vec<usize>) {
+    let keep: Vec<(usize, &RawNode)> = nodes
         .iter()
-        .filter(|n| n.visible && interactive(n.role))
-        .filter(|n| n.bounds.w >= 4.0 && n.bounds.h >= 4.0)
-        .filter(|n| on_screen(n.bounds, screen))
+        .enumerate()
+        .filter(|(_, n)| n.visible && interactive(n.role))
+        .filter(|(_, n)| n.bounds.w >= 4.0 && n.bounds.h >= 4.0)
+        .filter(|(_, n)| on_screen(n.bounds, screen))
         .collect();
 
     let keep = reading_order(keep);
 
     // Drop exact duplicates (a button and its inner label share a box).
     let mut marks: Vec<Element> = Vec::new();
-    for n in keep {
+    let mut picked: Vec<usize> = Vec::new();
+    for (i, n) in keep {
         if marks.iter().any(|m| near(m.bounds, n.bounds)) {
             continue;
         }
         if marks.len() >= MAX_MARKS {
             break;
         }
+        picked.push(i);
         marks.push(Element {
             mark: marks.len() as u32 + 1,
             role: n.role,
@@ -95,9 +156,9 @@ pub fn ground(nodes: &[RawNode], screen: Rect) -> Grounding {
     }
 
     if marks.len() < MIN_USEFUL {
-        return grid_for(screen);
+        return (grid_for(screen), Vec::new());
     }
-    Grounding::Marks(marks)
+    (Grounding::Marks(marks), picked)
 }
 
 /// A grid with roughly square cells, about 120px on a 1080p screen.
@@ -109,20 +170,25 @@ pub fn grid_for(screen: Rect) -> Grounding {
 
 /// Top to bottom in lines, left to right within a line. An element joins the
 /// current line when its vertical centre sits within half the line's height.
-fn reading_order(mut nodes: Vec<&RawNode>) -> Vec<&RawNode> {
-    nodes.sort_by(|a, b| a.bounds.center().1.total_cmp(&b.bounds.center().1));
-    let mut lines: Vec<(f32, f32, Vec<&RawNode>)> = Vec::new();
-    for n in nodes {
+/// A raw node and its index in the read.
+type Indexed<'a> = (usize, &'a RawNode);
+
+fn reading_order(mut nodes: Vec<Indexed<'_>>) -> Vec<Indexed<'_>> {
+    nodes.sort_by(|a, b| a.1.bounds.center().1.total_cmp(&b.1.bounds.center().1));
+    let mut lines: Vec<(f32, f32, Vec<Indexed>)> = Vec::new();
+    for (i, n) in nodes {
         let (_, cy) = n.bounds.center();
         match lines.last_mut() {
-            Some((ly, lh, line)) if (cy - *ly).abs() <= (lh.min(n.bounds.h)) / 2.0 => line.push(n),
-            _ => lines.push((cy, n.bounds.h, vec![n])),
+            Some((ly, lh, line)) if (cy - *ly).abs() <= (lh.min(n.bounds.h)) / 2.0 => {
+                line.push((i, n))
+            }
+            _ => lines.push((cy, n.bounds.h, vec![(i, n)])),
         }
     }
     lines
         .into_iter()
         .flat_map(|(_, _, mut line)| {
-            line.sort_by(|a, b| a.bounds.x.total_cmp(&b.bounds.x));
+            line.sort_by(|a, b| a.1.bounds.x.total_cmp(&b.1.bounds.x));
             line
         })
         .collect()
@@ -168,7 +234,21 @@ mod tests {
             enabled: true,
             visible: true,
             secure: false,
+            handle: None,
         }
+    }
+
+    #[test]
+    fn picked_indices_follow_marks() {
+        let nodes = [
+            node(Role::Button, "B", 300.0, 10.0),
+            node(Role::Image, "logo", 10.0, 90.0),
+            node(Role::Button, "A", 10.0, 12.0),
+        ];
+        let (g, picked) = ground_picked(&nodes, SCREEN);
+        assert!(matches!(g, Grounding::Marks(_)));
+        assert_eq!(picked, [2, 0]);
+        assert!(ground_picked(&[], SCREEN).1.is_empty());
     }
 
     #[test]
