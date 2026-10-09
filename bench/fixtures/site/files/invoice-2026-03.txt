@@ -1,0 +1,9 @@
+INVOICE 2026-03
+Kai Bench Supplies Ltd.
+
+Item                     Qty   Price
+Notebook A5                4    3.10
+Desk lamp                  1   42.00
+USB-C cable 2m             2    9.95
+
+Total (USD)                    74.30

@@ -1,13 +1,16 @@
 //! `kai` — run Gemma 4 on your computer from the terminal, validate skills and
 //! run the benchmark. The desktop app is `kai-app`; both share kai-core.
 
+mod ab;
+mod backend;
 mod bench;
 mod console;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use backend::{BackendArg, BackendOpts};
+use clap::{Parser, Subcommand};
 use console::{Printer, TerminalApprover};
-use kai_core::settings::{BackendChoice, Settings};
-use kai_core::{Config, Engine, Skill};
+use kai_core::settings::Settings;
+use kai_core::{Engine, Skill};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -18,23 +21,13 @@ struct Cli {
     cmd: Cmd,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-enum BackendArg {
-    Auto,
-    Vllm,
-    Gemini,
-    Mock,
-    /// Recorded replies, executed for real on this desktop (bench only).
-    Replay,
-}
-
 #[derive(Subcommand)]
 enum Cmd {
     /// Do a task on this computer, step by step, asking before risky actions.
     Run {
         task: String,
-        #[arg(long, value_enum, default_value = "auto")]
-        backend: BackendArg,
+        #[command(flatten)]
+        backend: BackendOpts,
         /// Split the task across parallel sub-agents.
         #[arg(long)]
         team: bool,
@@ -47,32 +40,27 @@ enum Cmd {
         #[command(subcommand)]
         cmd: SkillCmd,
     },
-    /// Run bench/tasks.yaml and write bench/results/<date>-<backend>.json.
+    /// Run bench/tasks.yaml and write bench/results/<date>-<backend>-<model>.{json,md};
+    /// `kai bench report` merges results into a head-to-head table.
+    #[command(args_conflicts_with_subcommands = true)]
     Bench {
-        #[arg(long, value_enum, default_value = "mock")]
-        backend: BackendArg,
-        #[arg(long, default_value = "bench/tasks.yaml")]
-        tasks: PathBuf,
-        #[arg(long, default_value = "bench/results")]
-        out: PathBuf,
-        /// Only these task ids.
-        #[arg(long)]
-        only: Vec<String>,
-        #[arg(long)]
-        yes: bool,
+        #[command(subcommand)]
+        cmd: Option<bench::BenchCmd>,
+        #[command(flatten)]
+        args: bench::BenchArgs,
     },
     /// Send one real screenshot to the model and report the latency.
     Smoke {
-        #[arg(long, value_enum, default_value = "auto")]
-        backend: BackendArg,
+        #[command(flatten)]
+        backend: BackendOpts,
         #[arg(long, default_value = "5")]
         n: u32,
     },
-    /// Check screen, accessibility and input permissions.
+    /// Check screen, accessibility and input permissions, and which backends have keys.
     Doctor,
-    /// Store an API key in the OS keychain: `kai key gemini` (reads stdin).
+    /// Store an API key in the OS keychain: `kai key gateway` (reads stdin).
     Key {
-        #[arg(value_parser = ["gemini", "vllm"])]
+        #[arg(value_parser = ["gemini", "vllm", "gateway", "openai"])]
         which: String,
     },
 }
@@ -83,27 +71,6 @@ enum SkillCmd {
     Validate { dirs: Vec<PathBuf> },
     /// List installed skills.
     List,
-}
-
-fn settings_for(b: BackendArg) -> Settings {
-    let mut s = Settings::load();
-    s.backend = match b {
-        BackendArg::Auto => s.backend,
-        BackendArg::Vllm => BackendChoice::Vllm,
-        BackendArg::Gemini => BackendChoice::Gemini,
-        BackendArg::Mock | BackendArg::Replay => BackendChoice::Mock,
-    };
-    s
-}
-
-fn config(s: &Settings) -> Config {
-    let (max_steps, max_time) = s.limits();
-    Config {
-        max_steps,
-        max_time,
-        approval: s.approval,
-        ..Config::default()
-    }
 }
 
 /// Built-in skills next to the binary or in the repo, plus the user's own.
@@ -150,11 +117,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             eprint!("Paste the {which} API key and press Enter: ");
             let mut line = String::new();
             std::io::stdin().read_line(&mut line)?;
-            let name = if which == "gemini" {
-                kai_os::secrets::GEMINI
-            } else {
-                kai_os::secrets::VLLM
+            let name = match which.as_str() {
+                "gemini" => kai_os::secrets::GEMINI,
+                "gateway" => kai_os::secrets::GATEWAY,
+                "openai" => kai_os::secrets::OPENAI,
+                _ => kai_os::secrets::VLLM,
             };
+            anyhow::ensure!(!line.trim().is_empty(), "no key given; nothing saved");
             kai_os::secrets::set(name, &line)?;
             eprintln!("Saved to the OS keychain.");
             Ok(ExitCode::SUCCESS)
@@ -167,65 +136,28 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     c.name, c.status, c.why, c.fix
                 );
             }
+            println!("\nmodel backends:");
+            for line in backend::key_report() {
+                println!("  {line}");
+            }
             Ok(if kai_os::permissions::all_granted(&checks) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
             })
         }
-        Cmd::Smoke { backend, n } => smoke(settings_for(backend), n).await,
+        Cmd::Smoke { backend, n } => smoke(&backend, n).await,
         Cmd::Run {
             task,
             backend,
             team,
             yes,
-        } => run_task(settings_for(backend), &task, team, yes).await,
+        } => run_task(&backend, &task, team, yes).await,
         Cmd::Bench {
-            backend,
-            tasks,
-            out,
-            only,
-            yes,
-        } => {
-            let mut list = bench::load_tasks(&tasks)?;
-            if !only.is_empty() {
-                list.retain(|t| only.contains(&t.id));
-            }
-            let skills = all_skills();
-            let s = settings_for(backend);
-            let (name, runs, mock) = if matches!(backend, BackendArg::Replay) {
-                let live = bench::Live {
-                    client: None,
-                    careful: None,
-                    skills: &skills,
-                    config: config(&s),
-                    auto_yes: yes,
-                };
-                ("replay", bench::run_live(&list, &live).await?, false)
-            } else if s.backend == BackendChoice::Mock {
-                ("mock", bench::run_mock(&list, &skills).await, true)
-            } else {
-                let (fast, careful) = s.clients(&kai_os::secrets::keys())?;
-                let live = bench::Live {
-                    client: Some(fast.as_ref()),
-                    careful: careful.as_deref(),
-                    skills: &skills,
-                    config: config(&s),
-                    auto_yes: yes,
-                };
-                let name = match s.backend {
-                    BackendChoice::Vllm => "vllm",
-                    BackendChoice::Gemini => "gemini",
-                    _ => "auto",
-                };
-                (name, bench::run_live(&list, &live).await?, false)
-            };
-            let summary = bench::summarise(name, runs, mock).await;
-            bench::print(&summary);
-            let path = bench::write(&summary, &out)?;
-            eprintln!("wrote {}", path.display());
-            Ok(ExitCode::SUCCESS)
-        }
+            cmd: Some(bench::BenchCmd::Report { dir, out }),
+            ..
+        } => bench::report(&dir, out.as_deref()),
+        Cmd::Bench { cmd: None, args } => bench::run(args, &all_skills()).await,
     }
 }
 
@@ -268,8 +200,28 @@ fn validate(dirs: &[PathBuf]) -> ExitCode {
     }
 }
 
-async fn smoke(s: Settings, n: u32) -> anyhow::Result<ExitCode> {
-    let (client, _) = s.clients(&kai_os::secrets::keys())?;
+/// Settings and keys for a live (model-calling) command.
+fn live_settings(
+    o: &BackendOpts,
+) -> anyhow::Result<(BackendArg, Settings, kai_core::settings::Keys)> {
+    let b = o.backend.unwrap_or(BackendArg::Auto);
+    anyhow::ensure!(
+        !b.recorded(),
+        "--backend {} is for `kai bench` only",
+        b.name()
+    );
+    let s = backend::settings_for(b, o.model.as_deref())?;
+    let keys = kai_os::secrets::keys();
+    if b == BackendArg::OpenaiNative {
+        return Err(backend::native_unavailable(&keys));
+    }
+    backend::require_key(b, &keys)?;
+    Ok((b, s, keys))
+}
+
+async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
+    let (_, s, keys) = live_settings(o)?;
+    let (client, _) = s.clients(&keys)?;
     let screen = kai_os::DesktopPerceptor::new();
     let obs = kai_core::Perceptor::observe(&screen).await?;
     let mut times = Vec::new();
@@ -294,8 +246,10 @@ async fn smoke(s: Settings, n: u32) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_task(s: Settings, task: &str, team: bool, yes: bool) -> anyhow::Result<ExitCode> {
-    let (fast, careful) = s.clients(&kai_os::secrets::keys())?;
+async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow::Result<ExitCode> {
+    let (_, s, keys) = live_settings(o)?;
+    let (config, _) = backend::config(&s, &o.ab)?;
+    let (fast, careful) = s.clients(&keys)?;
     let skills = all_skills();
     let kill = kai_os::KillSwitch::new();
     let _hotkey = kai_os::kill::install_hotkey(&kill, &s.kill_hotkey)
@@ -326,7 +280,7 @@ async fn run_task(s: Settings, task: &str, team: bool, yes: bool) -> anyhow::Res
             interrupt: &kill,
             sink: &Printer,
             skills: &skills,
-            config: config(&s),
+            config,
             parallelism: s.parallelism,
         };
         let report = orch.run(task).await?;
@@ -350,7 +304,7 @@ async fn run_task(s: Settings, task: &str, team: bool, yes: bool) -> anyhow::Res
             steering: &kai_core::engine::NoSteering,
             verifier: None,
             skills: &skills,
-            config: config(&s),
+            config,
         };
         let trace = engine.run(task).await;
         save_trace(&trace);
