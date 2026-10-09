@@ -187,6 +187,7 @@ impl RunState {
                 }
             }
             EngineEvent::Finished { .. } => self.thinking = false,
+            EngineEvent::Output { .. } | EngineEvent::Steered { .. } => {}
         }
     }
 }

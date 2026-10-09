@@ -239,6 +239,8 @@ async fn drive(
             approver: &approver,
             interrupt: kill,
             sink: &sink,
+            steering: &kai_core::engine::NoSteering,
+            verifier: None,
             skills: &skills,
             config,
         };

@@ -25,6 +25,10 @@ pub struct Engine<'a> {
     pub approver: &'a dyn Approver,
     pub interrupt: &'a dyn Interrupt,
     pub sink: &'a dyn EventSink,
+    /// User messages sent mid-run.
+    pub steering: &'a dyn Steering,
+    /// Optional cheap verifier (text-only decision model).
+    pub verifier: Option<&'a dyn Verifier>,
     pub skills: &'a [Skill],
     pub config: Config,
 }

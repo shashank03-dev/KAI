@@ -34,6 +34,16 @@ pub trait Perceptor: Send + Sync {
     async fn observe(&self) -> anyhow::Result<Observation>;
     /// Wait for the screen to settle after an action, up to a limit.
     async fn settle(&self, _max: Duration) {}
+    /// Observe without encoding a screenshot: tree only (cheap). Backends
+    /// that cannot read a tree fall back to a full observation.
+    async fn observe_tree_only(&self) -> anyhow::Result<Observation> {
+        self.observe().await
+    }
+    /// A zoomed JPEG of `rect` (global screen pixels), for a second look
+    /// after a missed click. `None` when unsupported.
+    async fn zoom(&self, _rect: crate::element::Rect) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// Moves the mouse/keyboard and reaches the OS for fast paths.
@@ -44,6 +54,35 @@ pub trait Actuator: Send + Sync {
     async fn open_url(&self, url: &str) -> anyhow::Result<()>;
     /// Run a terminal command and return its (truncated) combined output.
     async fn shell(&self, cmd: &str) -> anyhow::Result<String>;
+    /// Accessibility-first path: perform the action through the element's
+    /// accessibility pattern (UIA Invoke/Value/Toggle/ExpandCollapse, AT-SPI
+    /// Action/EditableText) with no mouse move. `Ok(true)` when it was done
+    /// that way, `Ok(false)` when the caller should fall back to `act`.
+    async fn a11y_act(&self, _decision: &Decision, _grounding: &Grounding) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+}
+
+/// Messages the user sends to a running agent ("steer"). Drained once per
+/// step and folded into the next model turn.
+pub trait Steering: Send + Sync {
+    fn take(&self) -> Vec<String>;
+}
+
+/// No steering (headless runs).
+pub struct NoSteering;
+impl Steering for NoSteering {
+    fn take(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// A cheap text-only judge (e.g. a decision model) that estimates whether a
+/// step's `expect` holds, so the loop can skip a full model call or a
+/// screenshot. Returns P(expect is met) in 0..=1, or `None` if unavailable.
+#[async_trait]
+pub trait Verifier: Send + Sync {
+    async fn check(&self, task: &str, expect: &str, state: &str) -> Option<f32>;
 }
 
 /// Approval UI (or an auto-policy in headless runs).
@@ -105,6 +144,17 @@ pub enum EngineEvent {
     Acted {
         step: u32,
         timings: Timings,
+    },
+    /// A terminal command Kai ran and its (truncated) output.
+    Output {
+        step: u32,
+        command: String,
+        output: String,
+    },
+    /// A user message was folded into this step.
+    Steered {
+        step: u32,
+        message: String,
     },
     Finished {
         outcome: Outcome,

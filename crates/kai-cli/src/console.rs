@@ -27,6 +27,7 @@ impl EventSink for Printer {
             ),
             EngineEvent::Finished { outcome } => eprintln!("  ⏹ {outcome:?}"),
             EngineEvent::Observed { .. } => {}
+            EngineEvent::Output { .. } | EngineEvent::Steered { .. } => {}
         }
     }
 }

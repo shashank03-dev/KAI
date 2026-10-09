@@ -321,6 +321,8 @@ impl Orchestrator<'_> {
             approver: self.approver,
             interrupt: self.interrupt,
             sink: self.sink,
+            steering: &crate::engine::NoSteering,
+            verifier: None,
             skills: self.skills,
             config: self.config,
         }

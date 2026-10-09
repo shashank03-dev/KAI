@@ -347,6 +347,8 @@ async fn run_task(s: Settings, task: &str, team: bool, yes: bool) -> anyhow::Res
             approver: &approver,
             interrupt: &kill,
             sink: &Printer,
+            steering: &kai_core::engine::NoSteering,
+            verifier: None,
             skills: &skills,
             config: config(&s),
         };

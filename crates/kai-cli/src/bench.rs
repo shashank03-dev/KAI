@@ -183,6 +183,8 @@ pub async fn run_mock(tasks: &[Task], skills: &[Skill]) -> Vec<(Task, Trace, Dur
             approver: &approver,
             interrupt: &kai_core::engine::NeverStops,
             sink: &NullSink,
+            steering: &kai_core::engine::NoSteering,
+            verifier: None,
             skills,
             config: Config::default(),
         };
@@ -230,6 +232,8 @@ pub async fn run_live(
             approver: &approver,
             interrupt: &kill,
             sink: &Printer,
+            steering: &kai_core::engine::NoSteering,
+            verifier: None,
             skills: live.skills,
             config: live.config,
         };

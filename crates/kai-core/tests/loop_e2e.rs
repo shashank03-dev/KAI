@@ -133,6 +133,8 @@ fn engine<'a>(
         approver,
         interrupt: stop,
         sink: &NullSink,
+        steering: &kai_core::engine::NoSteering,
+        verifier: None,
         skills: &[],
         config: Config::default(),
     }

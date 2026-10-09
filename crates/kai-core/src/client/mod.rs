@@ -53,6 +53,10 @@ pub struct ModelReply {
 pub enum Backend {
     Vllm,
     Gemini,
+    /// Any OpenAI-compatible endpoint: Vercel AI Gateway or OpenAI itself.
+    OpenAi,
+    /// OpenAI's own computer-use loop (native, not Kai's harness).
+    OpenAiNative,
     Mock,
 }
 
@@ -61,6 +65,8 @@ impl Backend {
         match self {
             Backend::Vllm => "DigitalOcean (Gemma 4)",
             Backend::Gemini => "Gemini API (Gemma 4)",
+            Backend::OpenAi => "OpenAI-compatible (Gateway/OpenAI)",
+            Backend::OpenAiNative => "OpenAI computer use (native loop)",
             Backend::Mock => "Mock",
         }
     }
