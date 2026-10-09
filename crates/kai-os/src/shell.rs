@@ -38,15 +38,18 @@ impl Shell {
         let read_err = tokio::spawn(async move { read_capped(&mut err).await });
 
         let started = Instant::now();
+        // Return the moment the command exits; check the kill switch and the
+        // timeout every 50 ms meanwhile.
         let status = loop {
-            if let Some(s) = child.try_wait()? {
-                break Some(s);
+            tokio::select! {
+                s = child.wait() => break Some(s?),
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                    if self.kill.is_tripped() || started.elapsed() > self.timeout {
+                        kill_tree(&mut child).await;
+                        break None;
+                    }
+                }
             }
-            if self.kill.is_tripped() || started.elapsed() > self.timeout {
-                kill_tree(&mut child).await;
-                break None;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
         };
 
         let (stdout, out_more) = read_out.await?;

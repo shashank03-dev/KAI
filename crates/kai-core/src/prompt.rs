@@ -142,7 +142,7 @@ pub fn select_skill<'a>(task: &str, skills: &'a [Skill]) -> Option<&'a Skill> {
         let hay_words = tokenize(&hay);
         let score = task_words
             .iter()
-            .filter(|w| w.len() > 2 && hay_words.contains(w))
+            .filter(|w| w.len() > 2 && !STOPWORDS.contains(&w.as_str()) && hay_words.contains(w))
             .count();
         if score > best.map(|(_, s)| s).unwrap_or(0) {
             best = Some((sk, score));
@@ -150,6 +150,12 @@ pub fn select_skill<'a>(task: &str, skills: &'a [Skill]) -> Option<&'a Skill> {
     }
     best.filter(|(_, s)| *s >= 2).map(|(sk, _)| sk)
 }
+
+/// Words too common to say which skill fits.
+const STOPWORDS: &[&str] = &[
+    "the", "and", "for", "with", "use", "when", "user", "wants", "that", "this", "from", "into",
+    "your", "you", "my", "can", "please", "then", "what", "which", "are", "was", "all", "any",
+];
 
 fn tokenize(s: &str) -> Vec<String> {
     s.to_ascii_lowercase()
@@ -208,6 +214,12 @@ mod tests {
         let skills = sample_skills();
         let picked = select_skill("please send an email to my professor", &skills).unwrap();
         assert_eq!(picked.front.name, "write-email-gmail");
+    }
+
+    #[test]
+    fn common_words_alone_do_not_pick_a_skill() {
+        let skills = sample_skills();
+        assert!(select_skill("use the thing and then the other for me", &skills).is_none());
     }
 
     #[test]

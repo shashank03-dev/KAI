@@ -276,3 +276,31 @@ async fn step_limit_is_enforced() {
     assert_eq!(trace.outcome, Some(Outcome::StepLimit));
     assert_eq!(trace.steps.len(), 5);
 }
+
+#[tokio::test]
+async fn skill_steps_run_without_the_model() {
+    let skill = kai_core::skill::load_from_str(
+        "---\nname: open-and-search-web\ndescription: Open a browser and search the web for a query.\nmetadata:\n  kai: '[{\"do\":\"open_url\",\"url\":\"https://duckduckgo.com\"},{\"do\":\"shortcut\",\"keys\":[\"Control\",\"L\"]}]'\n---\nbody\n",
+        std::path::Path::new("/x/open-and-search-web"),
+    )
+    .unwrap();
+    // Only one model reply exists: the skill steps must not consume any.
+    let client = MockClient::new([r#"{"thought":"done","action":"done","risk":"none"}"#]);
+    let screen = FakeScreen {
+        frame: AtomicUsize::new(0),
+    };
+    let rec = RecordingHands::default();
+    let hands = Advancing(&screen, &rec);
+    let approver = Policy(ApprovalChoice::Approve, AtomicUsize::new(0));
+    let stop = Flag(AtomicBool::new(false));
+    let skills = [skill];
+    let mut e = engine(&client, &screen, &hands, &approver, &stop);
+    e.skills = &skills;
+    let trace = e.run("search the web for gemma 4").await;
+    assert_eq!(trace.outcome, Some(Outcome::Success));
+    let log = rec.log.lock().unwrap().clone();
+    assert_eq!(log[0], "open_url https://duckduckgo.com");
+    assert_eq!(log[1], "Key None");
+    assert_eq!(trace.steps[1].decision.keys, vec!["ctrl", "l"]);
+    assert_eq!(trace.steps[0].backend, "skill (no model call)");
+}

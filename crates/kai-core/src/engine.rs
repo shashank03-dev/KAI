@@ -8,7 +8,7 @@ use crate::element::Grounding;
 use crate::prompt::{self, HistoryItem};
 use crate::risk::{self, ApprovalLevel};
 use crate::schema::{Action, Decision};
-use crate::skill::Skill;
+use crate::skill::{DeterministicStep, Skill};
 use crate::trace::{Outcome, StepRecord, Timings, Trace};
 use async_trait::async_trait;
 use std::time::{Duration, Instant};
@@ -162,7 +162,45 @@ impl Engine<'_> {
         let mut no_progress_streak = 0u32;
         let mut failure_streak = 0u32;
 
-        for step in 0..self.config.max_steps {
+        // A skill's deterministic steps run first, with no model call.
+        let mut first_step = 0u32;
+        if let Some(sk) = active_skill {
+            for st in &sk.steps {
+                if self.interrupt.stopped() {
+                    return finish(&mut trace, self.sink, Outcome::Stopped);
+                }
+                let decision = fixed_decision(st);
+                let t = Instant::now();
+                if let Err(e) = self.act(&decision, &Grounding::Marks(Vec::new())).await {
+                    log::warn!("skill step {st:?} failed: {e}; handing over to the model");
+                    break;
+                }
+                self.perceptor.settle(Duration::from_secs(3)).await;
+                let timings = Timings {
+                    act_ms: t.elapsed().as_millis() as u64,
+                    ..Default::default()
+                };
+                self.sink.emit(&EngineEvent::Acted {
+                    step: first_step,
+                    timings,
+                });
+                trace.push(StepRecord {
+                    index: first_step,
+                    decision: decision.clone(),
+                    timings,
+                    backend: "skill (no model call)".to_string(),
+                    elements: String::new(),
+                    screenshot: None,
+                    approval: None,
+                    verified: true,
+                    output: None,
+                });
+                history.push(HistoryItem::from_decision(&decision));
+                first_step += 1;
+            }
+        }
+
+        for step in first_step..self.config.max_steps {
             if self.interrupt.stopped() {
                 return finish(&mut trace, self.sink, Outcome::Stopped);
             }
@@ -430,6 +468,31 @@ impl Engine<'_> {
             _ => self.actuator.act(decision, grounding).await.map(|_| None),
         }
     }
+}
+
+/// The decision a deterministic skill step stands for.
+fn fixed_decision(st: &DeterministicStep) -> Decision {
+    let (action, text, keys) = match st {
+        DeterministicStep::OpenUrl { url } => (Action::OpenUrl, Some(url.clone()), vec![]),
+        DeterministicStep::OpenApp { app } => (Action::OpenApp, Some(app.clone()), vec![]),
+        DeterministicStep::Shortcut { keys } => (Action::Key, None, keys.clone()),
+        DeterministicStep::Type { text } => (Action::Type, Some(text.clone()), vec![]),
+    };
+    let mut d = Decision {
+        thought: "skill step".to_string(),
+        action,
+        target: None,
+        text,
+        keys,
+        direction: None,
+        amount: None,
+        risk: crate::schema::Risk::None,
+        expect: String::new(),
+    };
+    // Normalise keys exactly like a model reply; `type` without a target types
+    // into whatever has focus.
+    let _ = d.validate_and_clamp();
+    d
 }
 
 fn record(

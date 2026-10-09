@@ -13,6 +13,7 @@ pub mod orchestrator;
 pub mod prompt;
 pub mod risk;
 pub mod schema;
+pub mod settings;
 pub mod skill;
 pub mod trace;
 

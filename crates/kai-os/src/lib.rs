@@ -11,6 +11,7 @@ pub mod kill;
 pub mod launch;
 pub mod marks;
 pub mod permissions;
+pub mod secrets;
 pub mod shell;
 
 pub use desktop::{DesktopActuator, DesktopPerceptor};

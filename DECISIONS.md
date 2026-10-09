@@ -167,3 +167,29 @@ billing.
 - **Zoomed crop:** the `crop_jpeg` slot and `frame::crop` exist, but the loop
   does not yet request a crop automatically after a missed grid click. Listed
   as remaining work.
+
+## Phase 2c — CLI, skills, benchmark (measured)
+
+- `kai skill validate skills` — **9/9 skills pass** (6 required + `run-terminal-task`,
+  `own-site-security-check`, `pc-security-checkup`).
+- Security skills are deliberately **defensive and read-only**: a public
+  configuration review of a site the user confirms they own (certificate,
+  redirects, security headers, SPF/DMARC/CAA) and a posture check of the user's
+  own PC (firewall, updates, listening services, encryption). No port scanning,
+  probing or attack payloads; every fix is approved first.
+- Three bench modes, labelled in every results file:
+  - `mock` — recorded replies, scripted screen, dry-run hands. Plumbing only;
+    its ~0 ms timings are **not** a speed claim. 10/10.
+  - `replay` — recorded replies **executed for real** on a desktop (real
+    capture, AT-SPI, shell), judged by each task's real check command.
+    Measured on Xvfb: **5/5 terminal tasks pass; Kai's own per-step overhead
+    p50 65 ms, p95 93 ms** (model time excluded — there is no model in replay).
+    GUI tasks need a real model, since recorded marks won't match a live screen.
+  - `vllm` / `gemini` — the real thing. **Not run here** (no GPU Droplet or
+    Gemini key in this environment). Run on the demo laptop and commit.
+- Shell steps first cost a flat ~51 ms from a 50 ms poll; switched to waiting
+  on exit with `select!`, which took step overhead from p50 106 → 65 ms.
+- Skill selection ignores stopwords, so "open the … and …" no longer picks a
+  skill on filler words alone.
+- No OpenAI comparison runner: no key was supplied, so per the prompt the README
+  says the comparison was not run.

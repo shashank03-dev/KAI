@@ -4,3 +4,30 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "The `kai` command: run tasks headless, validate skills, run the benchmark."
+
+[[bin]]
+name = "kai"
+path = "src/main.rs"
+
+[dependencies]
+kai-core = { path = "../kai-core" }
+kai-os = { path = "../kai-os" }
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["full"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+async-trait = "0.1"
+jiff.workspace = true
+keyring.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

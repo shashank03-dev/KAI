@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-09",
+  "backend": "mock",
+  "os": "linux",
+  "note": "Mock backend: recorded replies on a scripted screen with a dry-run actuator. Measures harness overhead only. No model was called and nothing on the machine was touched.",
+  "tasks": [
+    {
+      "id": "search-web",
+      "title": "Open a search engine and search",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 5,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "write-note",
+      "title": "Write and save a note",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 2,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "rename-files",
+      "title": "Rename files in a folder",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 3,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "dark-mode",
+      "title": "Change a setting (dark mode)",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 2,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "disk-space",
+      "title": "Answer a question from the terminal",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 3,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "find-largest",
+      "title": "Find the largest file",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 3,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "open-site-find",
+      "title": "Open a site and find a page",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 4,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "play-video",
+      "title": "Play a video",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 3,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "fill-form",
+      "title": "Fill a form from text",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 3,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    },
+    {
+      "id": "pc-checkup",
+      "title": "Security check-up of this PC",
+      "outcome": "success",
+      "pass": true,
+      "judged_by": "outcome",
+      "steps": 2,
+      "seconds": 0.0,
+      "step_p50_ms": 0,
+      "step_p95_ms": 0
+    }
+  ],
+  "success_rate": 1.0,
+  "passed": 10,
+  "total": 10,
+  "step_p50_ms": 0,
+  "step_p95_ms": 0,
+  "total_seconds": 0.0
+}

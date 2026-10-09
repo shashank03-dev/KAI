@@ -1,0 +1,122 @@
+# Kai benchmark: 10 tasks a judge would understand.
+# setup/check run in the shell (sh on Linux, PowerShell on Windows); a check
+# that exits 0 is a pass. Tasks without a check are judged by the run's own
+# outcome, and the results file says which was used.
+# `mock` holds recorded replies for `kai bench --backend mock`.
+
+- id: search-web
+  title: Open a search engine and search
+  prompt: Search the web for "Gemma 4 model card" and open the result from Google.
+  check:
+    linux: xdotool getactivewindow getwindowname | grep -qi gemma
+    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'Gemma' }) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"type query in search box","action":"type","target":2,"text":"Gemma 4 model card","risk":"none","expect":"query typed"}'
+    - '{"thought":"submit search","action":"key","keys":["enter"],"risk":"none","expect":"results"}'
+    - '{"thought":"open first result","action":"click","target":3,"risk":"none","expect":"model card page"}'
+    - '{"thought":"Gemma 4 model card is open","action":"done","risk":"none"}'
+
+- id: write-note
+  title: Write and save a note
+  prompt: Create a file called kai-note.txt in my home folder that says "Hello from Kai".
+  setup:
+    linux: rm -f ~/kai-note.txt
+    windows: Remove-Item -ErrorAction SilentlyContinue $HOME\kai-note.txt
+  check:
+    linux: grep -q "Hello from Kai" ~/kai-note.txt
+    windows: if ((Get-Content $HOME\kai-note.txt -Raw) -match 'Hello from Kai') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"write the file from the terminal","action":"shell","text":"printf \"Hello from Kai\\n\" > ~/kai-note.txt","risk":"low","expect":"file written"}'
+    - '{"thought":"note saved","action":"done","risk":"none"}'
+
+- id: rename-files
+  title: Rename files in a folder
+  prompt: In the folder kai-bench/rename in my home folder, add the prefix "2026-" to every file name.
+  setup:
+    linux: rm -rf ~/kai-bench/rename && mkdir -p ~/kai-bench/rename && touch ~/kai-bench/rename/a.txt ~/kai-bench/rename/b.txt ~/kai-bench/rename/c.txt
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\rename; New-Item -ItemType Directory -Force $HOME\kai-bench\rename | Out-Null; 'a','b','c' | % { New-Item "$HOME\kai-bench\rename\$_.txt" | Out-Null }
+  check:
+    linux: test "$(ls ~/kai-bench/rename | grep -c '^2026-')" -eq 3
+    windows: if ((Get-ChildItem $HOME\kai-bench\rename -Name | ? { $_ -like '2026-*' }).Count -eq 3) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"see the files first","action":"shell","text":"ls -1 ~/kai-bench/rename","risk":"low","expect":"three files"}'
+    - '{"thought":"add the prefix","action":"shell","text":"cd ~/kai-bench/rename && for f in *; do mv -n \"$f\" \"2026-$f\"; done","risk":"low","expect":"renamed"}'
+    - '{"thought":"renamed 3 files","action":"done","risk":"none"}'
+
+- id: dark-mode
+  title: Change a setting (dark mode)
+  prompt: Switch my computer to dark mode.
+  setup:
+    linux: gsettings set org.gnome.desktop.interface color-scheme default
+    windows: Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize -Name AppsUseLightTheme -Value 1
+  check:
+    linux: gsettings get org.gnome.desktop.interface color-scheme | grep -q dark
+    windows: if ((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize).AppsUseLightTheme -eq 0) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"set the GNOME color scheme","action":"shell","text":"gsettings set org.gnome.desktop.interface color-scheme prefer-dark","risk":"high","expect":"dark windows"}'
+    - '{"thought":"dark mode is on","action":"done","risk":"none"}'
+
+- id: disk-space
+  title: Answer a question from the terminal
+  prompt: How much free disk space do I have on my home drive? Write just the number in GB to kai-bench/answer.txt in my home folder.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/answer.txt
+    windows: New-Item -ItemType Directory -Force $HOME\kai-bench | Out-Null; Remove-Item -ErrorAction SilentlyContinue $HOME\kai-bench\answer.txt
+  check:
+    linux: grep -Eq '^[0-9]+([.][0-9]+)?' ~/kai-bench/answer.txt
+    windows: if ((Get-Content $HOME\kai-bench\answer.txt -Raw) -match '^\d') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"check free space","action":"shell","text":"df -BG --output=avail ~ | tail -1","risk":"low","expect":"a number"}'
+    - '{"thought":"write the answer","action":"shell","text":"df -BG --output=avail ~ | tail -1 | tr -dc 0-9 > ~/kai-bench/answer.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"answer saved","action":"done","risk":"none"}'
+
+- id: find-largest
+  title: Find the largest file
+  prompt: Which file in kai-bench/big in my home folder is the largest? Write only its file name into kai-bench/largest.txt.
+  setup:
+    linux: rm -rf ~/kai-bench/big && mkdir -p ~/kai-bench/big && head -c 1000 /dev/zero > ~/kai-bench/big/small.bin && head -c 90000 /dev/zero > ~/kai-bench/big/huge.bin && head -c 20000 /dev/zero > ~/kai-bench/big/medium.bin && rm -f ~/kai-bench/largest.txt
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\big; New-Item -ItemType Directory -Force $HOME\kai-bench\big | Out-Null; [IO.File]::WriteAllBytes("$HOME\kai-bench\big\small.bin", (New-Object byte[] 1000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\huge.bin", (New-Object byte[] 90000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\medium.bin", (New-Object byte[] 20000))
+  check:
+    linux: grep -q "huge.bin" ~/kai-bench/largest.txt
+    windows: if ((Get-Content $HOME\kai-bench\largest.txt -Raw) -match 'huge.bin') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"list by size","action":"shell","text":"ls -S ~/kai-bench/big | head -1","risk":"low","expect":"largest name"}'
+    - '{"thought":"save it","action":"shell","text":"ls -S ~/kai-bench/big | head -1 > ~/kai-bench/largest.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"huge.bin is largest","action":"done","risk":"none"}'
+
+- id: open-site-find
+  title: Open a site and find a page
+  prompt: Open bmsce.ac.in and find the IEEE CS page.
+  check:
+    linux: xdotool getactivewindow getwindowname | grep -qi ieee
+    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'IEEE' }) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"go to the site","action":"open_url","text":"https://bmsce.ac.in","risk":"none","expect":"college home page"}'
+    - '{"thought":"open the result","action":"click","target":3,"risk":"none","expect":"IEEE CS page"}'
+    - '{"thought":"IEEE CS page is open","action":"done","risk":"none"}'
+
+- id: play-video
+  title: Play a video
+  prompt: Play "lofi hip hop radio" on YouTube.
+  check:
+    linux: xdotool getactivewindow getwindowname | grep -qi youtube
+    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'YouTube' }) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"go straight to results","action":"open_url","text":"https://www.youtube.com/results?search_query=lofi+hip+hop+radio","risk":"none","expect":"results"}'
+    - '{"thought":"play first result","action":"click","target":3,"risk":"none","expect":"video playing"}'
+    - '{"thought":"video is playing","action":"done","risk":"none"}'
+
+- id: fill-form
+  title: Fill a form from text
+  prompt: 'Fill the form on screen with: name Asha Rao, email asha@example.com. Do not submit.'
+  mock:
+    - '{"thought":"name field","action":"type","target":5,"text":"Asha Rao","risk":"none","expect":"name filled"}'
+    - '{"thought":"email field","action":"type","target":6,"text":"asha@example.com","risk":"none","expect":"email filled"}'
+    - '{"thought":"filled, not submitted","action":"done","risk":"none"}'
+
+- id: pc-checkup
+  title: Security check-up of this PC
+  prompt: Is my firewall turned on? Check, and tell me what to do if it is off.
+  mock:
+    - '{"thought":"check firewall","action":"shell","text":"ufw status 2>/dev/null || echo no ufw","risk":"low","expect":"status"}'
+    - '{"thought":"firewall status reported","action":"done","risk":"none"}'
