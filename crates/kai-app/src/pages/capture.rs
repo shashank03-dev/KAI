@@ -162,6 +162,7 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
             model_ms: 610 + 40 * i as u64,
             first_token_ms: None,
             act_ms: 60,
+            verify_ms: 0,
         };
         if i < 2 || done.is_some() {
             r.apply(Ui::Event(EngineEvent::Acted {
@@ -179,6 +180,7 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
             approval: None,
             verified: true,
             output: None,
+            path: None,
         });
     }
     r.thinking = done.is_none();

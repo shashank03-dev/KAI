@@ -10,8 +10,10 @@ pub mod client;
 pub mod element;
 pub mod engine;
 pub mod orchestrator;
+pub mod plan_cache;
 pub mod ports;
 pub mod prompt;
+pub mod reply;
 pub mod risk;
 pub mod schema;
 pub mod settings;
@@ -24,8 +26,10 @@ pub use client::{
 pub use element::{Element, Grounding, Rect, Role};
 pub use engine::{
     Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Interrupt,
-    Observation, ObserveTiming, Perceptor,
+    Observation, ObserveTiming, Perceptor, RunOptions,
 };
+pub use plan_cache::PlanCache;
+pub use reply::StepReply;
 pub use risk::ApprovalLevel;
 pub use schema::{Action, Decision, Direction, Risk};
 pub use skill::{DeterministicStep, Skill};

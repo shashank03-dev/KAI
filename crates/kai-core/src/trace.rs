@@ -15,13 +15,16 @@ pub struct Timings {
     pub model_ms: u64,
     pub first_token_ms: Option<u64>,
     pub act_ms: u64,
+    /// Time spent in the cheap text-only verifier, if one ran.
+    #[serde(default)]
+    pub verify_ms: u64,
 }
 
 impl Timings {
     pub fn total_ms(&self) -> u64 {
         // Capture and the tree read run in parallel; encoding follows them.
         let observe = self.capture_ms.max(self.tree_ms) + self.encode_ms;
-        observe + self.model_ms + self.act_ms
+        observe + self.model_ms + self.act_ms + self.verify_ms
     }
 
     pub fn set_model(&mut self, model: Duration, first_token: Option<Duration>) {
@@ -49,6 +52,29 @@ pub struct StepRecord {
     /// Terminal output of a `shell` step (truncated), for sub-agent reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// How the action reached the OS: `a11y` (accessibility pattern, no
+    /// mouse), `mouse`, `keyboard`, `os` (open_app/open_url), `shell`, `wait`,
+    /// or `none` (done/ask_user/skipped). Absent in old traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+impl StepRecord {
+    /// A record with the common fields; the rest start empty/verified.
+    pub fn new(index: u32, decision: &Decision, timings: Timings, backend: &str) -> Self {
+        Self {
+            index,
+            decision: decision.clone(),
+            timings,
+            backend: backend.to_string(),
+            elements: String::new(),
+            screenshot: None,
+            approval: None,
+            verified: true,
+            output: None,
+            path: None,
+        }
+    }
 }
 
 /// How a run ended.
@@ -130,6 +156,7 @@ mod tests {
             model_ms: 400,
             first_token_ms: Some(120),
             act_ms: 10,
+            verify_ms: 0,
         };
         // max(30,50) + 20 + 400 + 10 = 480
         assert_eq!(t.total_ms(), 480);
@@ -162,6 +189,7 @@ mod tests {
                 approval: None,
                 verified: true,
                 output: None,
+                path: None,
             });
         }
         let (p50, p95) = tr.step_percentiles();

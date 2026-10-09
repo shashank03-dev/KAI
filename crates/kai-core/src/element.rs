@@ -123,6 +123,49 @@ impl Grounding {
         }
     }
 
+    /// The prompt form of the list: state only when it is not plain enabled,
+    /// names capped at 60 characters, no quotes for unnamed elements. About a
+    /// third shorter than [`Grounding::as_text`] for a typical screen.
+    pub fn as_compact_text(&self) -> String {
+        const MAX_NAME: usize = 60;
+        match self {
+            Grounding::Marks(els) if !els.is_empty() => {
+                let mut out = String::with_capacity(els.len() * 24);
+                for (i, e) in els.iter().enumerate() {
+                    if i > 0 {
+                        out.push('\n');
+                    }
+                    out.push_str(&format!("#{} {}", e.mark, e.role.label()));
+                    let name = e.name.trim();
+                    if !name.is_empty() {
+                        let short: String = name.chars().take(MAX_NAME).collect();
+                        let more = if name.chars().count() > MAX_NAME {
+                            "…"
+                        } else {
+                            ""
+                        };
+                        out.push_str(&format!(" \"{short}{more}\""));
+                    }
+                    if !e.enabled {
+                        out.push_str(" (disabled)");
+                    } else if e.secure {
+                        out.push_str(" (secure)");
+                    }
+                }
+                out
+            }
+            _ => self.as_text(),
+        }
+    }
+
+    /// Number of marked elements (0 for a grid).
+    pub fn mark_count(&self) -> usize {
+        match self {
+            Grounding::Marks(els) => els.len(),
+            Grounding::Grid { .. } => 0,
+        }
+    }
+
     /// Look up the element for a target mark, if this is a marks grounding.
     pub fn element(&self, mark: u32) -> Option<&Element> {
         match self {
@@ -185,6 +228,20 @@ mod tests {
         assert!(t.contains("#1 button \"Save\" (enabled)"));
         assert!(t.contains("#2 button \"Delete\" (disabled)"));
         assert!(t.contains("#3 password \"Password\" (secure)"));
+    }
+
+    #[test]
+    fn compact_text_drops_plain_state_and_caps_names() {
+        let long = "x".repeat(80);
+        let g = Grounding::Marks(vec![
+            el(1, Role::Button, "Save", true, false),
+            el(2, Role::Button, "", false, false),
+            el(3, Role::PasswordField, &long, true, true),
+        ]);
+        let t = g.as_compact_text();
+        assert!(t.starts_with("#1 button \"Save\"\n#2 button (disabled)\n#3 password \""));
+        assert!(t.ends_with("…\" (secure)"));
+        assert_eq!(g.mark_count(), 3);
     }
 
     #[test]
