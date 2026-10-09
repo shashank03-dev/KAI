@@ -45,6 +45,10 @@ pub enum BackendChoice {
     Both,
     Vllm,
     Gemini,
+    /// Vercel AI Gateway (OpenAI-compatible): Gemma 4 and comparison models.
+    Gateway,
+    /// OpenAI directly (comparison runs).
+    OpenAi,
     Mock,
 }
 
@@ -100,6 +104,10 @@ pub type Clients = (Box<dyn ModelClient>, Option<Box<dyn ModelClient>>);
 pub struct Keys {
     pub vllm: Option<String>,
     pub gemini: Option<String>,
+    /// `AI_GATEWAY_API_KEY`.
+    pub gateway: Option<String>,
+    /// `OPENAI_API_KEY`.
+    pub openai: Option<String>,
 }
 
 impl Settings {
@@ -194,6 +202,9 @@ impl Settings {
             Ok(match self.backend {
                 BackendChoice::Vllm => Box::new(vllm()?),
                 BackendChoice::Gemini => Box::new(gemini()?),
+                BackendChoice::Gateway | BackendChoice::OpenAi => {
+                    anyhow::bail!("OpenAI-compatible backend not wired yet")
+                }
                 BackendChoice::Mock => Box::new(MockClient::always(
                     r#"{"thought":"mock backend","action":"done","risk":"none"}"#,
                 )),
@@ -246,6 +257,7 @@ mod tests {
             .clients(&Keys {
                 vllm: None,
                 gemini: Some("k".into()),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(fast.backend(), Backend::Gemini);
@@ -262,6 +274,7 @@ mod tests {
             .clients(&Keys {
                 vllm: Some("a".into()),
                 gemini: Some("b".into()),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(fast.backend(), Backend::Vllm);

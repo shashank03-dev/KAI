@@ -104,6 +104,8 @@ fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         BackendChoice::Both => "both",
         BackendChoice::Vllm => "vllm",
         BackendChoice::Gemini => "gemini",
+        BackendChoice::Gateway => "gateway",
+        BackendChoice::OpenAi => "openai",
         BackendChoice::Mock => "mock",
     };
     let result = match &app.pages.test_result {

@@ -6,12 +6,15 @@ use kai_core::settings::Keys;
 const SERVICE: &str = "kai";
 pub const VLLM: &str = "vllm_api_key";
 pub const GEMINI: &str = "gemini_api_key";
+pub const GATEWAY: &str = "ai_gateway_api_key";
+pub const OPENAI: &str = "openai_api_key";
 
 fn env_for(name: &str) -> &'static str {
-    if name == VLLM {
-        "VLLM_API_KEY"
-    } else {
-        "GEMINI_API_KEY"
+    match name {
+        VLLM => "VLLM_API_KEY",
+        GATEWAY => "AI_GATEWAY_API_KEY",
+        OPENAI => "OPENAI_API_KEY",
+        _ => "GEMINI_API_KEY",
     }
 }
 
@@ -47,5 +50,7 @@ pub fn keys() -> Keys {
     Keys {
         vllm: get(VLLM),
         gemini: get(GEMINI),
+        gateway: get(GATEWAY),
+        openai: get(OPENAI),
     }
 }

@@ -107,6 +107,7 @@ impl Onboarding {
         kai_core::settings::Keys {
             vllm: (!v.is_empty()).then_some(v),
             gemini: (!g.is_empty()).then_some(g),
+            ..Default::default()
         }
     }
 
