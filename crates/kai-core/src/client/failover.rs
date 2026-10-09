@@ -79,7 +79,14 @@ impl ModelClient for FailoverClient {
                     "primary backend failing over to secondary ({e}); cooldown {:?}",
                     self.cooldown
                 );
-                self.start_cooldown();
+                if matches!(e, ClientError::Unavailable(_)) {
+                    // Not a blip: this account cannot use the primary model.
+                    // Stay on the secondary for the rest of the process.
+                    *self.until.lock().unwrap() =
+                        Some(Instant::now() + Duration::from_secs(365 * 24 * 3600));
+                } else {
+                    self.start_cooldown();
+                }
                 self.secondary.as_ref().unwrap().decide(req).await
             }
             Err(e) => Err(e),
@@ -133,6 +140,37 @@ mod tests {
         assert_eq!(f.backend(), Backend::Mock);
         let r2 = f.decide(&req(&schema, &imgs)).await.unwrap();
         assert_eq!(r2.raw, "secondary");
+    }
+
+    struct Restricted;
+    #[async_trait]
+    impl ModelClient for Restricted {
+        fn backend(&self) -> Backend {
+            Backend::OpenAi
+        }
+        async fn decide(&self, _: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
+            Err(ClientError::from_status(
+                403,
+                r#"{"error":{"message":"Free tier users do not have access to this model."}}"#,
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn unavailable_model_fails_over_for_good() {
+        let f = FailoverClient::new(
+            Box::new(Restricted),
+            Some(Box::new(MockClient::always("fast"))),
+        )
+        .with_cooldown(Duration::ZERO);
+        let schema = crate::schema::Decision::json_schema();
+        let imgs = Images {
+            screenshot_jpeg: vec![],
+            crop_jpeg: None,
+        };
+        assert_eq!(f.decide(&req(&schema, &imgs)).await.unwrap().raw, "fast");
+        // Even with a zero cooldown the restricted primary is not retried.
+        assert_eq!(f.backend(), Backend::Mock);
     }
 
     #[tokio::test]

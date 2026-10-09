@@ -3,12 +3,19 @@
 
 mod failover;
 mod gemini;
+pub mod jev;
+mod llm_verifier;
 mod mock;
+mod openai;
+pub mod stream;
 mod vllm;
 
 pub use failover::FailoverClient;
 pub use gemini::GeminiClient;
+pub use jev::{Answer, DecisionClient, JevVerifier, Question};
+pub use llm_verifier::LlmVerifier;
 pub use mock::MockClient;
+pub use openai::{GATEWAY_BASE, OPENAI_BASE, OpenAiClient, gateway_model_id};
 pub use vllm::VllmClient;
 
 use async_trait::async_trait;
@@ -47,6 +54,8 @@ pub struct ModelReply {
     pub total: Duration,
     /// Which backend actually served this (for the status bar).
     pub backend: Backend,
+    /// What the call cost in US$, when the backend reports it (AI Gateway).
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,16 +91,71 @@ pub enum ClientError {
     Timeout(Duration),
     #[error("empty or malformed response body")]
     EmptyBody,
+    /// The model exists but this account may not use it (e.g. the AI
+    /// Gateway's free tier answers 403 for larger models). Not retryable.
+    #[error("model not available on this account: {0}")]
+    Unavailable(String),
+    /// No API key configured for this backend.
+    #[error("missing API key: {0}")]
+    MissingKey(&'static str),
 }
 
 impl ClientError {
     /// Whether the fallback should kick in for this error (Droplet unreachable
-    /// or slow → try Gemini).
+    /// or slow → try Gemini; model not available on this tier → other model).
     pub fn is_failover(&self) -> bool {
         matches!(
             self,
-            ClientError::Transport(_) | ClientError::Timeout(_) | ClientError::Status(500..=599, _)
+            ClientError::Transport(_)
+                | ClientError::Timeout(_)
+                | ClientError::Status(500..=599, _)
+                | ClientError::Unavailable(_)
         )
+    }
+
+    /// Map an HTTP error status and body to an error. A 401/403/404 that says
+    /// the account cannot use the model becomes [`ClientError::Unavailable`].
+    pub fn from_status(status: u16, body: &str) -> Self {
+        let lower = body.to_ascii_lowercase();
+        let restricted = lower.contains("free tier")
+            || lower.contains("restrictedmodels")
+            || lower.contains("no_providers_available")
+            || lower.contains("model_not_found")
+            || lower.contains("does not have access");
+        let short: String = body.chars().take(300).collect();
+        if matches!(status, 401 | 403 | 404) && restricted {
+            ClientError::Unavailable(short)
+        } else {
+            ClientError::Status(status, short)
+        }
+    }
+}
+
+/// A shared HTTP client: keep-alive pool, HTTP/2 when offered, the system
+/// proxy, and extra trusted roots from `SSL_CERT_FILE` (corporate proxies).
+pub fn http_client() -> reqwest::Client {
+    let mut b = reqwest::Client::builder()
+        .pool_max_idle_per_host(4)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(30))
+        .tcp_nodelay(true);
+    if let Some(path) = std::env::var_os("SSL_CERT_FILE")
+        && let Ok(pem) = std::fs::read(&path)
+        && let Ok(certs) = reqwest::Certificate::from_pem_bundle(&pem)
+    {
+        for c in certs {
+            b = b.add_root_certificate(c);
+        }
+    }
+    b.build().expect("reqwest client")
+}
+
+/// Map a reqwest send error to a [`ClientError`].
+pub(crate) fn send_error(e: reqwest::Error, timeout: Duration) -> ClientError {
+    if e.is_timeout() {
+        ClientError::Timeout(timeout)
+    } else {
+        ClientError::Transport(e.to_string())
     }
 }
 

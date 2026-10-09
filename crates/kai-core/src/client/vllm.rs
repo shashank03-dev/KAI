@@ -2,8 +2,10 @@
 //!
 //! Uses `response_format: json_schema` so the reply is always schema-valid, one
 //! persistent HTTP/2 keep-alive connection, and image parts as data URLs.
+//! Streams by default (same SSE wire format as OpenAI) for real TTFT.
 
-use super::{Backend, ClientError, ModelClient, ModelReply, ModelRequest};
+use super::stream::{self, StreamOutcome};
+use super::{Backend, ClientError, ModelClient, ModelReply, ModelRequest, send_error};
 use async_trait::async_trait;
 use base64::Engine;
 use std::time::{Duration, Instant};
@@ -14,6 +16,8 @@ pub struct VllmClient {
     api_key: String,
     model: String,
     timeout: Duration,
+    stream: bool,
+    early_stop: bool,
 }
 
 impl VllmClient {
@@ -31,7 +35,21 @@ impl VllmClient {
             api_key: api_key.into(),
             model: "gemma-4-26b-a4b-it".to_string(),
             timeout: Duration::from_secs(45),
+            stream: true,
+            early_stop: false,
         }
+    }
+
+    /// Streaming on (default) or off.
+    pub fn with_streaming(mut self, on: bool) -> Self {
+        self.stream = on;
+        self
+    }
+
+    /// Stop reading the stream once the first JSON object closes.
+    pub fn with_early_stop(mut self, on: bool) -> Self {
+        self.early_stop = on;
+        self
     }
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
@@ -55,7 +73,7 @@ impl VllmClient {
         if let Some(crop) = &req.images.crop_jpeg {
             content.push(image_part(crop));
         }
-        serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "max_tokens": req.max_tokens,
             "temperature": req.temperature,
@@ -67,7 +85,12 @@ impl VllmClient {
                 "type": "json_schema",
                 "json_schema": { "name": "kai_reply", "schema": req.schema, "strict": true }
             }) }
-        })
+        });
+        if self.stream {
+            body["stream"] = true.into();
+            body["stream_options"] = serde_json::json!({ "include_usage": true });
+        }
+        body
     }
 }
 
@@ -95,42 +118,38 @@ impl ModelClient for VllmClient {
             .timeout(self.timeout)
             .send()
             .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    ClientError::Timeout(self.timeout)
-                } else {
-                    ClientError::Transport(e.to_string())
-                }
-            })?;
+            .map_err(|e| send_error(e, self.timeout))?;
 
         let status = resp.status();
         if !status.is_success() {
             let txt = resp.text().await.unwrap_or_default();
-            return Err(ClientError::Status(status.as_u16(), truncate(&txt)));
+            return Err(ClientError::from_status(status.as_u16(), &txt));
         }
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| ClientError::Transport(e.to_string()))?;
-
-        let raw = v["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or(ClientError::EmptyBody)?
-            .to_string();
-
+        let out = if self.stream {
+            stream::read_chat_stream(resp, started, self.early_stop).await?
+        } else {
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| ClientError::Transport(e.to_string()))?;
+            let mut o = StreamOutcome::default();
+            o.apply(&v, started);
+            o.first_token = None;
+            o
+        };
+        if out.content.is_empty() {
+            return Err(ClientError::EmptyBody);
+        }
         Ok(ModelReply {
-            raw,
-            prompt_tokens: v["usage"]["prompt_tokens"].as_u64().map(|n| n as u32),
-            completion_tokens: v["usage"]["completion_tokens"].as_u64().map(|n| n as u32),
-            first_token: None,
+            raw: out.content,
+            prompt_tokens: out.prompt_tokens,
+            completion_tokens: out.completion_tokens,
+            first_token: out.first_token,
             total: started.elapsed(),
             backend: Backend::Vllm,
+            cost_usd: None,
         })
     }
-}
-
-fn truncate(s: &str) -> String {
-    s.chars().take(300).collect()
 }
 
 #[cfg(test)]

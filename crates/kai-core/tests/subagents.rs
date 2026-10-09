@@ -47,6 +47,7 @@ impl ModelClient for Router {
             first_token: None,
             total: Duration::ZERO,
             backend: Backend::Mock,
+            cost_usd: None,
         })
     }
 }

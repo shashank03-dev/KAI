@@ -7,6 +7,7 @@
 //! backends. See `docs/HARNESS.md`.
 
 pub mod client;
+pub mod cua;
 pub mod element;
 pub mod engine;
 pub mod orchestrator;
