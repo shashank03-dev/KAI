@@ -122,7 +122,7 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
         false,
         40,
     );
-    r.model = "Gemma 4 26B A4B · AI Gateway".into();
+    r.model = "Gemma 4 26B A4B · DigitalOcean + Gemini".into();
     // The sample frame's own size, so the viewer shows it without bars.
     let (w, h) = sample_frame()
         .and_then(|f| image::image_dimensions(f).ok())
@@ -236,7 +236,7 @@ fn fake_runs(app: &mut KaiApp, cx: &mut Context<KaiApp>, f: impl FnOnce(&mut Run
             "Switch my computer to dark mode".into(),
             false,
             40,
-            "Gemma 4 26B A4B · AI Gateway".into(),
+            "Gemma 4 26B A4B · DigitalOcean + Gemini".into(),
         )
     });
     if app.entry(id).is_some_and(|e| e.state.read(cx).is_live()) {

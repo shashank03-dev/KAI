@@ -41,7 +41,8 @@ form, changes system settings, or types into a password field.
 diagnostics, builds). You will see its output in your last steps. Prefer it over \
 clicking when the task is naturally a command.
 - Use `ask_user` when you genuinely need the user to choose or provide input.
-- Use `done` the moment the task is complete.
+- Use `done` the moment the task is complete. A command that ended with \
+`[exit 0]` worked; never run the same command twice.
 - `expect` describes what the screen should show after your action.
 - Only when the next actions are certain (e.g. type, then press Enter), list up \
 to 3 of them in `then`, each like {\"action\":\"key\",\"keys\":[\"enter\"]}. \
@@ -175,6 +176,12 @@ impl HistoryItem {
 
     /// Attach command output so the model sees what a shell step did.
     pub fn push_output(&mut self, out: &str) {
+        // A silent success reads as "nothing happened" unless we say so.
+        let out = if out.trim() == "[exit 0]" {
+            "(no output) [exit 0 = success]"
+        } else {
+            out
+        };
         self.output = Some(out.to_string());
     }
 
@@ -186,7 +193,14 @@ impl HistoryItem {
         if let Some(text) = &d.text
             && !text.is_empty()
         {
-            let short: String = text.chars().take(30).collect();
+            // Commands are kept whole (a cut command looks like a wrong one);
+            // typed text and URLs are shortened.
+            let cap = if d.action == crate::schema::Action::Shell {
+                300
+            } else {
+                30
+            };
+            let short: String = text.chars().take(cap).collect();
             summary.push_str(&format!(" \"{short}\""));
         }
         if !d.keys.is_empty() {

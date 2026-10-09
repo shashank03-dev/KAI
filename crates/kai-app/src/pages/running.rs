@@ -114,7 +114,7 @@ pub fn tabs(app: &KaiApp, r: &RunState, live: bool, cx: &Context<KaiApp>) -> Any
             .children(plan(r))
             .children(panes::transcript(r))
             .children(
-                (live && r.thinking)
+                (live && r.thinking && !r.held)
                     .then(|| ThinkingIndicator::new("thinking").label(t(cx, "run.thinking", &[]))),
             )
             .into_any_element(),
