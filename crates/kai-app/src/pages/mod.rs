@@ -11,7 +11,11 @@ pub mod skills;
 
 use crate::app::KaiApp;
 use crate::state::Phase;
-use ely_gpui_component::{forms::TextInput, overlays::Dialog, settings::{KeyboardShortcutsList, Shortcut}};
+use ely_gpui_component::{
+    forms::TextInput,
+    overlays::Dialog,
+    settings::{KeyboardShortcutsList, Shortcut},
+};
 use gpui::{AppContext, Context, Entity, IntoElement, ParentElement, Styled, Window, div};
 use kai_core::settings::Settings;
 use std::collections::BTreeSet;
@@ -84,7 +88,11 @@ impl PageState {
 }
 
 /// Run: the composer when idle, the live run while working, the result after.
-pub fn run_page(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
+pub fn run_page(
+    app: &mut KaiApp,
+    window: &mut Window,
+    cx: &mut Context<KaiApp>,
+) -> impl IntoElement {
     match app.run.read(cx).phase {
         Phase::Idle => home::render(app, window, cx).into_any_element(),
         Phase::Running | Phase::Waiting => running::render(app, window, cx).into_any_element(),
@@ -93,10 +101,18 @@ pub fn run_page(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>)
 }
 
 pub fn shortcut_list() -> Vec<Shortcut> {
-    let s = |group: &str, name: &str, keys: &str| Shortcut { group: group.to_string().into(), name: name.to_string().into(), keys: keys.to_string().into() };
+    let s = |group: &str, name: &str, keys: &str| Shortcut {
+        group: group.to_string().into(),
+        name: name.to_string().into(),
+        keys: keys.to_string().into(),
+    };
     vec![
         s("Anywhere", "Stop Kai", "ctrl-alt-escape"),
-        s("Anywhere", "Stop Kai (if the first is taken)", "ctrl-alt-end"),
+        s(
+            "Anywhere",
+            "Stop Kai (if the first is taken)",
+            "ctrl-alt-end",
+        ),
         s("Anywhere", "Quick launcher", "ctrl-shift-space"),
         s("In Kai", "Command palette", "ctrl-k"),
         s("In Kai", "New task", "ctrl-n"),
@@ -108,7 +124,11 @@ pub fn shortcut_list() -> Vec<Shortcut> {
     ]
 }
 
-pub fn shortcuts_dialog(app: Entity<KaiApp>, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
+pub fn shortcuts_dialog(
+    app: Entity<KaiApp>,
+    _: &mut Window,
+    cx: &mut Context<KaiApp>,
+) -> impl IntoElement {
     let search = cx.entity().read(cx).pages.shortcut_search.clone();
     Dialog::new("shortcuts", "Keyboard shortcuts", move |_, cx| {
         app.update(cx, |a, cx| {
@@ -116,5 +136,9 @@ pub fn shortcuts_dialog(app: Entity<KaiApp>, _: &mut Window, cx: &mut Context<Ka
             cx.notify();
         })
     })
-    .child(div().w_full().child(KeyboardShortcutsList::new(shortcut_list(), &search)))
+    .child(
+        div()
+            .w_full()
+            .child(KeyboardShortcutsList::new(shortcut_list(), &search)),
+    )
 }

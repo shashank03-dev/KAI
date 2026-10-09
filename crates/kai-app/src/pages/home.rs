@@ -14,12 +14,36 @@ use kai_core::settings::MODELS;
 
 /// One starter per skill, worded as a task.
 const STARTERS: &[(&str, &str, IconName)] = &[
-    ("open-and-search-web", "Open bmsce.ac.in and find the IEEE CS page", IconName::Globe),
-    ("run-terminal-task", "Find the 5 biggest files in my Downloads folder", IconName::Terminal),
-    ("rename-files-in-folder", "Add today's date to every file name in ~/Pictures/trip", IconName::FolderOpen),
-    ("pc-security-checkup", "Check my PC's firewall, updates and open ports", IconName::Shield),
-    ("system-settings-dark-mode", "Switch my computer to dark mode", IconName::Moon),
-    ("spotify-or-youtube-play", "Play lofi hip hop radio on YouTube", IconName::Music),
+    (
+        "open-and-search-web",
+        "Open bmsce.ac.in and find the IEEE CS page",
+        IconName::Globe,
+    ),
+    (
+        "run-terminal-task",
+        "Find the 5 biggest files in my Downloads folder",
+        IconName::Terminal,
+    ),
+    (
+        "rename-files-in-folder",
+        "Add today's date to every file name in ~/Pictures/trip",
+        IconName::FolderOpen,
+    ),
+    (
+        "pc-security-checkup",
+        "Check my PC's firewall, updates and open ports",
+        IconName::Shield,
+    ),
+    (
+        "system-settings-dark-mode",
+        "Switch my computer to dark mode",
+        IconName::Moon,
+    ),
+    (
+        "spotify-or-youtube-play",
+        "Play lofi hip hop radio on YouTube",
+        IconName::Music,
+    ),
 ];
 
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
@@ -44,17 +68,24 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 a.save_settings(cx);
             })
         });
-    let team = Switch::new("team", app.team).label(t(cx, "home.team", &[])).on_change(move |on, _, cx| {
-        team_pick.update(cx, |a, cx| {
-            a.team = on;
-            cx.notify();
-        })
-    });
+    let team = Switch::new("team", app.team)
+        .label(t(cx, "home.team", &[]))
+        .on_change(move |on, _, cx| {
+            team_pick.update(cx, |a, cx| {
+                a.team = on;
+                cx.notify();
+            })
+        });
 
     let offline = match &app.conn {
         Conn::Offline(reason) => {
             let go = cx.entity();
-            Some(Banner::new("offline", Severity::Warning, reason.clone()).action("Open settings", move |_, cx| go.update(cx, |a, cx| a.go(Page::Settings, cx))))
+            Some(
+                Banner::new("offline", Severity::Warning, reason.clone())
+                    .action("Open settings", move |_, cx| {
+                        go.update(cx, |a, cx| a.go(Page::Settings, cx))
+                    }),
+            )
         }
         _ => None,
     };
@@ -79,14 +110,20 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                             .child(t(cx, "home.ask", &[])),
                     )
                     .child(
-                        PromptInput::new("composer", &app.draft, move |window, cx| send.update(cx, |a, cx| a.start_run(None, window, cx)))
-                            .tool(model)
-                            .tool(team),
+                        PromptInput::new("composer", &app.draft, move |window, cx| {
+                            send.update(cx, |a, cx| a.start_run(None, window, cx))
+                        })
+                        .tool(model)
+                        .tool(team),
                     )
-                    .child(SuggestionChips::new("starters", starters, move |ix, window, cx| {
-                        let task = chosen[ix].clone();
-                        pick.update(cx, |a, cx| a.start_run(Some(task), window, cx))
-                    })),
+                    .child(SuggestionChips::new(
+                        "starters",
+                        starters,
+                        move |ix, window, cx| {
+                            let task = chosen[ix].clone();
+                            pick.update(cx, |a, cx| a.start_run(Some(task), window, cx))
+                        },
+                    )),
             ),
         )
 }

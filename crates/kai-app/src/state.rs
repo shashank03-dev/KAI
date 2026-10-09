@@ -58,7 +58,14 @@ pub struct RunState {
 
 impl RunState {
     pub fn start(&mut self, task: String, team: bool, max_steps: u32) {
-        *self = Self { phase: Phase::Running, task, team, max_steps, started: Some(Instant::now()), ..Self::default() };
+        *self = Self {
+            phase: Phase::Running,
+            task,
+            team,
+            max_steps,
+            started: Some(Instant::now()),
+            ..Self::default()
+        };
     }
 
     pub fn current_step(&self) -> u32 {
@@ -85,7 +92,10 @@ impl RunState {
             Ui::Event(ev) => self.event(ev),
             Ui::Approval(p) => {
                 self.phase = Phase::Waiting;
-                self.caption = format!("Waiting for you: {}", describe(&p.decision, p.element.as_deref()));
+                self.caption = format!(
+                    "Waiting for you: {}",
+                    describe(&p.decision, p.element.as_deref())
+                );
                 self.approval = Some(p);
             }
             Ui::Plan(p) => self.plan = Some(p),
@@ -123,12 +133,19 @@ impl RunState {
                 self.thinking = true;
                 self.caption = "Gemma is deciding…".into();
             }
-            EngineEvent::Decided { step, decision, target } => {
+            EngineEvent::Decided {
+                step,
+                decision,
+                target,
+            } => {
                 self.thinking = false;
                 self.pointer = match (target, self.screen) {
                     (Some(t), Some(s)) if s.w > 0.0 && s.h > 0.0 => {
                         let (cx, cy) = t.center();
-                        Some((((cx - s.x) / s.w).clamp(0.0, 1.0), ((cy - s.y) / s.h).clamp(0.0, 1.0)))
+                        Some((
+                            ((cx - s.x) / s.w).clamp(0.0, 1.0),
+                            ((cy - s.y) / s.h).clamp(0.0, 1.0),
+                        ))
                     }
                     _ => None,
                 };
@@ -151,7 +168,9 @@ impl RunState {
             EngineEvent::Acted { step, timings } => {
                 self.phase = Phase::Running;
                 self.approval = None;
-                self.last_model_ms = Some(timings.model_ms).filter(|ms| *ms > 0).or(self.last_model_ms);
+                self.last_model_ms = Some(timings.model_ms)
+                    .filter(|ms| *ms > 0)
+                    .or(self.last_model_ms);
                 if let Some(s) = self.steps.iter_mut().rev().find(|s| s.index == step) {
                     s.timings = Some(timings);
                     s.state = StepState::Done;
@@ -174,7 +193,9 @@ impl RunState {
 
 /// An action in plain words: "Clicking “Save”", "Typing “hello”".
 pub fn describe(d: &Decision, element: Option<&str>) -> String {
-    let on = element.map(|e| format!(" “{e}”")).unwrap_or_else(|| d.target.map(|t| format!(" #{t}")).unwrap_or_default());
+    let on = element
+        .map(|e| format!(" “{e}”"))
+        .unwrap_or_else(|| d.target.map(|t| format!(" #{t}")).unwrap_or_default());
     let text = d.text.as_deref().unwrap_or("");
     let short: String = text.chars().take(48).collect();
     match d.action {
@@ -206,7 +227,12 @@ mod tests {
     fn pointer_is_a_share_of_the_screen() {
         let mut s = RunState::default();
         s.start("t".into(), false, 40);
-        s.apply(Ui::Event(EngineEvent::Observed { step: 0, elements: String::new(), screenshot: Arc::from(&[][..]), screen: Some(Rect::new(0.0, 0.0, 1000.0, 500.0)) }));
+        s.apply(Ui::Event(EngineEvent::Observed {
+            step: 0,
+            elements: String::new(),
+            screenshot: Arc::from(&[][..]),
+            screen: Some(Rect::new(0.0, 0.0, 1000.0, 500.0)),
+        }));
         s.apply(Ui::Event(EngineEvent::Decided {
             step: 0,
             decision: decision(r#"{"thought":"x","action":"click","target":1,"risk":"none"}"#),
@@ -220,18 +246,31 @@ mod tests {
     #[test]
     fn frames_follow_the_newest_unless_scrubbed() {
         let mut s = RunState::default();
-        s.apply(Ui::Frame { step: 0, path: "a".into() });
-        s.apply(Ui::Frame { step: 1, path: "b".into() });
+        s.apply(Ui::Frame {
+            step: 0,
+            path: "a".into(),
+        });
+        s.apply(Ui::Frame {
+            step: 1,
+            path: "b".into(),
+        });
         assert_eq!(s.shown, Some(1));
         s.shown = Some(0);
-        s.apply(Ui::Frame { step: 2, path: "c".into() });
+        s.apply(Ui::Frame {
+            step: 2,
+            path: "c".into(),
+        });
         assert_eq!(s.shown, Some(0), "a scrubbed viewer stays put");
     }
 
     #[test]
     fn a_failed_run_marks_its_last_step() {
         let mut s = RunState::default();
-        s.apply(Ui::Event(EngineEvent::Decided { step: 0, decision: decision(r#"{"thought":"x","action":"wait","risk":"none"}"#), target: None }));
+        s.apply(Ui::Event(EngineEvent::Decided {
+            step: 0,
+            decision: decision(r#"{"thought":"x","action":"wait","risk":"none"}"#),
+            target: None,
+        }));
         let mut t = Trace::new("x");
         t.finish(Outcome::Stopped);
         s.apply(Ui::Finished(Box::new(t)));

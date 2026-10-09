@@ -12,11 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(
-    name = "kai",
-    version,
-    about = "Kai: Gemma 4's hands on your computer"
-)]
+#[command(name = "kai", version, about = "Kai: Gemma 4's hands on your computer")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

@@ -25,7 +25,8 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     let json = serde_json::to_string_pretty(&p.decision).unwrap_or_default();
 
     let frame = run.frames.last().map(|f| {
-        let mut v = ComputerUseViewer::new("approval-frame", f.to_string_lossy().to_string()).action(what.clone());
+        let mut v = ComputerUseViewer::new("approval-frame", f.to_string_lossy().to_string())
+            .action(what.clone());
         if let Some(s) = run.screen {
             v = v.ratio(s.w / s.h.max(1.0));
         }
@@ -44,20 +45,30 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
         p.decision.thought
     ))
     .children(frame)
-    .child(div().w_full().child(CodeBlock::new("approval-json", json).language("json")))
+    .child(
+        div()
+            .w_full()
+            .child(CodeBlock::new("approval-json", json).language("json")),
+    )
     .action(|close| {
-        Button::new("approval-stop", "Stop").variant(ButtonVariant::Danger).on_click(move |_, window, cx| close(window, cx))
+        Button::new("approval-stop", "Stop")
+            .variant(ButtonVariant::Danger)
+            .on_click(move |_, window, cx| close(window, cx))
     })
     .action(move |close| {
-        Button::new("approval-skip", "Skip this step").variant(ButtonVariant::Secondary).on_click(move |_, window, cx| {
-            skip.set(ApprovalChoice::Skip);
-            close(window, cx)
-        })
+        Button::new("approval-skip", "Skip this step")
+            .variant(ButtonVariant::Secondary)
+            .on_click(move |_, window, cx| {
+                skip.set(ApprovalChoice::Skip);
+                close(window, cx)
+            })
     })
     .action(move |close| {
-        Button::new("approval-ok", "Approve").variant(ButtonVariant::Primary).on_click(move |_, window, cx| {
-            approve.set(ApprovalChoice::Approve);
-            close(window, cx)
-        })
+        Button::new("approval-ok", "Approve")
+            .variant(ButtonVariant::Primary)
+            .on_click(move |_, window, cx| {
+                approve.set(ApprovalChoice::Approve);
+                close(window, cx)
+            })
     })
 }

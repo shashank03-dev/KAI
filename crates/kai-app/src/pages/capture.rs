@@ -14,10 +14,27 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const SHOTS: &[&str] = &[
-    "01-onboarding-welcome", "02-onboarding-connect", "03-onboarding-access", "04-onboarding-safety", "05-onboarding-try",
-    "10-home", "11-home-offline", "20-running", "21-approval", "30-done-success", "31-done-failure",
-    "40-skills", "41-skill-detail", "42-save-as-skill", "50-history", "60-bench",
-    "70-settings-model", "71-settings-safety", "72-settings-privacy", "80-palette", "81-shortcuts",
+    "01-onboarding-welcome",
+    "02-onboarding-connect",
+    "03-onboarding-access",
+    "04-onboarding-safety",
+    "05-onboarding-try",
+    "10-home",
+    "11-home-offline",
+    "20-running",
+    "21-approval",
+    "30-done-success",
+    "31-done-failure",
+    "40-skills",
+    "41-skill-detail",
+    "42-save-as-skill",
+    "50-history",
+    "60-bench",
+    "70-settings-model",
+    "71-settings-safety",
+    "72-settings-privacy",
+    "80-palette",
+    "81-shortcuts",
 ];
 
 pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
@@ -33,16 +50,25 @@ pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
                 if ok.is_err() {
                     return;
                 }
-                cx.background_executor().timer(Duration::from_millis(900)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(900))
+                    .await;
                 let suffix = if mode == Mode::Dark { "dark" } else { "light" };
                 let path = dir.join(format!("{name}-{suffix}.png"));
                 let bounds = this.update_in(cx, |_, window, _| {
                     let b = window.bounds();
                     let s = window.scale_factor();
-                    (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s)
+                    (
+                        f32::from(b.origin.x) * s,
+                        f32::from(b.origin.y) * s,
+                        f32::from(b.size.width) * s,
+                        f32::from(b.size.height) * s,
+                    )
                 });
                 if let Ok(b) = bounds {
-                    cx.background_executor().spawn(async move { shoot(&path, b) }).await;
+                    cx.background_executor()
+                        .spawn(async move { shoot(&path, b) })
+                        .await;
                 }
             }
         }
@@ -53,12 +79,17 @@ pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
 
 fn shoot(path: &std::path::Path, (x, y, w, h): (f32, f32, f32, f32)) {
     let r = (|| -> anyhow::Result<()> {
-        let m = xcap::Monitor::all()?.into_iter().next().ok_or_else(|| anyhow::anyhow!("no display"))?;
+        let m = xcap::Monitor::all()?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("no display"))?;
         let img = m.capture_image()?;
         let (x, y) = (x.max(0.0) as u32, y.max(0.0) as u32);
         let w = (w as u32).min(img.width().saturating_sub(x));
         let h = (h as u32).min(img.height().saturating_sub(y));
-        image::imageops::crop_imm(&img, x, y, w, h).to_image().save(path)?;
+        image::imageops::crop_imm(&img, x, y, w, h)
+            .to_image()
+            .save(path)?;
         Ok(())
     })();
     if let Err(e) = r {
@@ -71,32 +102,84 @@ fn decision(json: &str) -> Decision {
 }
 
 fn sample_frame() -> Option<PathBuf> {
-    ["docs/img/set-of-marks-gtk.jpg", "../../docs/img/set-of-marks-gtk.jpg"].iter().map(PathBuf::from).find(|p| p.is_file()).and_then(|p| p.canonicalize().ok())
+    [
+        "docs/img/set-of-marks-gtk.jpg",
+        "../../docs/img/set-of-marks-gtk.jpg",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .find(|p| p.is_file())
+    .and_then(|p| p.canonicalize().ok())
 }
 
 fn fake_run(r: &mut RunState, done: Option<Outcome>) {
-    r.start("Open bmsce.ac.in and find the IEEE CS page".into(), false, 40);
+    r.start(
+        "Open bmsce.ac.in and find the IEEE CS page".into(),
+        false,
+        40,
+    );
     let screen = Some(Rect::new(0.0, 0.0, 1280.0, 720.0));
     if let Some(f) = sample_frame() {
         for step in 0..3 {
-            r.apply(Ui::Frame { step, path: f.clone() });
+            r.apply(Ui::Frame {
+                step,
+                path: f.clone(),
+            });
         }
     }
     let steps = [
-        (r#"{"thought":"Go straight to the college site","action":"open_url","text":"https://bmsce.ac.in","risk":"none"}"#, None),
-        (r#"{"thought":"The Clubs menu should list IEEE","action":"click","target":3,"risk":"none"}"#, Some(Rect::new(480.0, 10.0, 80.0, 24.0))),
-        (r#"{"thought":"IEEE CS appears under Technical clubs","action":"click","target":42,"risk":"low"}"#, Some(Rect::new(40.0, 180.0, 200.0, 30.0))),
+        (
+            r#"{"thought":"Go straight to the college site","action":"open_url","text":"https://bmsce.ac.in","risk":"none"}"#,
+            None,
+        ),
+        (
+            r#"{"thought":"The Clubs menu should list IEEE","action":"click","target":3,"risk":"none"}"#,
+            Some(Rect::new(480.0, 10.0, 80.0, 24.0)),
+        ),
+        (
+            r#"{"thought":"IEEE CS appears under Technical clubs","action":"click","target":42,"risk":"low"}"#,
+            Some(Rect::new(40.0, 180.0, 200.0, 30.0)),
+        ),
     ];
     let mut trace = Trace::new(&r.task);
     for (i, (json, target)) in steps.iter().enumerate() {
         let d = decision(json);
-        r.apply(Ui::Event(EngineEvent::Observed { step: i as u32, elements: String::new(), screenshot: std::sync::Arc::from(&[][..]), screen }));
-        r.apply(Ui::Event(EngineEvent::Decided { step: i as u32, decision: Box::new(d.clone()), target: *target }));
-        let tm = Timings { capture_ms: 21, tree_ms: 150, encode_ms: 44, model_ms: 610 + 40 * i as u64, first_token_ms: None, act_ms: 60 };
+        r.apply(Ui::Event(EngineEvent::Observed {
+            step: i as u32,
+            elements: String::new(),
+            screenshot: std::sync::Arc::from(&[][..]),
+            screen,
+        }));
+        r.apply(Ui::Event(EngineEvent::Decided {
+            step: i as u32,
+            decision: Box::new(d.clone()),
+            target: *target,
+        }));
+        let tm = Timings {
+            capture_ms: 21,
+            tree_ms: 150,
+            encode_ms: 44,
+            model_ms: 610 + 40 * i as u64,
+            first_token_ms: None,
+            act_ms: 60,
+        };
         if i < 2 || done.is_some() {
-            r.apply(Ui::Event(EngineEvent::Acted { step: i as u32, timings: tm }));
+            r.apply(Ui::Event(EngineEvent::Acted {
+                step: i as u32,
+                timings: tm,
+            }));
         }
-        trace.push(StepRecord { index: i as u32, decision: d, timings: tm, backend: "DigitalOcean (Gemma 4)".into(), elements: String::new(), screenshot: None, approval: None, verified: true, output: None });
+        trace.push(StepRecord {
+            index: i as u32,
+            decision: d,
+            timings: tm,
+            backend: "DigitalOcean (Gemma 4)".into(),
+            elements: String::new(),
+            screenshot: None,
+            approval: None,
+            verified: true,
+            output: None,
+        });
     }
     r.thinking = done.is_none();
     r.elapsed = Duration::from_millis(4_200);
@@ -169,7 +252,12 @@ fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
             app.go(Page::Bench, cx);
         }
         "70-settings-model" | "71-settings-safety" | "72-settings-privacy" => {
-            app.pages.settings_section = match SHOTS[i] { "71-settings-safety" => "safety", "72-settings-privacy" => "privacy", _ => "model" }.into();
+            app.pages.settings_section = match SHOTS[i] {
+                "71-settings-safety" => "safety",
+                "72-settings-privacy" => "privacy",
+                _ => "model",
+            }
+            .into();
             app.go(Page::Settings, cx);
         }
         "80-palette" => {

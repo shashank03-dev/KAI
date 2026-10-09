@@ -10,12 +10,18 @@ pub struct KaiAssets;
 impl AssetSource for KaiAssets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
         Ok(match path {
-            HAND => Some(Cow::Borrowed(include_bytes!("../../../assets/icons/kai-hand.svg"))),
+            HAND => Some(Cow::Borrowed(include_bytes!(
+                "../../../assets/icons/kai-hand.svg"
+            ))),
             _ => None,
         })
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        Ok(if HAND.starts_with(path) { vec![HAND.into()] } else { Vec::new() })
+        Ok(if HAND.starts_with(path) {
+            vec![HAND.into()]
+        } else {
+            Vec::new()
+        })
     }
 }

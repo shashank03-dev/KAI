@@ -31,7 +31,8 @@ pub fn agent_state(r: &RunState) -> AgentState {
 }
 
 fn card(ix: usize, s: &StepView) -> impl IntoElement {
-    let mut c = ToolCallCard::new(("step", ix), s.title.clone(), s.state).summary(s.thought.clone());
+    let mut c =
+        ToolCallCard::new(("step", ix), s.title.clone(), s.state).summary(s.thought.clone());
     if let Some(tm) = s.timings {
         c = c.took(Duration::from_millis(tm.total_ms())).result(format!(
             "capture {} ms · tree {} ms · encode {} ms · model {} ms · act {} ms",
@@ -62,9 +63,29 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .border_b_1()
         .border_color(theme.colors.border)
         .child(AgentStatus::new("run-status", state))
-        .child(div().flex_1().min_w_0().text_size(theme.text_size(TextSize::Md)).child(r.task.clone()))
-        .child(div().text_size(theme.text_size(TextSize::Sm)).text_color(theme.colors.fg_muted).child(t(cx, "run.step", &[("n", &step_no.to_string()), ("max", &r.max_steps.to_string())])))
-        .child(stop_button("run-stop").on_click(move |_, _, cx| stop.update(cx, |a, cx| a.stop(cx))));
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(theme.text_size(TextSize::Md))
+                .child(r.task.clone()),
+        )
+        .child(
+            div()
+                .text_size(theme.text_size(TextSize::Sm))
+                .text_color(theme.colors.fg_muted)
+                .child(t(
+                    cx,
+                    "run.step",
+                    &[
+                        ("n", &step_no.to_string()),
+                        ("max", &r.max_steps.to_string()),
+                    ],
+                )),
+        )
+        .child(
+            stop_button("run-stop").on_click(move |_, _, cx| stop.update(cx, |a, cx| a.stop(cx))),
+        );
 
     let plan = r.plan.as_ref().map(|p| {
         let done = r.steps.len();
@@ -72,28 +93,34 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             "plan",
             "Sub-agents",
             p.subtasks.iter().enumerate().map(|(i, s)| {
-                let state = if i < done { StepState::Done } else { StepState::Working };
+                let state = if i < done {
+                    StepState::Done
+                } else {
+                    StepState::Working
+                };
                 (format!("{} · {:?}", s.goal, s.kind), state)
             }),
         )
     });
 
-    let left = ScrollArea::new("steps")
-        .vertical()
-        .child(
-            div()
-                .p_4()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .children(plan)
-                .children(r.steps.iter().enumerate().map(|(i, s)| card(i, s)))
-                .children(r.thinking.then(|| ThinkingIndicator::new("thinking").label(t(cx, "run.thinking", &[])))),
-        );
+    let left = ScrollArea::new("steps").vertical().child(
+        div()
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(plan)
+            .children(r.steps.iter().enumerate().map(|(i, s)| card(i, s)))
+            .children(
+                r.thinking
+                    .then(|| ThinkingIndicator::new("thinking").label(t(cx, "run.thinking", &[]))),
+            ),
+    );
 
     let viewer = match r.shown.and_then(|i| r.frames.get(i)) {
         Some(frame) => {
-            let mut v = ComputerUseViewer::new("viewer", frame.to_string_lossy().to_string()).action(r.caption.clone());
+            let mut v = ComputerUseViewer::new("viewer", frame.to_string_lossy().to_string())
+                .action(r.caption.clone());
             if let Some(s) = r.screen {
                 v = v.ratio(s.w / s.h.max(1.0));
             }
@@ -112,13 +139,19 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .into_any_element(),
     };
     let strip = (r.frames.len() > 1).then(|| {
-        let frames: Vec<String> = r.frames.iter().map(|f| f.to_string_lossy().to_string()).collect();
-        BrowserPreview::new("frames", "Earlier frames", frames, r.shown.unwrap_or(0)).on_show(move |ix, _, cx| {
-            pick.update(cx, |r, cx| {
-                r.shown = Some(ix);
-                cx.notify();
-            })
-        })
+        let frames: Vec<String> = r
+            .frames
+            .iter()
+            .map(|f| f.to_string_lossy().to_string())
+            .collect();
+        BrowserPreview::new("frames", "Earlier frames", frames, r.shown.unwrap_or(0)).on_show(
+            move |ix, _, cx| {
+                pick.update(cx, |r, cx| {
+                    r.shown = Some(ix);
+                    cx.notify();
+                })
+            },
+        )
     });
 
     let tokens = r.steps.len() * TOKENS_PER_STEP;
@@ -130,20 +163,44 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .flex_col()
             .gap_3()
             .child(TokenCounter::new(tokens).limit(CONTEXT_WINDOW as usize))
-            .child(UsageBar::new(CONTEXT_WINDOW).part("This step's context", (TOKENS_PER_STEP as f64).min(CONTEXT_WINDOW)))
-            .child(CostEstimator::new("cost", tokens, r.steps.len() * 40, (droplet * hours / tokens.max(1) as f64 * 1_000_000.0, 0.0)))
-            .child(div().text_size(theme.text_size(TextSize::Xs)).text_color(theme.colors.fg_muted).child(format!(
-                "Droplet time so far: {:.1} min at ${droplet:.2}/h",
-                r.elapsed.as_secs_f64() / 60.0
-            ))),
+            .child(UsageBar::new(CONTEXT_WINDOW).part(
+                "This step's context",
+                (TOKENS_PER_STEP as f64).min(CONTEXT_WINDOW),
+            ))
+            .child(CostEstimator::new(
+                "cost",
+                tokens,
+                r.steps.len() * 40,
+                (droplet * hours / tokens.max(1) as f64 * 1_000_000.0, 0.0),
+            ))
+            .child(
+                div()
+                    .text_size(theme.text_size(TextSize::Xs))
+                    .text_color(theme.colors.fg_muted)
+                    .child(format!(
+                        "Droplet time so far: {:.1} min at ${droplet:.2}/h",
+                        r.elapsed.as_secs_f64() / 60.0
+                    )),
+            ),
     );
 
-    let right = ScrollArea::new("seen").vertical().child(div().p_4().flex().flex_col().gap_3().child(viewer).children(strip).child(meters));
+    let right = ScrollArea::new("seen").vertical().child(
+        div()
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(viewer)
+            .children(strip)
+            .child(meters),
+    );
 
-    div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .child(header)
-        .child(div().flex_1().min_h_0().child(SplitPane::new("run-split", Axis::Horizontal, px(280.)).sizes(&[0.42, 0.58]).pane(left).pane(right)))
+    div().size_full().flex().flex_col().child(header).child(
+        div().flex_1().min_h_0().child(
+            SplitPane::new("run-split", Axis::Horizontal, px(280.))
+                .sizes(&[0.42, 0.58])
+                .pane(left)
+                .pane(right),
+        ),
+    )
 }

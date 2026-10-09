@@ -19,7 +19,10 @@ use std::time::{Duration, Instant};
 pub enum Ui {
     Event(EngineEvent),
     /// A frame saved to disk for the viewer.
-    Frame { step: u32, path: PathBuf },
+    Frame {
+        step: u32,
+        path: PathBuf,
+    },
     Approval(Pending),
     Plan(Plan),
     /// Team mode's final report.
@@ -60,7 +63,13 @@ impl Agent {
                 None
             }
         };
-        Ok(Self { runtime, kill, perceptor: Arc::new(DesktopPerceptor::new()), actuator, running: Arc::new(AtomicBool::new(false)) })
+        Ok(Self {
+            runtime,
+            kill,
+            perceptor: Arc::new(DesktopPerceptor::new()),
+            actuator,
+            running: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     pub fn can_act(&self) -> bool {
@@ -72,18 +81,47 @@ impl Agent {
     }
 
     /// Start a run. Events arrive on the returned receiver until `Finished`.
-    pub fn run(&self, task: String, team: bool, settings: Settings, keys: Keys, skills: Vec<Skill>) -> mpsc::UnboundedReceiver<Ui> {
+    pub fn run(
+        &self,
+        task: String,
+        team: bool,
+        settings: Settings,
+        keys: Keys,
+        skills: Vec<Skill>,
+    ) -> mpsc::UnboundedReceiver<Ui> {
         let (tx, rx) = mpsc::unbounded();
         let Some(actuator) = self.actuator.clone() else {
-            let _ = tx.unbounded_send(Ui::Failed("Kai can't move the mouse or type on this desktop. Open Settings › Permissions.".into()));
+            let _ = tx.unbounded_send(Ui::Failed(
+                "Kai can't move the mouse or type on this desktop. Open Settings › Permissions."
+                    .into(),
+            ));
             return rx;
         };
         self.kill.reset();
         self.running.store(true, Ordering::SeqCst);
-        let (kill, perceptor, running) = (self.kill.clone(), self.perceptor.clone(), self.running.clone());
-        self.runtime.spawn(kai_os::kill::watch_corner(kill.clone(), actuator.input.clone(), running.clone()));
+        let (kill, perceptor, running) = (
+            self.kill.clone(),
+            self.perceptor.clone(),
+            self.running.clone(),
+        );
+        self.runtime.spawn(kai_os::kill::watch_corner(
+            kill.clone(),
+            actuator.input.clone(),
+            running.clone(),
+        ));
         self.runtime.spawn(async move {
-            let result = drive(task, team, settings, keys, skills, &tx, &kill, perceptor.as_ref(), actuator.as_ref()).await;
+            let result = drive(
+                task,
+                team,
+                settings,
+                keys,
+                skills,
+                &tx,
+                &kill,
+                perceptor.as_ref(),
+                actuator.as_ref(),
+            )
+            .await;
             running.store(false, Ordering::SeqCst);
             if let Err(e) = result {
                 let _ = tx.unbounded_send(Ui::Failed(friendly(&e)));
@@ -111,12 +149,19 @@ impl Agent {
     }
 
     /// Send one real screenshot to the configured backend and time it.
-    pub fn test_connection(&self, settings: Settings, keys: Keys) -> oneshot::Receiver<Result<(Duration, String), String>> {
+    pub fn test_connection(
+        &self,
+        settings: Settings,
+        keys: Keys,
+    ) -> oneshot::Receiver<Result<(Duration, String), String>> {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
             let r = async {
                 let (client, _) = settings.clients(&keys)?;
-                let images = Images { screenshot_jpeg: probe_jpeg(), crop_jpeg: None };
+                let images = Images {
+                    screenshot_jpeg: probe_jpeg(),
+                    crop_jpeg: None,
+                };
                 let started = Instant::now();
                 let reply = client.warm_up(&images).await?;
                 anyhow::Ok((started.elapsed(), reply.backend.label().to_string()))
@@ -143,10 +188,18 @@ async fn drive(
 ) -> anyhow::Result<()> {
     let (fast, careful) = settings.clients(&keys)?;
     let (max_steps, max_time) = settings.limits();
-    let config = Config { max_steps, max_time, approval: settings.approval, ..Config::default() };
+    let config = Config {
+        max_steps,
+        max_time,
+        approval: settings.approval,
+        ..Config::default()
+    };
     let dir = run_dir();
     std::fs::create_dir_all(&dir)?;
-    let sink = Sink { tx: tx.clone(), dir: dir.clone() };
+    let sink = Sink {
+        tx: tx.clone(),
+        dir: dir.clone(),
+    };
     let approver = UiApprover { tx: tx.clone() };
 
     if team {
@@ -219,7 +272,9 @@ struct Sink {
 
 impl EventSink for Sink {
     fn emit(&self, ev: &EngineEvent) {
-        if let EngineEvent::Observed { step, screenshot, .. } = ev
+        if let EngineEvent::Observed {
+            step, screenshot, ..
+        } = ev
             && !screenshot.is_empty()
         {
             let path = self.dir.join(format!("{step:03}.jpg"));
@@ -242,8 +297,19 @@ struct UiApprover {
 impl Approver for UiApprover {
     async fn approve(&self, decision: &Decision, grounding: &Grounding) -> ApprovalChoice {
         let (reply, answer) = oneshot::channel();
-        let element = decision.target.and_then(|t| grounding.element(t)).map(|e| e.name.clone());
-        if self.tx.unbounded_send(Ui::Approval(Pending { decision: decision.clone(), element, reply })).is_err() {
+        let element = decision
+            .target
+            .and_then(|t| grounding.element(t))
+            .map(|e| e.name.clone());
+        if self
+            .tx
+            .unbounded_send(Ui::Approval(Pending {
+                decision: decision.clone(),
+                element,
+                reply,
+            }))
+            .is_err()
+        {
             return ApprovalChoice::Stop;
         }
         // A closed window or dropped dialog counts as Stop.
@@ -253,7 +319,9 @@ impl Approver for UiApprover {
 
 /// A small real JPEG so the connection test exercises image input.
 fn probe_jpeg() -> Vec<u8> {
-    let img = image::RgbImage::from_fn(64, 40, |x, y| image::Rgb([(x * 4) as u8, (y * 6) as u8, 160]));
+    let img = image::RgbImage::from_fn(64, 40, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 6) as u8, 160])
+    });
     kai_os::frame::encode_jpeg(&img)
 }
 
@@ -261,13 +329,21 @@ fn probe_jpeg() -> Vec<u8> {
 pub fn friendly(e: &anyhow::Error) -> String {
     let s = format!("{e:#}");
     let l = s.to_ascii_lowercase();
-    if l.contains("401") || l.contains("403") || l.contains("api key not valid") || l.contains("unauthorized") {
+    if l.contains("401")
+        || l.contains("403")
+        || l.contains("api key not valid")
+        || l.contains("unauthorized")
+    {
         "The key was refused (401/403). Check the API key in Settings › Model & server.".into()
     } else if l.contains("timed out") || l.contains("timeout") {
         "The model didn't answer in time. Is the Droplet up? Run deploy/digitalocean/up.sh, or add a Gemini key so Kai can fall back.".into()
     } else if l.contains("dns") || l.contains("connect") || l.contains("transport") {
-        "Kai couldn't reach the model server. Check the address and your internet connection.".into()
-    } else if l.contains("no digitalocean") || l.contains("no gemini") || l.contains("set up the digitalocean") {
+        "Kai couldn't reach the model server. Check the address and your internet connection."
+            .into()
+    } else if l.contains("no digitalocean")
+        || l.contains("no gemini")
+        || l.contains("set up the digitalocean")
+    {
         "No model is set up yet. Add the DigitalOcean server or a Gemini key in Settings › Model & server.".into()
     } else if l.contains("404") {
         "The server answered 404: the model name or address is wrong. The address should end in /v1.".into()
@@ -287,8 +363,16 @@ mod tests {
 
     #[test]
     fn errors_read_as_next_steps() {
-        assert!(friendly(&anyhow::anyhow!("backend returned status 401: nope")).contains("key was refused"));
+        assert!(
+            friendly(&anyhow::anyhow!("backend returned status 401: nope"))
+                .contains("key was refused")
+        );
         assert!(friendly(&anyhow::anyhow!("backend timed out after 45s")).contains("Droplet up"));
-        assert!(friendly(&anyhow::anyhow!("set up the DigitalOcean server or a Gemini key")).contains("No model is set up"));
+        assert!(
+            friendly(&anyhow::anyhow!(
+                "set up the DigitalOcean server or a Gemini key"
+            ))
+            .contains("No model is set up")
+        );
     }
 }

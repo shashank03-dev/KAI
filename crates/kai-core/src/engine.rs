@@ -3,140 +3,16 @@
 //! [`Perceptor`] and [`Actuator`] traits, which `kai-os` implements and tests
 //! fake. See `docs/HARNESS.md`.
 
+pub use crate::ports::*;
+
 use crate::client::{Images, ModelClient, ModelRequest};
 use crate::element::Grounding;
 use crate::prompt::{self, HistoryItem};
-use crate::risk::{self, ApprovalLevel};
+use crate::risk;
 use crate::schema::{Action, Decision};
 use crate::skill::{DeterministicStep, Skill};
 use crate::trace::{Outcome, StepRecord, Timings, Trace};
-use async_trait::async_trait;
 use std::time::{Duration, Instant};
-
-/// What one observation produced.
-pub struct Observation {
-    pub images: Images,
-    pub grounding: Grounding,
-    /// Perceptual hash of the screen, to detect "nothing changed".
-    pub screen_hash: u64,
-    /// Where the observe time went (capture and tree run in parallel).
-    pub timing: ObserveTiming,
-    /// The captured display in global screen pixels, when known.
-    pub screen: Option<crate::element::Rect>,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ObserveTiming {
-    pub capture_ms: u64,
-    pub tree_ms: u64,
-    pub encode_ms: u64,
-}
-
-/// Looks at the screen and grounds it (Set-of-Marks or grid).
-#[async_trait]
-pub trait Perceptor: Send + Sync {
-    async fn observe(&self) -> anyhow::Result<Observation>;
-    /// Wait for the screen to settle after an action, up to a limit.
-    async fn settle(&self, _max: Duration) {}
-}
-
-/// Moves the mouse/keyboard and reaches the OS for fast paths.
-#[async_trait]
-pub trait Actuator: Send + Sync {
-    async fn act(&self, decision: &Decision, grounding: &Grounding) -> anyhow::Result<()>;
-    async fn open_app(&self, app: &str) -> anyhow::Result<()>;
-    async fn open_url(&self, url: &str) -> anyhow::Result<()>;
-    /// Run a terminal command and return its (truncated) combined output.
-    async fn shell(&self, cmd: &str) -> anyhow::Result<String>;
-}
-
-/// Approval UI (or an auto-policy in headless runs).
-#[async_trait]
-pub trait Approver: Send + Sync {
-    /// Return true to proceed, false to skip/stop the action.
-    async fn approve(&self, decision: &Decision, grounding: &Grounding) -> ApprovalChoice;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalChoice {
-    Approve,
-    Skip,
-    Stop,
-}
-
-/// Lets the loop be stopped within one step (kill switch / interrupt button).
-pub trait Interrupt: Send + Sync {
-    fn stopped(&self) -> bool;
-}
-
-/// A no-op interrupt for headless runs.
-pub struct NeverStops;
-impl Interrupt for NeverStops {
-    fn stopped(&self) -> bool {
-        false
-    }
-}
-
-/// Streams live state to the UI. No-op by default.
-pub trait EventSink: Send + Sync {
-    fn emit(&self, _ev: &EngineEvent) {}
-}
-pub struct NullSink;
-impl EventSink for NullSink {}
-
-/// Events the UI renders as they happen.
-#[derive(Debug, Clone)]
-pub enum EngineEvent {
-    Observed {
-        step: u32,
-        elements: String,
-        /// The marked JPEG the model sees (empty for terminal sub-agents).
-        screenshot: std::sync::Arc<[u8]>,
-        screen: Option<crate::element::Rect>,
-    },
-    Thinking {
-        step: u32,
-    },
-    Decided {
-        step: u32,
-        decision: Box<Decision>,
-        /// The box the action points at, in global screen pixels.
-        target: Option<crate::element::Rect>,
-    },
-    AwaitingApproval {
-        step: u32,
-    },
-    Acted {
-        step: u32,
-        timings: Timings,
-    },
-    Finished {
-        outcome: Outcome,
-    },
-}
-
-/// Run limits and policy.
-#[derive(Debug, Clone, Copy)]
-pub struct Config {
-    pub max_steps: u32,
-    pub max_time: Duration,
-    pub approval: ApprovalLevel,
-    pub max_tokens: u32,
-    /// Stop and ask after this many no-progress / failed steps in a row.
-    pub max_failures: u32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            max_steps: 40,
-            max_time: Duration::from_secs(600),
-            approval: ApprovalLevel::HighRiskOnly,
-            max_tokens: 192,
-            max_failures: 3,
-        }
-    }
-}
 
 /// All the collaborators the loop drives.
 pub struct Engine<'a> {

@@ -16,8 +16,8 @@ use ely_gpui_component::{
     theme::{ActiveTheme, TextSize},
 };
 use gpui::{
-    App, AppContext, AsyncApp, Context, Entity, FocusHandle, Global, IntoElement, ParentElement, Render, Styled,
-    Window, WindowHandle, div, px, size,
+    App, AppContext, AsyncApp, Context, Entity, FocusHandle, Global, IntoElement, ParentElement,
+    Render, Styled, Window, WindowHandle, div, px, size,
 };
 use kai_core::{ApprovalChoice, Rect};
 
@@ -32,16 +32,25 @@ pub struct MiniView {
 pub fn open(run: Entity<RunState>, cx: &mut App) {
     let view = cx.new(|cx| {
         cx.observe(&run, |_, _, cx| cx.notify()).detach();
-        MiniView { run, focus: cx.focus_handle() }
+        MiniView {
+            run,
+            focus: cx.focus_handle(),
+        }
     });
-    match MiniWindow::open("Kai is working", size(px(340.), px(196.)), Some(Corner::TopRight), view.into(), cx) {
+    match MiniWindow::open(
+        "Kai is working",
+        size(px(340.), px(196.)),
+        Some(Corner::TopRight),
+        view.into(),
+        cx,
+    ) {
         Ok(h) => cx.set_global(Open(Some(h))),
         Err(e) => log::error!("mini window: {e:#}"),
     }
 }
 
 pub fn close(cx: &mut AsyncApp) {
-    let _ = cx.update(|cx| {
+    cx.update(|cx| {
         if let Some(h) = cx.try_global::<Open>().and_then(|o| o.0) {
             let _ = h.update(cx, |_, window, _| window.remove_window());
         }
@@ -57,7 +66,12 @@ pub fn exclude_windows(agent: &Agent, cx: &mut App) {
         let _ = handle.update(cx, |_, window, _| {
             let b = window.bounds();
             let s = window.scale_factor();
-            rects.push(Rect::new(f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s));
+            rects.push(Rect::new(
+                f32::from(b.origin.x) * s,
+                f32::from(b.origin.y) * s,
+                f32::from(b.size.width) * s,
+                f32::from(b.size.height) * s,
+            ));
             #[cfg(target_os = "windows")]
             {
                 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -89,16 +103,40 @@ impl Render for MiniView {
         let theme = cx.theme();
         let r = self.run.read(cx);
         let waiting = r.phase == Phase::Waiting;
-        let step = t(cx, "run.step", &[("n", &r.current_step().max(1).to_string()), ("max", &r.max_steps.to_string())]);
-        let (stop_run, a, s, d) = (self.run.clone(), self.run.clone(), self.run.clone(), self.run.clone());
+        let step = t(
+            cx,
+            "run.step",
+            &[
+                ("n", &r.current_step().max(1).to_string()),
+                ("max", &r.max_steps.to_string()),
+            ],
+        );
+        let (stop_run, a, s, d) = (
+            self.run.clone(),
+            self.run.clone(),
+            self.run.clone(),
+            self.run.clone(),
+        );
 
         let answers = waiting.then(|| {
             div()
                 .flex()
                 .gap_2()
-                .child(Button::new("mini-approve", "Approve").variant(ButtonVariant::Primary).on_click(move |_, _, cx| Self::answer(&a, ApprovalChoice::Approve, cx)))
-                .child(Button::new("mini-skip", "Skip").variant(ButtonVariant::Secondary).on_click(move |_, _, cx| Self::answer(&s, ApprovalChoice::Skip, cx)))
-                .child(Button::new("mini-deny", "Stop").variant(ButtonVariant::Danger).on_click(move |_, _, cx| Self::answer(&d, ApprovalChoice::Stop, cx)))
+                .child(
+                    Button::new("mini-approve", "Approve")
+                        .variant(ButtonVariant::Primary)
+                        .on_click(move |_, _, cx| Self::answer(&a, ApprovalChoice::Approve, cx)),
+                )
+                .child(
+                    Button::new("mini-skip", "Skip")
+                        .variant(ButtonVariant::Secondary)
+                        .on_click(move |_, _, cx| Self::answer(&s, ApprovalChoice::Skip, cx)),
+                )
+                .child(
+                    Button::new("mini-deny", "Stop")
+                        .variant(ButtonVariant::Danger)
+                        .on_click(move |_, _, cx| Self::answer(&d, ApprovalChoice::Stop, cx)),
+                )
         });
 
         FocusScope::new(&self.focus)
@@ -109,9 +147,17 @@ impl Render for MiniView {
             .flex()
             .flex_col()
             .gap_2()
-            .bg(if waiting { theme.colors.warning_subtle } else { theme.colors.bg })
+            .bg(if waiting {
+                theme.colors.warning_subtle
+            } else {
+                theme.colors.bg
+            })
             .border_1()
-            .border_color(if waiting { theme.colors.warning } else { theme.colors.border })
+            .border_color(if waiting {
+                theme.colors.warning
+            } else {
+                theme.colors.border
+            })
             .child(
                 div()
                     .flex()
@@ -119,17 +165,33 @@ impl Render for MiniView {
                     .justify_between()
                     .gap_2()
                     .child(AgentStatus::new("mini-status", agent_state(r)))
-                    .child(div().text_size(theme.text_size(TextSize::Xs)).text_color(theme.colors.fg_muted).child(step)),
+                    .child(
+                        div()
+                            .text_size(theme.text_size(TextSize::Xs))
+                            .text_color(theme.colors.fg_muted)
+                            .child(step),
+                    ),
             )
-            .child(div().text_size(theme.text_size(TextSize::Sm)).line_clamp(2).child(r.caption.clone()))
-            .children(r.thinking.then(|| ThinkingIndicator::new("mini-thinking").label(t(cx, "run.thinking", &[]))))
+            .child(
+                div()
+                    .text_size(theme.text_size(TextSize::Sm))
+                    .line_clamp(2)
+                    .child(r.caption.clone()),
+            )
+            .children(
+                r.thinking.then(|| {
+                    ThinkingIndicator::new("mini-thinking").label(t(cx, "run.thinking", &[]))
+                }),
+            )
             .child(div().flex_1())
             .children(answers)
             .children((!waiting).then(|| {
-                stop_button("mini-stop").full_width().on_click(move |_, _, cx| {
-                    cx.global::<AgentHandle>().0.stop();
-                    Self::answer(&stop_run, ApprovalChoice::Stop, cx);
-                })
+                stop_button("mini-stop")
+                    .full_width()
+                    .on_click(move |_, _, cx| {
+                        cx.global::<AgentHandle>().0.stop();
+                        Self::answer(&stop_run, ApprovalChoice::Stop, cx);
+                    })
             }))
     }
 }

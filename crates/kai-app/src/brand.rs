@@ -45,7 +45,11 @@ pub fn contrast(a: u32, b: u32) -> f32 {
     fn lum(hex: u32) -> f32 {
         let ch = |v: u32| {
             let s = v as f32 / 255.0;
-            if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+            if s <= 0.03928 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
         };
         0.2126 * ch(hex >> 16 & 0xff) + 0.7152 * ch(hex >> 8 & 0xff) + 0.0722 * ch(hex & 0xff)
     }
@@ -60,9 +64,18 @@ mod tests {
     #[test]
     fn saffron_meets_wcag_aa_in_both_modes() {
         // Accent as text on the page background, and label text on the accent.
-        assert!(contrast(SAFFRON_LIGHT, 0xfcfaf7) >= 4.5, "light accent on bg");
-        assert!(contrast(0xffffff, SAFFRON_LIGHT) >= 4.5, "label on light accent");
+        assert!(
+            contrast(SAFFRON_LIGHT, 0xfcfaf7) >= 4.5,
+            "light accent on bg"
+        );
+        assert!(
+            contrast(0xffffff, SAFFRON_LIGHT) >= 4.5,
+            "label on light accent"
+        );
         assert!(contrast(SAFFRON_DARK, 0x252525) >= 4.5, "dark accent on bg");
-        assert!(contrast(0x252525, SAFFRON_DARK) >= 4.5, "label on dark accent");
+        assert!(
+            contrast(0x252525, SAFFRON_DARK) >= 4.5,
+            "label on dark accent"
+        );
     }
 }

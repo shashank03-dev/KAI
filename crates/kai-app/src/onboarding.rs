@@ -13,7 +13,10 @@ use ely_gpui_component::{
     primitives::{IconName, Severity},
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{AppContext, Context, Entity, IntoElement, Keystroke, ParentElement, Render, Styled, WeakEntity, Window, div};
+use gpui::{
+    AppContext, Context, Entity, IntoElement, Keystroke, ParentElement, Render, Styled, WeakEntity,
+    Window, div,
+};
 use kai_core::risk::ApprovalLevel;
 use kai_core::settings::{BackendChoice, Settings};
 use kai_os::permissions::{Check, Status};
@@ -34,26 +37,59 @@ pub struct Onboarding {
 }
 
 impl Onboarding {
-    pub fn new(settings: Settings, app: WeakEntity<KaiApp>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let endpoint = cx.new(|cx| TextInput::new(window, cx).placeholder("https://<droplet>.sslip.io/v1").label("Server address"));
-        let vllm_key = cx.new(|cx| TextInput::new(window, cx).placeholder("Server API key").label("Server API key").masked());
-        let gemini_key = cx.new(|cx| TextInput::new(window, cx).placeholder("Gemini API key").label("Gemini API key").masked());
-        let me = Self { app, step: 0, settings, endpoint, vllm_key, gemini_key, testing: false, tested: None, checks: Vec::new() };
+    pub fn new(
+        settings: Settings,
+        app: WeakEntity<KaiApp>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let endpoint = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .placeholder("https://<droplet>.sslip.io/v1")
+                .label("Server address")
+        });
+        let vllm_key = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .placeholder("Server API key")
+                .label("Server API key")
+                .masked()
+        });
+        let gemini_key = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .placeholder("Gemini API key")
+                .label("Gemini API key")
+                .masked()
+        });
+        let me = Self {
+            app,
+            step: 0,
+            settings,
+            endpoint,
+            vllm_key,
+            gemini_key,
+            testing: false,
+            tested: None,
+            checks: Vec::new(),
+        };
         // Poll access once a second while onboarding is open, so the status turns green by itself.
-        cx.spawn(async move |this, cx| loop {
-            let rx = match this.update(cx, |_, cx| cx.global::<AgentHandle>().0.permissions()) {
-                Ok(rx) => rx,
-                Err(_) => break,
-            };
-            if let Ok(checks) = rx.await
-                && this.update(cx, |o, cx| {
-                    o.checks = checks;
-                    cx.notify();
-                }).is_err()
-            {
-                break;
+        cx.spawn(async move |this, cx| {
+            loop {
+                let rx = match this.update(cx, |_, cx| cx.global::<AgentHandle>().0.permissions()) {
+                    Ok(rx) => rx,
+                    Err(_) => break,
+                };
+                if let Ok(checks) = rx.await
+                    && this
+                        .update(cx, |o, cx| {
+                            o.checks = checks;
+                            cx.notify();
+                        })
+                        .is_err()
+                {
+                    break;
+                }
+                cx.background_executor().timer(Duration::from_secs(1)).await;
             }
-            cx.background_executor().timer(Duration::from_secs(1)).await;
         })
         .detach();
         me
@@ -68,16 +104,24 @@ impl Onboarding {
     fn keys(&self, cx: &Context<Self>) -> kai_core::settings::Keys {
         let v = self.vllm_key.read(cx).text().trim().to_string();
         let g = self.gemini_key.read(cx).text().trim().to_string();
-        kai_core::settings::Keys { vllm: (!v.is_empty()).then_some(v), gemini: (!g.is_empty()).then_some(g) }
+        kai_core::settings::Keys {
+            vllm: (!v.is_empty()).then_some(v),
+            gemini: (!g.is_empty()).then_some(g),
+        }
     }
 
     fn test(&mut self, cx: &mut Context<Self>) {
         self.settings.vllm_endpoint = self.endpoint.read(cx).text().trim().to_string();
         self.testing = true;
         self.tested = None;
-        let rx = cx.global::<AgentHandle>().0.test_connection(self.settings.clone(), self.keys(cx));
+        let rx = cx
+            .global::<AgentHandle>()
+            .0
+            .test_connection(self.settings.clone(), self.keys(cx));
         cx.spawn(async move |this, cx| {
-            let r = rx.await.unwrap_or_else(|_| Err("Kai's agent stopped.".into()));
+            let r = rx
+                .await
+                .unwrap_or_else(|_| Err("Kai's agent stopped.".into()));
             let _ = this.update(cx, |o, cx| {
                 o.testing = false;
                 o.tested = Some(r);
@@ -90,7 +134,10 @@ impl Onboarding {
 
     fn finish(&mut self, demo: bool, window: &mut Window, cx: &mut Context<Self>) {
         let keys = self.keys(cx);
-        for (name, value) in [(kai_os::secrets::VLLM, keys.vllm), (kai_os::secrets::GEMINI, keys.gemini)] {
+        for (name, value) in [
+            (kai_os::secrets::VLLM, keys.vllm),
+            (kai_os::secrets::GEMINI, keys.gemini),
+        ] {
             if let Some(v) = value
                 && let Err(e) = kai_os::secrets::set(name, &v)
             {
@@ -102,7 +149,9 @@ impl Onboarding {
         let settings = self.settings.clone();
         let _ = self.app.update(cx, |app, cx| {
             app.settings = settings;
-            app.pages.endpoint.update(cx, |f, cx| f.set_text(app.settings.vllm_endpoint.clone(), cx));
+            app.pages.endpoint.update(cx, |f, cx| {
+                f.set_text(app.settings.vllm_endpoint.clone(), cx)
+            });
             app.onboarding = None;
             app.save_settings(cx);
             app.check_connection(window, cx);
@@ -135,49 +184,149 @@ impl Onboarding {
     fn connect(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let pick = |choice: BackendChoice, cx: &mut Context<Self>| {
             let me = cx.entity();
-            move |_: &mut Window, cx: &mut gpui::App| me.update(cx, |o, cx| { o.settings.backend = choice; o.tested = None; cx.notify(); })
+            move |_: &mut Window, cx: &mut gpui::App| {
+                me.update(cx, |o, cx| {
+                    o.settings.backend = choice;
+                    o.tested = None;
+                    cx.notify();
+                })
+            }
         };
         let b = self.settings.backend;
         let wants_vllm = matches!(b, BackendChoice::Both | BackendChoice::Vllm);
         let wants_gemini = matches!(b, BackendChoice::Both | BackendChoice::Gemini);
         let tester = cx.entity();
         let result = match &self.tested {
-            Some(Ok((took, backend))) => Some(InlineMessage::new(Severity::Success, format!("{backend} answered an image request in {} ms.", took.as_millis())).into_any_element()),
-            Some(Err(e)) => Some(ErrorView::new("test-error", IconName::TriangleAlert, "The test didn't pass").detail(e.clone()).into_any_element()),
+            Some(Ok((took, backend))) => Some(
+                InlineMessage::new(
+                    Severity::Success,
+                    format!(
+                        "{backend} answered an image request in {} ms.",
+                        took.as_millis()
+                    ),
+                )
+                .into_any_element(),
+            ),
+            Some(Err(e)) => Some(
+                ErrorView::new(
+                    "test-error",
+                    IconName::TriangleAlert,
+                    "The test didn't pass",
+                )
+                .detail(e.clone())
+                .into_any_element(),
+            ),
             None => None,
         };
-        div().flex().flex_col().gap_4()
-            .child(div().flex().flex_col().gap_2()
-                .child(RadioCard::new("b-both", b == BackendChoice::Both, "Both (recommended)").description("Your DigitalOcean server first, Gemini if it is down or slow.").icon(IconName::Layers).on_select(pick(BackendChoice::Both, cx)))
-                .child(RadioCard::new("b-vllm", b == BackendChoice::Vllm, "Our DigitalOcean server").description("Gemma 4 on your own GPU Droplet via vLLM.").icon(IconName::Server).on_select(pick(BackendChoice::Vllm, cx)))
-                .child(RadioCard::new("b-gemini", b == BackendChoice::Gemini, "Gemini API").description("Gemma 4 through Google's API with your key.").icon(IconName::Globe).on_select(pick(BackendChoice::Gemini, cx))))
-            .children(wants_vllm.then(|| div().flex().flex_col().gap_2().child(UrlInput::new(&self.endpoint)).child(PasswordInput::new(&self.vllm_key))))
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        RadioCard::new("b-both", b == BackendChoice::Both, "Both (recommended)")
+                            .description(
+                                "Your DigitalOcean server first, Gemini if it is down or slow.",
+                            )
+                            .icon(IconName::Layers)
+                            .on_select(pick(BackendChoice::Both, cx)),
+                    )
+                    .child(
+                        RadioCard::new(
+                            "b-vllm",
+                            b == BackendChoice::Vllm,
+                            "Our DigitalOcean server",
+                        )
+                        .description("Gemma 4 on your own GPU Droplet via vLLM.")
+                        .icon(IconName::Server)
+                        .on_select(pick(BackendChoice::Vllm, cx)),
+                    )
+                    .child(
+                        RadioCard::new("b-gemini", b == BackendChoice::Gemini, "Gemini API")
+                            .description("Gemma 4 through Google's API with your key.")
+                            .icon(IconName::Globe)
+                            .on_select(pick(BackendChoice::Gemini, cx)),
+                    ),
+            )
+            .children(wants_vllm.then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(UrlInput::new(&self.endpoint))
+                    .child(PasswordInput::new(&self.vllm_key))
+            }))
             .children(wants_gemini.then(|| PasswordInput::new(&self.gemini_key)))
-            .child(Button::new("test", "Test with a real image").variant(ButtonVariant::Primary).loading(self.testing).on_click(move |_, _, cx| tester.update(cx, |o, cx| o.test(cx))))
+            .child(
+                Button::new("test", "Test with a real image")
+                    .variant(ButtonVariant::Primary)
+                    .loading(self.testing)
+                    .on_click(move |_, _, cx| tester.update(cx, |o, cx| o.test(cx))),
+            )
             .children(result)
     }
 
     fn access(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let theme = cx.theme();
         let fixer = cx.entity();
-        div().flex().flex_col().gap_3().children(self.checks.iter().map(|c| {
-            let (label, tone) = match c.status {
-                Status::Granted => ("Granted", Tone::Success),
-                Status::Limited => ("Limited", Tone::Warning),
-                Status::Missing => ("Missing", Tone::Danger),
-            };
-            let fix = (c.status == Status::Missing && c.name == "Accessibility").then(|| {
-                let f = fixer.clone();
-                Button::new("fix-a11y", "Turn it on").variant(ButtonVariant::Secondary).on_click(move |_, _, cx| {
-                    f.update(cx, |_, cx| cx.global::<AgentHandle>().0.enable_accessibility())
-                })
-            });
-            div().p_3().flex().flex_col().gap_1().rounded_md().border_1().border_color(theme.colors.border)
-                .child(div().flex().items_center().justify_between().child(div().child(c.name)).child(Badge::new(label).tone(tone)))
-                .child(div().text_size(theme.text_size(TextSize::Sm)).text_color(theme.colors.fg_muted).child(c.why))
-                .children((c.status != Status::Granted).then(|| div().text_size(theme.text_size(TextSize::Sm)).child(c.fix.clone())))
-                .children(fix)
-        })).children(self.checks.is_empty().then(|| div().text_color(theme.colors.fg_muted).child("Checking…")))
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .children(self.checks.iter().map(|c| {
+                let (label, tone) = match c.status {
+                    Status::Granted => ("Granted", Tone::Success),
+                    Status::Limited => ("Limited", Tone::Warning),
+                    Status::Missing => ("Missing", Tone::Danger),
+                };
+                let fix = (c.status == Status::Missing && c.name == "Accessibility").then(|| {
+                    let f = fixer.clone();
+                    Button::new("fix-a11y", "Turn it on")
+                        .variant(ButtonVariant::Secondary)
+                        .on_click(move |_, _, cx| {
+                            f.update(cx, |_, cx| {
+                                cx.global::<AgentHandle>().0.enable_accessibility()
+                            })
+                        })
+                });
+                div()
+                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.colors.border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(div().child(c.name))
+                            .child(Badge::new(label).tone(tone)),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.text_size(TextSize::Sm))
+                            .text_color(theme.colors.fg_muted)
+                            .child(c.why),
+                    )
+                    .children((c.status != Status::Granted).then(|| {
+                        div()
+                            .text_size(theme.text_size(TextSize::Sm))
+                            .child(c.fix.clone())
+                    }))
+                    .children(fix)
+            }))
+            .children(
+                self.checks
+                    .is_empty()
+                    .then(|| div().text_color(theme.colors.fg_muted).child("Checking…")),
+            )
     }
 
     fn safety(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -217,15 +366,26 @@ impl Onboarding {
 
 /// "ctrl+alt+Escape" (global-hotkey) ⇄ "ctrl-alt-escape" (gpui).
 pub fn gh_to_gpui(s: &str) -> String {
-    s.split('+').map(|p| p.trim().to_ascii_lowercase()).collect::<Vec<_>>().join("-")
+    s.split('+')
+        .map(|p| p.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 pub fn gpui_to_gh(k: &Keystroke) -> String {
     let mut parts = Vec::new();
-    if k.modifiers.control { parts.push("ctrl".to_string()); }
-    if k.modifiers.alt { parts.push("alt".to_string()); }
-    if k.modifiers.shift { parts.push("shift".to_string()); }
-    if k.modifiers.platform { parts.push("super".to_string()); }
+    if k.modifiers.control {
+        parts.push("ctrl".to_string());
+    }
+    if k.modifiers.alt {
+        parts.push("alt".to_string());
+    }
+    if k.modifiers.shift {
+        parts.push("shift".to_string());
+    }
+    if k.modifiers.platform {
+        parts.push("super".to_string());
+    }
     let key = match k.key.as_str() {
         "escape" => "Escape".to_string(),
         "end" => "End".to_string(),
@@ -240,13 +400,33 @@ pub fn gpui_to_gh(k: &Keystroke) -> String {
 impl Render for Onboarding {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let steps = [
-            ("welcome", "Welcome to Kai", "Gemma 4's hands on your computer."),
-            ("connect", "Connect the brain", "Where Gemma 4 runs. A real image request tests it."),
-            ("access", "Let Kai see and act", "Each one turns green by itself once granted."),
-            ("safety", "Stay in control", "How careful Kai is, and how to stop it."),
+            (
+                "welcome",
+                "Welcome to Kai",
+                "Gemma 4's hands on your computer.",
+            ),
+            (
+                "connect",
+                "Connect the brain",
+                "Where Gemma 4 runs. A real image request tests it.",
+            ),
+            (
+                "access",
+                "Let Kai see and act",
+                "Each one turns green by itself once granted.",
+            ),
+            (
+                "safety",
+                "Stay in control",
+                "How careful Kai is, and how to stop it.",
+            ),
             ("try", "Try it", "One safe task to finish setting up."),
         ]
-        .map(|(key, title, body)| OnboardingStep { key: key.into(), title: title.into(), body: body.into() });
+        .map(|(key, title, body)| OnboardingStep {
+            key: key.into(),
+            title: title.into(),
+            body: body.into(),
+        });
         let content = match self.step {
             0 => self.welcome(cx).into_any_element(),
             1 => self.connect(cx).into_any_element(),
@@ -257,11 +437,21 @@ impl Render for Onboarding {
         let (walk, done, skip) = (cx.entity(), cx.entity(), cx.entity());
         div().size_full().flex().justify_center().p_8().child(
             div().w_full().max_w(gpui::rems(36.)).child(
-                OnboardingWizard::new("onboarding", steps, self.step, move |to, _, cx| walk.update(cx, |o, cx| { o.step = to; cx.notify(); }),
-                    move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)))
-                    .content(content)
-                    .ready(self.ready())
-                    .on_skip(move |window, cx| skip.update(cx, |o, cx| o.finish(false, window, cx))),
+                OnboardingWizard::new(
+                    "onboarding",
+                    steps,
+                    self.step,
+                    move |to, _, cx| {
+                        walk.update(cx, |o, cx| {
+                            o.step = to;
+                            cx.notify();
+                        })
+                    },
+                    move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)),
+                )
+                .content(content)
+                .ready(self.ready())
+                .on_skip(move |window, cx| skip.update(cx, |o, cx| o.finish(false, window, cx))),
             ),
         )
     }

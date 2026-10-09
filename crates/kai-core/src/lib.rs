@@ -10,6 +10,7 @@ pub mod client;
 pub mod element;
 pub mod engine;
 pub mod orchestrator;
+pub mod ports;
 pub mod prompt;
 pub mod risk;
 pub mod schema;

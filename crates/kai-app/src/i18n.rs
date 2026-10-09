@@ -13,7 +13,10 @@ const EN: &[(&str, &str)] = &[
     ("nav.bench", "Benchmarks"),
     ("nav.settings", "Settings"),
     ("home.ask", "What should Kai do on your computer?"),
-    ("home.placeholder", "Describe a task, e.g. \"rename the photos in Downloads by date\""),
+    (
+        "home.placeholder",
+        "Describe a task, e.g. \"rename the photos in Downloads by date\"",
+    ),
     ("home.team", "Team"),
     ("run.step", "Step {n} of {max}"),
     ("run.thinking", "Gemma is deciding…"),
@@ -25,15 +28,21 @@ const EN: &[(&str, &str)] = &[
 ];
 
 pub fn install(cx: &mut App) {
-    cx.set_global(ely_gpui_component::i18n::I18n::new("en-US").catalog("en-US", &[("kai.ready", "Ready")]));
+    cx.set_global(
+        ely_gpui_component::i18n::I18n::new("en-US").catalog("en-US", &[("kai.ready", "Ready")]),
+    );
 }
 
 /// The string for `key`, with `{name}` filled.
 pub fn t(_: &App, key: &str, args: &[(&str, &str)]) -> String {
-    let mut s = EN.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()).unwrap_or_else(|| {
-        log::error!("strings: no {key:?}");
-        key.to_string()
-    });
+    let mut s = EN
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_else(|| {
+            log::error!("strings: no {key:?}");
+            key.to_string()
+        });
     for (name, value) in args {
         s = s.replace(&format!("{{{name}}}"), value);
     }
