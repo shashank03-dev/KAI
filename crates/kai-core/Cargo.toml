@@ -1,0 +1,29 @@
+[package]
+name = "kai-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Kai's model harness: the observe-ground-decide-act-verify loop, model backends, and skills."
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+log.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+futures.workspace = true
+jiff.workspace = true
+async-trait = "0.1"
+
+[dev-dependencies]
+env_logger.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

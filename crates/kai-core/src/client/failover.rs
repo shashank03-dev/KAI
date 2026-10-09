@@ -1,0 +1,148 @@
+//! Automatic fallback: prefer the Droplet (vLLM); on a failover-class error
+//! switch to Gemini for this step and keep using it for a cooldown, then try
+//! the Droplet again.
+
+use super::{Backend, ClientError, ModelClient, ModelReply, ModelRequest};
+use async_trait::async_trait;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// Wraps a primary and a secondary client.
+pub struct FailoverClient {
+    primary: Box<dyn ModelClient>,
+    secondary: Option<Box<dyn ModelClient>>,
+    cooldown: Duration,
+    /// When set, stay on the secondary until this instant.
+    until: Mutex<Option<Instant>>,
+}
+
+impl FailoverClient {
+    pub fn new(primary: Box<dyn ModelClient>, secondary: Option<Box<dyn ModelClient>>) -> Self {
+        Self {
+            primary,
+            secondary,
+            cooldown: Duration::from_secs(30),
+            until: Mutex::new(None),
+        }
+    }
+
+    pub fn with_cooldown(mut self, d: Duration) -> Self {
+        self.cooldown = d;
+        self
+    }
+
+    fn in_cooldown(&self) -> bool {
+        self.until
+            .lock()
+            .unwrap()
+            .map(|t| Instant::now() < t)
+            .unwrap_or(false)
+    }
+
+    fn start_cooldown(&self) {
+        *self.until.lock().unwrap() = Some(Instant::now() + self.cooldown);
+    }
+
+    fn clear_cooldown(&self) {
+        *self.until.lock().unwrap() = None;
+    }
+}
+
+#[async_trait]
+impl ModelClient for FailoverClient {
+    fn backend(&self) -> Backend {
+        if self.in_cooldown() {
+            self.secondary
+                .as_ref()
+                .map(|s| s.backend())
+                .unwrap_or_else(|| self.primary.backend())
+        } else {
+            self.primary.backend()
+        }
+    }
+
+    async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
+        // While cooling down, go straight to the secondary.
+        if self.in_cooldown()
+            && let Some(sec) = &self.secondary
+        {
+            return sec.decide(req).await;
+        }
+
+        match self.primary.decide(req).await {
+            Ok(r) => {
+                self.clear_cooldown();
+                Ok(r)
+            }
+            Err(e) if e.is_failover() && self.secondary.is_some() => {
+                log::warn!(
+                    "primary backend failing over to secondary ({e}); cooldown {:?}",
+                    self.cooldown
+                );
+                self.start_cooldown();
+                self.secondary.as_ref().unwrap().decide(req).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{Images, MockClient};
+
+    struct AlwaysFails;
+    #[async_trait]
+    impl ModelClient for AlwaysFails {
+        fn backend(&self) -> Backend {
+            Backend::Vllm
+        }
+        async fn decide(&self, _: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
+            Err(ClientError::Timeout(Duration::from_secs(1)))
+        }
+    }
+
+    fn req<'a>(schema: &'a serde_json::Value, imgs: &'a Images) -> ModelRequest<'a> {
+        ModelRequest {
+            system: "s",
+            user_text: "u",
+            images: imgs,
+            schema,
+            max_tokens: 1,
+            temperature: 0.0,
+        }
+    }
+
+    #[tokio::test]
+    async fn fails_over_and_stays_on_secondary_during_cooldown() {
+        let f = FailoverClient::new(
+            Box::new(AlwaysFails),
+            Some(Box::new(MockClient::always("secondary"))),
+        );
+        let schema = crate::schema::Decision::json_schema();
+        let imgs = Images {
+            screenshot_jpeg: vec![],
+            crop_jpeg: None,
+        };
+        // First call fails over.
+        let r = f.decide(&req(&schema, &imgs)).await.unwrap();
+        assert_eq!(r.raw, "secondary");
+        assert_eq!(r.backend, Backend::Mock);
+        // During cooldown we don't even touch the (failing) primary.
+        assert_eq!(f.backend(), Backend::Mock);
+        let r2 = f.decide(&req(&schema, &imgs)).await.unwrap();
+        assert_eq!(r2.raw, "secondary");
+    }
+
+    #[tokio::test]
+    async fn no_secondary_propagates_error() {
+        let f = FailoverClient::new(Box::new(AlwaysFails), None);
+        let schema = crate::schema::Decision::json_schema();
+        let imgs = Images {
+            screenshot_jpeg: vec![],
+            crop_jpeg: None,
+        };
+        assert!(f.decide(&req(&schema, &imgs)).await.is_err());
+    }
+}
