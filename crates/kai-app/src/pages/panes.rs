@@ -19,12 +19,23 @@ use kai_core::orchestrator::Kind;
 use std::time::Duration;
 
 pub fn card(ix: usize, s: &StepView) -> impl IntoElement {
-    let mut c =
-        ToolCallCard::new(("step", ix), s.title.clone(), s.state).summary(s.thought.clone());
+    let mut title = s.title.clone();
+    // Steps the model didn't decide (batched follow-ups, plan cache, skills).
+    let no_model = s.timings.is_some_and(|t| t.model_ms == 0);
+    match (&s.path, &s.backend) {
+        (Some(p), Some(b)) => title = format!("{title} · via {p} · {b}"),
+        (Some(p), None) => title = format!("{title} · via {p}"),
+        (None, Some(b)) if b.contains("no model call") => title = format!("{title} · {b}"),
+        _ if no_model && s.backend.is_none() && !title.contains("no model call") => {
+            title = format!("{title} · no model call")
+        }
+        _ => {}
+    }
+    let mut c = ToolCallCard::new(("step", ix), title, s.state).summary(s.thought.clone());
     if let Some(tm) = s.timings {
         c = c.took(Duration::from_millis(tm.total_ms())).result(format!(
-            "capture {} ms · tree {} ms · encode {} ms · model {} ms · act {} ms",
-            tm.capture_ms, tm.tree_ms, tm.encode_ms, tm.model_ms, tm.act_ms
+            "capture {} ms · tree {} ms · encode {} ms · model {} ms · act {} ms · verify {} ms",
+            tm.capture_ms, tm.tree_ms, tm.encode_ms, tm.model_ms, tm.act_ms, tm.verify_ms
         ));
     }
     if !s.json.is_empty() {

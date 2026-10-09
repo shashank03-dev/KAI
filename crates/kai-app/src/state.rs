@@ -32,6 +32,10 @@ pub struct StepView {
     pub state: StepState,
     pub timings: Option<Timings>,
     pub json: String,
+    /// How the action was carried out (a11y, mouse, keyboard, os, shell…)
+    /// and which backend decided it; known once the run's trace arrives.
+    pub path: Option<String>,
+    pub backend: Option<String>,
 }
 
 #[derive(Default)]
@@ -175,6 +179,12 @@ impl RunState {
                 {
                     last.state = StepState::Failed;
                 }
+                for rec in &trace.steps {
+                    if let Some(v) = self.steps.iter_mut().find(|v| v.index == rec.index) {
+                        v.path = rec.path.clone();
+                        v.backend = Some(rec.backend.clone());
+                    }
+                }
                 self.trace = Some(*trace);
                 self.paused = false;
                 self.held = false;
@@ -227,6 +237,8 @@ impl RunState {
                     state: StepState::Working,
                     timings: None,
                     json: serde_json::to_string_pretty(&*decision).unwrap_or_default(),
+                    path: None,
+                    backend: None,
                 });
             }
             EngineEvent::AwaitingApproval { .. } => self.phase = Phase::Waiting,
@@ -251,6 +263,8 @@ impl RunState {
                         state: StepState::Done,
                         timings: Some(timings),
                         json: String::new(),
+                        path: None,
+                        backend: None,
                     });
                 }
             }
