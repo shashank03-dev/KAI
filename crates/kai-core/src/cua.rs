@@ -291,6 +291,7 @@ fn record(i: u32, d: Decision, t: Timings, label: &str, elements: String, ok: bo
         approval: None,
         verified: ok,
         output: None,
+        path: Some("native".to_string()),
     }
 }
 

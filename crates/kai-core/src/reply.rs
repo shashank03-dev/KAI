@@ -76,8 +76,8 @@ impl StepReply {
                 "required": ["action"],
                 "properties": {
                     "action": action,
-                    "target": { "type": "integer" },
-                    "text": { "type": "string" },
+                    "target": { "type": ["integer", "null"] },
+                    "text": { "type": ["string", "null"] },
                     "keys": { "type": "array", "items": { "type": "string" } },
                     "risk": { "type": "string", "enum": ["none","low","high"] },
                     "expect": { "type": "string" }
@@ -118,6 +118,22 @@ mod tests {
         assert_eq!(r.decision.target, Some(3));
         assert!(r.then.is_empty());
         assert!(!r.need_screen);
+    }
+
+    #[test]
+    fn strict_mode_reply_with_every_field_parses() {
+        // OpenAI strict structured outputs emit every property, nulls included.
+        let r = StepReply::parse_checked(
+            r#"{"thought":"search","action":"type","target":4,"text":"lofi","keys":[],
+                "direction":null,"amount":null,"risk":"none","expect":"typed",
+                "then":[{"action":"key","target":null,"text":null,"keys":["Return"],
+                         "risk":"none","expect":"results"}],
+                "need_screen":false}"#,
+        )
+        .unwrap();
+        assert_eq!(r.decision.target, Some(4));
+        assert_eq!(r.then.len(), 1);
+        assert_eq!(r.then[0].target, None);
     }
 
     #[test]
