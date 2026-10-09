@@ -2,14 +2,19 @@
 //! the user's config folder. API keys are never stored here; they live in the
 //! OS keychain (see `kai_os::secrets`).
 
-use crate::client::{FailoverClient, GeminiClient, MockClient, ModelClient, VllmClient};
+use crate::client::{
+    FailoverClient, GeminiClient, MockClient, ModelClient, OpenAiClient, VllmClient,
+    gateway_model_id,
+};
 use crate::risk::ApprovalLevel;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// The Gemma 4 family Kai knows. Ids are the Gemini API names; the vLLM server
-/// serves the same names (`--served-model-name`).
+/// The models Kai knows. Gemma 4 ids are the Gemini API names; the vLLM server
+/// serves the same names (`--served-model-name`) and the AI Gateway maps them to
+/// `google/<id>`. Comparison models are AI Gateway ids (any Gateway id works as
+/// `fast_model`/`careful_model`; these are the ones the app offers).
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
         id: "gemma-4-26b-a4b-it",
@@ -21,12 +26,34 @@ pub const MODELS: &[ModelInfo] = &[
         label: "Gemma 4 31B · careful",
         role: ModelRole::Careful,
     },
+    ModelInfo {
+        id: "openai/gpt-5-mini",
+        label: "GPT-5 mini · comparison (Gateway)",
+        role: ModelRole::Comparison,
+    },
+    ModelInfo {
+        id: "openai/gpt-5",
+        label: "GPT-5 · comparison (Gateway)",
+        role: ModelRole::Comparison,
+    },
+    ModelInfo {
+        id: "openai/gpt-4.1",
+        label: "GPT-4.1 · comparison (Gateway)",
+        role: ModelRole::Comparison,
+    },
+    ModelInfo {
+        id: "openai/gpt-4.1-mini",
+        label: "GPT-4.1 mini · comparison (Gateway)",
+        role: ModelRole::Comparison,
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelRole {
     Fast,
     Careful,
+    /// Not Gemma: offered for side-by-side runs (Gateway or OpenAI backends).
+    Comparison,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -199,28 +226,77 @@ impl Settings {
                     .ok_or_else(|| anyhow::anyhow!("no Gemini API key set"))?;
                 Ok(GeminiClient::new(key).with_model(model))
             };
+            let gateway = || -> anyhow::Result<OpenAiClient> {
+                let key = keys
+                    .gateway
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("no AI Gateway key set (AI_GATEWAY_API_KEY)"))?;
+                Ok(OpenAiClient::gateway(key).with_model(gateway_model_id(model)))
+            };
+            let openai = || -> anyhow::Result<OpenAiClient> {
+                let key = keys
+                    .openai
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("no OpenAI API key set (OPENAI_API_KEY)"))?;
+                anyhow::ensure!(
+                    !model.contains('/') || model.starts_with("openai/"),
+                    "model {model} is not an OpenAI model"
+                );
+                Ok(OpenAiClient::openai(key).with_model(model.trim_start_matches("openai/")))
+            };
             Ok(match self.backend {
                 BackendChoice::Vllm => Box::new(vllm()?),
                 BackendChoice::Gemini => Box::new(gemini()?),
-                BackendChoice::Gateway | BackendChoice::OpenAi => {
-                    anyhow::bail!("OpenAI-compatible backend not wired yet")
-                }
+                BackendChoice::Gateway => Box::new(gateway()?),
+                BackendChoice::OpenAi => Box::new(openai()?),
                 BackendChoice::Mock => Box::new(MockClient::always(
                     r#"{"thought":"mock backend","action":"done","risk":"none"}"#,
                 )),
-                BackendChoice::Both => match (vllm(), gemini()) {
-                    (Ok(v), Ok(g)) => Box::new(FailoverClient::new(Box::new(v), Some(Box::new(g)))),
-                    (Ok(v), Err(_)) => Box::new(v),
-                    (Err(_), Ok(g)) => Box::new(g),
-                    (Err(e), Err(_)) => {
-                        return Err(e.context("set up the DigitalOcean server or a Gemini key"));
+                BackendChoice::Both => {
+                    // Droplet first, then Gemini, then the AI Gateway: each
+                    // one that is configured backs up the one before it.
+                    let mut chain: Vec<Box<dyn ModelClient>> = Vec::new();
+                    let first_err = match vllm() {
+                        Ok(v) => {
+                            chain.push(Box::new(v));
+                            None
+                        }
+                        Err(e) => Some(e),
+                    };
+                    if let Ok(g) = gemini() {
+                        chain.push(Box::new(g));
                     }
-                },
+                    if let Ok(g) = gateway() {
+                        chain.push(Box::new(g));
+                    }
+                    let mut it = chain.into_iter().rev();
+                    let Some(mut client) = it.next() else {
+                        let e = first_err.unwrap_or_else(|| anyhow::anyhow!("no backend"));
+                        return Err(e.context(
+                            "set up the DigitalOcean server or a Gemini key (or an AI Gateway key)",
+                        ));
+                    };
+                    for primary in it {
+                        client = Box::new(FailoverClient::new(primary, Some(client)));
+                    }
+                    client
+                }
             })
         };
         let fast = make(&self.fast_model)?;
         let careful = if self.careful_model != self.fast_model {
-            make(&self.careful_model).ok()
+            make(&self.careful_model).ok().map(|c| {
+                // On the Gateway/OpenAI the careful model may be off-limits for
+                // this account (free tier: 403 for Gemma 4 31B). Back it with
+                // the fast model so a careful step never fails the run.
+                if matches!(self.backend, BackendChoice::Gateway | BackendChoice::OpenAi)
+                    && let Ok(f) = make(&self.fast_model)
+                {
+                    Box::new(FailoverClient::new(c, Some(f))) as Box<dyn ModelClient>
+                } else {
+                    c
+                }
+            })
         } else {
             None
         };
@@ -287,6 +363,74 @@ mod tests {
             err.to_string()
                 .contains("set up the DigitalOcean server or a Gemini key")
         );
+    }
+
+    #[test]
+    fn gateway_backend_maps_ids_and_backs_careful_with_fast() {
+        let s = Settings {
+            backend: BackendChoice::Gateway,
+            ..Default::default()
+        };
+        let keys = Keys {
+            gateway: Some("g".into()),
+            ..Default::default()
+        };
+        let (fast, careful) = s.clients(&keys).unwrap();
+        assert_eq!(fast.backend(), Backend::OpenAi);
+        assert_eq!(careful.unwrap().backend(), Backend::OpenAi);
+        let err = s.clients(&Keys::default()).err().unwrap();
+        assert!(err.to_string().contains("AI_GATEWAY_API_KEY"));
+        assert_eq!(gateway_model_id(MODELS[0].id), "google/gemma-4-26b-a4b-it");
+        assert_eq!(gateway_model_id("openai/gpt-5-mini"), "openai/gpt-5-mini");
+    }
+
+    #[test]
+    fn openai_backend_takes_openai_ids_only() {
+        let keys = Keys {
+            openai: Some("o".into()),
+            ..Default::default()
+        };
+        let s = Settings {
+            backend: BackendChoice::OpenAi,
+            fast_model: "openai/gpt-5-mini".into(),
+            careful_model: "gpt-5".into(),
+            ..Default::default()
+        };
+        let (fast, careful) = s.clients(&keys).unwrap();
+        assert_eq!(fast.backend(), Backend::OpenAi);
+        assert!(careful.is_some());
+        let bad = Settings {
+            backend: BackendChoice::OpenAi,
+            ..Default::default()
+        };
+        assert!(bad.clients(&keys).is_ok()); // plain gemma id: OpenAI will 404 at call time
+        let bad = Settings {
+            backend: BackendChoice::OpenAi,
+            fast_model: "google/gemma-4-26b-a4b-it".into(),
+            ..Default::default()
+        };
+        assert!(bad.clients(&keys).is_err());
+    }
+
+    #[test]
+    fn both_falls_back_to_gateway_when_it_is_the_only_key() {
+        let (fast, _) = Settings::default()
+            .clients(&Keys {
+                gateway: Some("g".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(fast.backend(), Backend::OpenAi);
+    }
+
+    #[test]
+    fn comparison_models_are_gateway_ids() {
+        let cmp: Vec<_> = MODELS
+            .iter()
+            .filter(|m| m.role == ModelRole::Comparison)
+            .collect();
+        assert!(cmp.len() >= 3);
+        assert!(cmp.iter().all(|m| m.id.starts_with("openai/")));
     }
 
     #[test]

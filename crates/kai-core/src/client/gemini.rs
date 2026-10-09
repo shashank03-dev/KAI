@@ -1,8 +1,9 @@
 //! Gemini API backend (`generateContent`) for Gemma 4.
 //!
 //! JSON mode via `responseMimeType`, schema in the prompt (not forced function
-//! calling — that hung in testing), `thinkingLevel: low` with a
-//! retry-and-remember fallback if the model rejects the thinking field.
+//! calling — that hung in testing), `thinkingLevel: minimal` (thinking off for
+//! Gemma per Google's docs) and `responseJsonSchema` for the reply schema, each
+//! with a retry-and-remember fallback if the model rejects the field.
 
 use super::{Backend, ClientError, ModelClient, ModelReply, ModelRequest};
 use async_trait::async_trait;
@@ -22,6 +23,8 @@ pub struct GeminiClient {
     timeout: Duration,
     /// Remembered across calls: does this model accept thinkingConfig?
     thinking: AtomicU8,
+    /// Remembered across calls: does this model accept responseJsonSchema?
+    json_schema: AtomicU8,
 }
 
 impl GeminiClient {
@@ -36,7 +39,14 @@ impl GeminiClient {
             model: "gemma-4-26b-a4b-it".to_string(),
             timeout: Duration::from_secs(45),
             thinking: AtomicU8::new(THINKING_UNKNOWN),
+            json_schema: AtomicU8::new(THINKING_UNKNOWN),
         }
+    }
+
+    /// API root, e.g. `https://generativelanguage.googleapis.com/v1beta`.
+    pub fn with_base(mut self, base: impl Into<String>) -> Self {
+        self.base = base.into().trim_end_matches('/').to_string();
+        self
     }
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
@@ -44,7 +54,12 @@ impl GeminiClient {
         self
     }
 
-    fn body(&self, req: &ModelRequest<'_>, include_thinking: bool) -> serde_json::Value {
+    fn body(
+        &self,
+        req: &ModelRequest<'_>,
+        include_thinking: bool,
+        include_schema: bool,
+    ) -> serde_json::Value {
         let mut parts = vec![serde_json::json!({ "text": req.user_text })];
         if !req.images.screenshot_jpeg.is_empty() {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&req.images.screenshot_jpeg);
@@ -77,9 +92,12 @@ impl GeminiClient {
         });
         if !req.schema.is_null() {
             gen_cfg["responseMimeType"] = serde_json::json!("application/json");
+            if include_schema {
+                gen_cfg["responseJsonSchema"] = req.schema.clone();
+            }
         }
         if include_thinking {
-            gen_cfg["thinkingConfig"] = serde_json::json!({ "thinkingLevel": "low" });
+            gen_cfg["thinkingConfig"] = serde_json::json!({ "thinkingLevel": "minimal" });
         }
 
         let mut all_parts = Vec::new();
@@ -101,6 +119,7 @@ impl GeminiClient {
         &self,
         req: &ModelRequest<'_>,
         include_thinking: bool,
+        include_schema: bool,
     ) -> Result<(reqwest::StatusCode, serde_json::Value, Duration), ClientError> {
         let url = format!("{}/models/{}:generateContent", self.base, self.model);
         let started = Instant::now();
@@ -108,7 +127,7 @@ impl GeminiClient {
             .http
             .post(url)
             .header("x-goog-api-key", &self.api_key)
-            .json(&self.body(req, include_thinking))
+            .json(&self.body(req, include_thinking, include_schema))
             .timeout(self.timeout)
             .send()
             .await
@@ -135,33 +154,54 @@ impl ModelClient for GeminiClient {
     }
 
     async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
-        let include = self.thinking.load(Ordering::Relaxed) != THINKING_UNSUPPORTED;
-        let (status, v, elapsed) = self.call(req, include).await?;
-
-        // If the thinking field was the problem, retry once without it and
-        // remember for the rest of the process.
-        let (status, v, elapsed) = if !status.is_success() && include && mentions_thinking(&v) {
-            self.thinking.store(THINKING_UNSUPPORTED, Ordering::Relaxed);
-            log::warn!("Gemini rejected thinkingConfig; retrying without it (remembered)");
-            self.call(req, false).await?
-        } else {
-            if include && status.is_success() {
-                self.thinking.store(THINKING_SUPPORTED, Ordering::Relaxed);
+        // Each optional field is dropped (and remembered) if the model rejects
+        // it; at most one retry per field.
+        let mut attempts = 0;
+        let (status, v, elapsed) = loop {
+            attempts += 1;
+            let thinking = self.thinking.load(Ordering::Relaxed) != THINKING_UNSUPPORTED;
+            let schema = !req.schema.is_null()
+                && self.json_schema.load(Ordering::Relaxed) != THINKING_UNSUPPORTED;
+            let (status, v, elapsed) = self.call(req, thinking, schema).await?;
+            if status.is_success() {
+                if thinking {
+                    self.thinking.store(THINKING_SUPPORTED, Ordering::Relaxed);
+                }
+                if schema {
+                    self.json_schema
+                        .store(THINKING_SUPPORTED, Ordering::Relaxed);
+                }
+                break (status, v, elapsed);
             }
-            (status, v, elapsed)
+            if attempts < 3 && thinking && mentions(&v, "thinking") {
+                self.thinking.store(THINKING_UNSUPPORTED, Ordering::Relaxed);
+                log::warn!("Gemini rejected thinkingConfig; retrying without it (remembered)");
+                continue;
+            }
+            if attempts < 3 && schema && mentions(&v, "schema") {
+                self.json_schema
+                    .store(THINKING_UNSUPPORTED, Ordering::Relaxed);
+                log::warn!("Gemini rejected responseJsonSchema; plain JSON mode (remembered)");
+                continue;
+            }
+            break (status, v, elapsed);
         };
 
         if !status.is_success() {
-            return Err(ClientError::Status(
-                status.as_u16(),
-                truncate(&v.to_string()),
-            ));
+            return Err(ClientError::from_status(status.as_u16(), &v.to_string()));
         }
 
-        let raw = v["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
+        // Skip thought parts (if any); join the answer text.
+        let raw: String = v["candidates"][0]["content"]["parts"]
+            .as_array()
             .ok_or(ClientError::EmptyBody)?
-            .to_string();
+            .iter()
+            .filter(|p| p["thought"] != true)
+            .filter_map(|p| p["text"].as_str())
+            .collect();
+        if raw.is_empty() {
+            return Err(ClientError::EmptyBody);
+        }
 
         Ok(ModelReply {
             raw,
@@ -174,16 +214,13 @@ impl ModelClient for GeminiClient {
             first_token: None,
             total: elapsed,
             backend: Backend::Gemini,
+            cost_usd: None,
         })
     }
 }
 
-fn mentions_thinking(v: &serde_json::Value) -> bool {
-    v.to_string().to_ascii_lowercase().contains("thinking")
-}
-
-fn truncate(s: &str) -> String {
-    s.chars().take(300).collect()
+fn mentions(v: &serde_json::Value, what: &str) -> bool {
+    v.to_string().to_ascii_lowercase().contains(what)
 }
 
 #[cfg(test)]
@@ -213,15 +250,16 @@ mod tests {
             max_tokens: 64,
             temperature: 0.0,
         };
-        let body = c.body(&req, true);
+        let body = c.body(&req, true, true);
         assert_eq!(
             body["generationConfig"]["responseMimeType"],
             "application/json"
         );
         assert_eq!(
             body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
-            "low"
+            "minimal"
         );
+        assert_eq!(body["generationConfig"]["responseJsonSchema"], schema);
         assert_eq!(body["systemInstruction"]["parts"][0]["text"], "SYS");
         // inlineData image present.
         let parts = body["contents"][0]["parts"].as_array().unwrap();
@@ -240,7 +278,8 @@ mod tests {
             max_tokens: 1,
             temperature: 0.0,
         };
-        let body = c.body(&req, false);
+        let body = c.body(&req, false, false);
         assert!(body["generationConfig"].get("thinkingConfig").is_none());
+        assert!(body["generationConfig"].get("responseJsonSchema").is_none());
     }
 }

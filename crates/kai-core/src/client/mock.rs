@@ -77,6 +77,7 @@ impl ModelClient for MockClient {
             first_token: Some(self.latency / 2),
             total: self.latency,
             backend: Backend::Mock,
+            cost_usd: None,
         })
     }
 }
