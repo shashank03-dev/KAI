@@ -129,3 +129,41 @@ billing.
 - 2026-10-09: Region default `nyc2` not `blr1` (no H100 in `blr1`).
 - 2026-10-09: Gemini thinking set to `low` with retry-and-remember fallback,
   refining the team's "minimal" note to the levels the current API documents.
+
+## Phase 2b — kai-os (measured on this machine)
+
+- **Measured observe cost** (Xvfb 1920x1080, `gtk3-widget-factory`, real AT-SPI
+  tree with 81 marks, release build, 4 vCPU container, no GPU):
+  capture **19–28 ms**, accessibility tree **136–198 ms**, downscale + marks +
+  JPEG **41–52 ms**, JPEG **~128 KB**. Capture and the tree run in parallel, so
+  observe ≈ max(capture, tree) + encode ≈ **~200 ms**. The tree read has a hard
+  600 ms budget; past it Kai uses the grid. Evidence: `docs/img/set-of-marks-gtk.jpg`
+  (exactly the image the model receives).
+- **Mark tags sit above each box**, not inside it. The first capture put tags
+  inside and hid the first letters of labels ("~~Combo~~boxentry"); moved after
+  reviewing the image.
+- **Grid cells are numbered** (1 = top-left, row by row) instead of the prompt's
+  "D7" letters, so the model always answers with one integer `target` in both
+  modes, and the 3x5 bitmap digit font needs no font file.
+- **Excluding Kai's own windows from capture:** Windows uses
+  `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` (set by the app on its
+  HWNDs). **Linux/X11 has no equivalent API**, so the app reports its window
+  rectangles and `kai-os` paints over them before the frame is hashed or sent.
+- **Wayland:** screen capture works through the desktop portal (one prompt per
+  session); synthetic input reaches only XWayland apps. Onboarding reports this
+  as "Limited" and tells the user to pick an Xorg session for full control.
+  Not hidden, not faked.
+- **Kill switch hotkey:** `Ctrl+Alt+Esc` by default on both OSes; if it is
+  already grabbed (KDE binds it to xkill) Kai falls back to `Ctrl+Alt+End` and
+  says so. Pointer in the top-left 3 px also stops. Tested: a running shell
+  command is killed with its whole process group within ~150 ms.
+- **Shell:** `sh -c` in its own process group (Linux), PowerShell with
+  `taskkill /T` (Windows); 180 s timeout, 12 KB output cap per stream.
+- **URLs:** only `http`, `https`, `mailto`; bare hosts get `https://`.
+  `javascript:`/`file:` are refused.
+- **Windows build** is type-checked from Linux with `x86_64-pc-windows-gnu`
+  (clippy clean). The msvc target needs MSVC's C toolchain for `ring`, so CI on
+  a Windows runner is the real proof; see `.github/workflows/ci.yml`.
+- **Zoomed crop:** the `crop_jpeg` slot and `frame::crop` exist, but the loop
+  does not yet request a crop automatically after a missed grid click. Listed
+  as remaining work.

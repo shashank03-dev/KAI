@@ -164,6 +164,7 @@ impl Perceptor for Headless {
             },
             grounding: Grounding::Marks(Vec::new()),
             screen_hash: self.tick.fetch_add(1, Ordering::SeqCst),
+            timing: Default::default(),
         })
     }
 }

@@ -19,6 +19,15 @@ pub struct Observation {
     pub grounding: Grounding,
     /// Perceptual hash of the screen, to detect "nothing changed".
     pub screen_hash: u64,
+    /// Where the observe time went (capture and tree run in parallel).
+    pub timing: ObserveTiming,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ObserveTiming {
+    pub capture_ms: u64,
+    pub tree_ms: u64,
+    pub encode_ms: u64,
 }
 
 /// Looks at the screen and grounds it (Set-of-Marks or grid).
@@ -76,12 +85,29 @@ impl EventSink for NullSink {}
 /// Events the UI renders as they happen.
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    Observed { step: u32, elements: String },
-    Thinking { step: u32 },
-    Decided { step: u32, decision: Box<Decision> },
-    AwaitingApproval { step: u32 },
-    Acted { step: u32, timings: Timings },
-    Finished { outcome: Outcome },
+    Observed {
+        step: u32,
+        elements: String,
+        /// The marked JPEG the model sees (empty for terminal sub-agents).
+        screenshot: std::sync::Arc<[u8]>,
+    },
+    Thinking {
+        step: u32,
+    },
+    Decided {
+        step: u32,
+        decision: Box<Decision>,
+    },
+    AwaitingApproval {
+        step: u32,
+    },
+    Acted {
+        step: u32,
+        timings: Timings,
+    },
+    Finished {
+        outcome: Outcome,
+    },
 }
 
 /// Run limits and policy.
@@ -162,6 +188,7 @@ impl Engine<'_> {
             self.sink.emit(&EngineEvent::Observed {
                 step,
                 elements: elements.clone(),
+                screenshot: obs.images.screenshot_jpeg.as_slice().into(),
             });
 
             // No-progress detection: same screen two steps running.
@@ -202,10 +229,20 @@ impl Engine<'_> {
             };
             failure_streak = 0;
 
-            let mut timings = Timings {
-                capture_ms: observe_ms,
-                ..Default::default()
-            };
+            let mut timings =
+                if obs.timing.capture_ms + obs.timing.tree_ms + obs.timing.encode_ms > 0 {
+                    Timings {
+                        capture_ms: obs.timing.capture_ms,
+                        tree_ms: obs.timing.tree_ms,
+                        encode_ms: obs.timing.encode_ms,
+                        ..Default::default()
+                    }
+                } else {
+                    Timings {
+                        capture_ms: observe_ms,
+                        ..Default::default()
+                    }
+                };
             timings.set_model(model_time, first_token);
 
             self.sink.emit(&EngineEvent::Decided {

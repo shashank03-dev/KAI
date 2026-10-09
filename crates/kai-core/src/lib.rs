@@ -22,7 +22,7 @@ pub use client::{
 pub use element::{Element, Grounding, Rect, Role};
 pub use engine::{
     Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Interrupt,
-    Observation, Perceptor,
+    Observation, ObserveTiming, Perceptor,
 };
 pub use risk::ApprovalLevel;
 pub use schema::{Action, Decision, Direction, Risk};

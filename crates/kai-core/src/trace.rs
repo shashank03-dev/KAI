@@ -19,9 +19,8 @@ pub struct Timings {
 
 impl Timings {
     pub fn total_ms(&self) -> u64 {
-        // capture, tree and encode run in parallel off the UI thread, so the
-        // observe phase costs the max of the three, not their sum.
-        let observe = self.capture_ms.max(self.tree_ms).max(self.encode_ms);
+        // Capture and the tree read run in parallel; encoding follows them.
+        let observe = self.capture_ms.max(self.tree_ms) + self.encode_ms;
         observe + self.model_ms + self.act_ms
     }
 
@@ -123,7 +122,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn observe_phase_is_parallel_max_not_sum() {
+    fn capture_and_tree_overlap_then_encode() {
         let t = Timings {
             capture_ms: 30,
             tree_ms: 50,
@@ -132,8 +131,8 @@ mod tests {
             first_token_ms: Some(120),
             act_ms: 10,
         };
-        // max(30,50,20)=50 + 400 + 10 = 460
-        assert_eq!(t.total_ms(), 460);
+        // max(30,50) + 20 + 400 + 10 = 480
+        assert_eq!(t.total_ms(), 480);
     }
 
     #[test]

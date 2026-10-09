@@ -4,3 +4,39 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Kai's hands and eyes: capture, accessibility trees, input, shell and the kill switch, per OS."
+
+[dependencies]
+kai-core = { path = "../kai-core" }
+anyhow.workspace = true
+log.workspace = true
+async-trait = "0.1"
+tokio.workspace = true
+image.workspace = true
+fast_image_resize = { version = "6", features = ["image"] }
+xcap = "0.9"
+enigo = "0.6"
+arboard = { version = "3", default-features = false }
+global-hotkey = "0.8"
+open = "5"
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+uiautomation = "0.25"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+atspi = { version = "0.30", features = ["proxies", "connection", "tokio"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+env_logger.workspace = true
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

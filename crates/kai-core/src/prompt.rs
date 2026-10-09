@@ -28,8 +28,8 @@ screen and choosing ONE action at a time.
 You are given a screenshot with numbered boxes drawn on interactive elements, \
 and a text list of those elements like `#14 button \"Save\" (enabled)`. To act \
 on an element, use its number as `target`. Never guess raw pixel coordinates. \
-If the screen shows a grid instead of numbered boxes, refer to a cell like D7 \
-via `target` as the cell index.
+If the screen shows a numbered grid instead of boxes, use the cell number as \
+`target`.
 
 Rules:
 - Reply with ONE JSON object for the next action, and nothing else.

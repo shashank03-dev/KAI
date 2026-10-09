@@ -115,10 +115,10 @@ impl Grounding {
                     .join("\n")
             }
             Grounding::Grid { cols, rows, .. } => format!(
-                "No accessibility tree. A {cols}x{rows} grid overlays the screen; \
-                 refer to a cell like A1 (top-left) .. {}{}.",
-                col_letter(cols - 1),
-                rows
+                "No accessibility tree here. A {cols}x{rows} grid of numbered cells covers \
+                 the screen, 1 at top-left, {} at bottom-right, row by row. Use the cell \
+                 number as `target`.",
+                cols * rows
             ),
         }
     }
@@ -128,6 +128,14 @@ impl Grounding {
         match self {
             Grounding::Marks(els) => els.iter().find(|e| e.mark == mark),
             Grounding::Grid { .. } => None,
+        }
+    }
+
+    /// The screen rectangle a target number points at, for marks or grid.
+    pub fn target_rect(&self, mark: u32) -> Option<Rect> {
+        match self {
+            Grounding::Marks(_) => self.element(mark).map(|e| e.bounds),
+            Grounding::Grid { .. } => mark.checked_sub(1).and_then(|i| self.grid_cell(i)),
         }
     }
 
@@ -149,18 +157,6 @@ impl Grounding {
             _ => None,
         }
     }
-}
-
-fn col_letter(mut n: u32) -> String {
-    let mut s = String::new();
-    loop {
-        s.insert(0, (b'A' + (n % 26) as u8) as char);
-        if n < 26 {
-            break;
-        }
-        n = n / 26 - 1;
-    }
-    s
 }
 
 #[cfg(test)]
@@ -206,6 +202,18 @@ mod tests {
         assert_eq!(g.grid_cell(0), Some(Rect::new(0.0, 0.0, 50.0, 50.0)));
         assert_eq!(g.grid_cell(3), Some(Rect::new(50.0, 50.0, 50.0, 50.0)));
         assert_eq!(g.grid_cell(4), None);
+    }
+
+    #[test]
+    fn grid_targets_are_one_based() {
+        let g = Grounding::Grid {
+            cols: 2,
+            rows: 2,
+            screen: Rect::new(0.0, 0.0, 100.0, 100.0),
+        };
+        assert_eq!(g.target_rect(1), Some(Rect::new(0.0, 0.0, 50.0, 50.0)));
+        assert_eq!(g.target_rect(0), None);
+        assert!(g.as_text().contains("1 at top-left, 4 at bottom-right"));
     }
 
     #[test]
