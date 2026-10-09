@@ -123,7 +123,11 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
         40,
     );
     r.model = "Gemma 4 26B A4B · AI Gateway".into();
-    let screen = Some(Rect::new(0.0, 0.0, 1280.0, 720.0));
+    // The sample frame's own size, so the viewer shows it without bars.
+    let (w, h) = sample_frame()
+        .and_then(|f| image::image_dimensions(f).ok())
+        .unwrap_or((1280, 720));
+    let screen = Some(Rect::new(0.0, 0.0, w as f32, h as f32));
     if let Some(f) = sample_frame() {
         for step in 0..3 {
             r.apply(Ui::Frame {
@@ -262,7 +266,7 @@ fn add_outputs(r: &mut RunState) {
     }
 }
 
-fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
+fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiApp>) {
     app.palette = false;
     app.run_tab = "steps".into();
     app.shortcuts = false;
@@ -270,6 +274,12 @@ fn stage(app: &mut KaiApp, i: usize, _: &mut Window, cx: &mut Context<KaiApp>) {
     app.pages.drafting = false;
     app.conn = Conn::Online("DigitalOcean (Gemma 4) · 640 ms".into());
     if i < 5 {
+        // The dark pass needs onboarding again after the light pass closed it.
+        if app.onboarding.is_none() {
+            let (settings, me) = (app.settings.clone(), cx.entity().downgrade());
+            app.onboarding =
+                Some(cx.new(|cx| crate::onboarding::Onboarding::new(settings, me, window, cx)));
+        }
         if let Some(o) = &app.onboarding {
             o.update(cx, |o, cx| o.set_step(i, cx));
         }

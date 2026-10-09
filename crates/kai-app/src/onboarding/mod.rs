@@ -358,24 +358,31 @@ impl Render for Onboarding {
             _ => self.try_it(cx).into_any_element(),
         };
         let (walk, done, skip) = (cx.entity(), cx.entity(), cx.entity());
-        div().size_full().flex().justify_center().p_8().child(
-            div().w_full().max_w(gpui::rems(36.)).child(
-                OnboardingWizard::new(
-                    "onboarding",
-                    steps,
-                    self.step,
-                    move |to, _, cx| {
-                        walk.update(cx, |o, cx| {
-                            o.step = to;
-                            cx.notify();
-                        })
-                    },
-                    move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)),
-                )
-                .content(content)
-                .ready(self.ready())
-                .on_skip(move |window, cx| skip.update(cx, |o, cx| o.finish(false, window, cx))),
-            ),
-        )
+        // Scrolls on short windows (the Connect step is the tallest).
+        ely_gpui_component::layout::ScrollArea::new("onboarding-scroll")
+            .vertical()
+            .child(
+                div().w_full().flex().justify_center().p_8().child(
+                    div().w_full().max_w(gpui::rems(36.)).child(
+                        OnboardingWizard::new(
+                            "onboarding",
+                            steps,
+                            self.step,
+                            move |to, _, cx| {
+                                walk.update(cx, |o, cx| {
+                                    o.step = to;
+                                    cx.notify();
+                                })
+                            },
+                            move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)),
+                        )
+                        .content(content)
+                        .ready(self.ready())
+                        .on_skip(move |window, cx| {
+                            skip.update(cx, |o, cx| o.finish(false, window, cx))
+                        }),
+                    ),
+                ),
+            )
     }
 }

@@ -205,9 +205,11 @@ pub fn team_tree(r: &RunState, cx: &App) -> AnyElement {
         .flex_col()
         .gap_2()
         .child(
-            div()
-                .h(px(32. * rows as f32 + 8.))
-                .child(Tree::new("team-tree", [root]).open(open)),
+            div().w_full().h(px(32. * rows as f32 + 8.)).child(
+                Tree::new("team-tree", [root])
+                    .open(open)
+                    .size_full(),
+            ),
         )
         .child(
             div()

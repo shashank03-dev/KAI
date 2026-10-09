@@ -350,9 +350,10 @@ impl Render for KaiApp {
                 .as_ref()
                 .map(|p| approval::dialog(p, me.clone(), r).into_any_element())
         });
-        let shortcuts = self
-            .shortcuts
-            .then(|| pages::shortcuts_dialog(me.clone(), window, cx).into_any_element());
+        let shortcuts = self.shortcuts.then(|| {
+            pages::shortcuts_dialog(me.clone(), self.pages.shortcut_search.clone())
+                .into_any_element()
+        });
         let palette = self.palette.then(|| self.palette(cx).into_any_element());
         let status = self.status_bar(cx).into_any_element();
 

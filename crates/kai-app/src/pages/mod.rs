@@ -152,12 +152,8 @@ pub fn shortcut_list() -> Vec<Shortcut> {
     ]
 }
 
-pub fn shortcuts_dialog(
-    app: Entity<KaiApp>,
-    _: &mut Window,
-    cx: &mut Context<KaiApp>,
-) -> impl IntoElement {
-    let search = cx.entity().read(cx).pages.shortcut_search.clone();
+/// `search` is passed in: reading the app entity while it renders panics.
+pub fn shortcuts_dialog(app: Entity<KaiApp>, search: Entity<TextInput>) -> impl IntoElement {
     Dialog::new("shortcuts", "Keyboard shortcuts", move |_, cx| {
         app.update(cx, |a, cx| {
             a.shortcuts = false;

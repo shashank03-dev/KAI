@@ -109,7 +109,7 @@ fn key_row(
         .gap_2()
         .child(PasswordInput::new(field))
         .child(
-            div().child(
+            div().flex().child(
                 Button::new(
                     gpui::SharedString::from(format!("test-{key}")),
                     format!("Test {}", backend_label(backend)),

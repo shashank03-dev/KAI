@@ -21,7 +21,11 @@ fn status(r: &RunState, place: usize, cx: &Context<KaiApp>) -> (IconName, Hsla, 
         Phase::Queued => (
             IconName::Hourglass,
             c.fg_muted,
-            format!("Queued · {place} ahead"),
+            if place == 0 {
+                "Queued · next".to_string()
+            } else {
+                format!("Queued · {place} ahead")
+            },
         ),
         Phase::Running if r.held => (IconName::Pause, c.warning, "Paused".into()),
         Phase::Running => (
@@ -183,7 +187,7 @@ pub fn queued(app: &KaiApp, cx: &Context<KaiApp>) -> AnyElement {
                 .child(format!("Will use {}", r.model)),
         )
         .child(
-            div().child(
+            div().flex().child(
                 Button::new("cancel-queued", "Cancel")
                     .variant(ButtonVariant::Secondary)
                     .icon(IconName::X)

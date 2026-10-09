@@ -51,7 +51,7 @@ do, and how to stop it.
 
 ```
 Splash ──► Onboarding (first run) ──► Home (AppShell)
-                                        ├─ Run        (idle ▸ running ▸ done)
+                                        ├─ Run        (sessions list | new task ▸ queued ▸ running ▸ done)
                                         ├─ Skills     (grid ▸ detail sheet)
                                         ├─ History    (list ▸ trace)
                                         ├─ Benchmarks
@@ -133,6 +133,54 @@ disabled with the reason), not configured (Banner linking to Settings).
 States: thinking, acting, waiting for approval, waiting for an answer,
 fallback active (status bar amber "Gemini fallback"), stopping.
 
+### 4b. Sessions — Kai as a control centre for agents
+Every task becomes a **run** in a sessions list (`lists::ListItem` rows in a
+248 px column beside the run view): queued, running (step n), paused, waiting
+for you, done or failed, each with its own transcript, frames and controls.
+**New task** returns to the composer; **Clear finished** drops done runs (their
+traces stay in History).
+
+- **One run has the screen at a time.** A run cannot know in advance whether a
+  step will click, so every run queues behind the active one
+  (`Queued · n ahead`, Cancel). Inside a Team run, terminal sub-agents still
+  run in parallel and GUI sub-agents take turns (the orchestrator's design).
+- **Controls:** Pause / Resume and Stop in the run header and in the mini
+  window; Run again (retry) on a finished run. Pause holds the engine *between
+  actions*, never inside one: the run's `RunControl` is the engine's
+  `Interrupt`, and while paused `stopped()` waits (`block_in_place` on the
+  agent runtime). The header shows "Pausing after this step" until the engine
+  actually holds, then "Paused".
+- **Stop semantics:** a run's own Stop stops that run only; the kill switch
+  (global hotkey, top-left corner, Ctrl+., the mini window's Stop) stops the
+  active run *and holds the queue*, so the next task doesn't grab the mouse
+  right after the user said stop. "Resume queue" releases it.
+- **Steering:** a `chat::PromptInput` under the transcript sends a message to
+  the running agent (`RunControl` is the engine's `Steering`); it shows as a
+  user `chat::MessageBubble` with "Waiting for Kai's next step" until the
+  engine's `Steered` event marks it "Kai read this at step n". Team runs can't
+  be steered yet (sub-agents use `NoSteering`); the composer says so.
+- **Run view tabs** (`navigation::Tabs`): **Steps** (plan, step cards with
+  the action path and backend once known, steering bubbles in place),
+  **Terminal** (each shell command, its output via `terminal::AnsiText`, the
+  exit code as a `Badge`, act time), **Sub-agents** for Team runs
+  (`lists::Tree`: one node per sub-agent with kind, wave and a live status).
+  Sub-agent events carry no id, so live status follows the plan's waves
+  (`Finished` events counted per wave); exact outcomes and step counts come
+  from the team's report at the end.
+- **Latency meter:** a `data_display::Sparkline` of model time per step with
+  the last and median values, in the Usage panel (measured, not estimated).
+- **File changes:** not shown. Shell output is shown verbatim; guessing
+  touched files from a command line would be unreliable.
+
+### 4c. Model and backend switcher
+`menus::DropdownMenu` in the status bar and in the composer: the model list
+is `kai_core::settings::MODELS` (new entries appear by themselves) and the
+backends Both · DigitalOcean · Gemini API · AI Gateway · OpenAI. The command
+palette has "Switch model" and "Switch backend" groups too. Settings › Model &
+server has a key field and a **Test** button per backend (vLLM, Gemini, Vercel
+AI Gateway, OpenAI), keys in the OS keychain; onboarding offers Gateway and
+OpenAI as `RadioCard`s with their key fields.
+
 ### 5. Done
 The window returns. `feedback::ResultView` success or failure in plain words,
 `data_display::Statistic`s for steps, total time and seconds per step,
@@ -160,10 +208,12 @@ phase) with its frames in `agent::BrowserPreview`; export with
 `chat::ConversationExport` to a zip (trace JSON + frames).
 
 ### 8. Benchmarks
-A row of `data_display::Statistic`s (success rate, p50, p95, total),
-`charts::BarChart` of seconds per step per backend, `tables::DataTable`
-(Ely's EvalResultTable) of the latest runs, and **Run benchmark** with
-`motion::ProgressBar`. This is the projector page.
+An overview `tables::DataTable` with one row per backend and model (newest
+results file each), `charts::BarChart` of step p50 for the backends that
+measured it (p95 only when all did), then `navigation::Tabs` per results file
+with its `Statistic`s and task table, and **Run benchmark** with
+`motion::ProgressBar`. The reader is tolerant of missing or renamed fields; a
+missing number reads "not measured", never 0. This is the projector page.
 
 ### 9. Settings — `settings::SettingsLayout`
 Model & server (endpoint, keys in the OS keychain via `PasswordInput`, Test

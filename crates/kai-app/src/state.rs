@@ -131,7 +131,8 @@ impl RunState {
 
     /// Apply one message from the agent.
     pub fn apply(&mut self, msg: Ui) {
-        if let Some(t) = self.started {
+        // The clock stops when the run is done.
+        if let Some(t) = self.started.filter(|_| self.phase != Phase::Done) {
             self.elapsed = t.elapsed();
         }
         match msg {
