@@ -1,0 +1,219 @@
+//! `--backend` / `--model` for `kai run`, `kai bench` and `kai smoke`, and the
+//! key report for `kai doctor`. Everything goes through `Settings::clients()`
+//! so a backend wired in kai-core works here without changes.
+
+use crate::ab::{Ab, apply_ab};
+use clap::{Args, ValueEnum};
+use kai_core::Config;
+use kai_core::settings::{BackendChoice, Keys, Settings};
+
+/// Default model on the Vercel AI Gateway (its ids carry the vendor prefix).
+pub const GATEWAY_DEFAULT_MODEL: &str = "google/gemma-4-26b-a4b-it";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum BackendArg {
+    /// Whatever the settings file says (the app's choice).
+    Auto,
+    /// Your DigitalOcean vLLM server.
+    Vllm,
+    /// Google's Gemini API (Gemma 4).
+    Gemini,
+    /// Vercel AI Gateway, OpenAI-compatible: Gemma 4 and comparison models.
+    Gateway,
+    /// OpenAI directly (comparison runs).
+    #[value(name = "openai")]
+    OpenAi,
+    /// OpenAI's own computer-use loop instead of Kai's harness.
+    OpenaiNative,
+    /// Recorded replies on a scripted screen; touches nothing (bench only).
+    Mock,
+    /// Recorded replies, executed for real on this desktop (bench only).
+    Replay,
+}
+
+impl BackendArg {
+    pub fn name(self) -> &'static str {
+        match self {
+            BackendArg::Auto => "auto",
+            BackendArg::Vllm => "vllm",
+            BackendArg::Gemini => "gemini",
+            BackendArg::Gateway => "gateway",
+            BackendArg::OpenAi => "openai",
+            BackendArg::OpenaiNative => "openai-native",
+            BackendArg::Mock => "mock",
+            BackendArg::Replay => "replay",
+        }
+    }
+
+    pub fn recorded(self) -> bool {
+        matches!(self, BackendArg::Mock | BackendArg::Replay)
+    }
+}
+
+/// Backend flags shared by `run`, `bench` and `smoke`.
+#[derive(Args, Clone, Debug, Default)]
+pub struct BackendOpts {
+    /// Model backend (default: auto for run/smoke, mock for bench).
+    #[arg(long, value_enum)]
+    pub backend: Option<BackendArg>,
+    /// Model id for the backend, e.g. google/gemma-4-26b-a4b-it or gpt-5-mini.
+    /// Used for both the fast and the careful slot.
+    #[arg(long)]
+    pub model: Option<String>,
+    #[command(flatten)]
+    pub ab: Ab,
+}
+
+/// Settings with the chosen backend and model applied.
+pub fn settings_for(b: BackendArg, model: Option<&str>) -> anyhow::Result<Settings> {
+    let mut s = Settings::load();
+    s.backend = match b {
+        BackendArg::Auto => s.backend,
+        BackendArg::Vllm => BackendChoice::Vllm,
+        BackendArg::Gemini => BackendChoice::Gemini,
+        BackendArg::Gateway => BackendChoice::Gateway,
+        BackendArg::OpenAi | BackendArg::OpenaiNative => BackendChoice::OpenAi,
+        BackendArg::Mock | BackendArg::Replay => BackendChoice::Mock,
+    };
+    let model = match (b, model) {
+        (_, Some(m)) => Some(m.trim().to_string()),
+        (BackendArg::Gateway, None) => Some(GATEWAY_DEFAULT_MODEL.to_string()),
+        (BackendArg::OpenAi, None) => {
+            anyhow::bail!("--backend openai needs --model (for example --model gpt-5-mini)")
+        }
+        _ => None,
+    };
+    if let Some(m) = model {
+        anyhow::ensure!(!m.is_empty(), "--model is empty");
+        s.fast_model = m.clone();
+        s.careful_model = m;
+    }
+    Ok(s)
+}
+
+/// The model id a run uses, for results files.
+pub fn model_label(b: BackendArg, s: &Settings) -> String {
+    if b.recorded() {
+        "recorded".into()
+    } else {
+        s.fast_model.clone()
+    }
+}
+
+/// A clear error before any network call when the backend's key is missing.
+pub fn require_key(b: BackendArg, keys: &Keys) -> anyhow::Result<()> {
+    let (missing, which, env) = match b {
+        BackendArg::Gateway => (keys.gateway.is_none(), "gateway", "AI_GATEWAY_API_KEY"),
+        BackendArg::OpenAi | BackendArg::OpenaiNative => {
+            (keys.openai.is_none(), "openai", "OPENAI_API_KEY")
+        }
+        BackendArg::Gemini => (keys.gemini.is_none(), "gemini", "GEMINI_API_KEY"),
+        BackendArg::Vllm => (keys.vllm.is_none(), "vllm", "VLLM_API_KEY"),
+        _ => (false, "", ""),
+    };
+    anyhow::ensure!(
+        !missing,
+        "no {which} API key: run `kai key {which}` or set {env}"
+    );
+    Ok(())
+}
+
+/// Engine config from settings plus the A/B switches. The bool says whether
+/// the switches reached the engine (see [`apply_ab`]).
+pub fn config(s: &Settings, ab: &Ab) -> anyhow::Result<(Config, bool)> {
+    let (max_steps, max_time) = s.limits();
+    let mut c = Config {
+        max_steps,
+        max_time,
+        approval: s.approval,
+        ..Config::default()
+    };
+    let applied = apply_ab(&mut c, ab)?;
+    Ok((c, applied))
+}
+
+/// OpenAI's native computer-use loop.
+///
+/// TODO(merge): `kai_core::cua` is being written in parallel. Once it lands,
+/// run it here (one task -> one `Trace`) and return the trace; `kai run` and
+/// `kai bench` already route `--backend openai-native` to this function.
+pub fn native_unavailable(keys: &Keys) -> anyhow::Error {
+    if keys.openai.is_none() {
+        return anyhow::anyhow!(
+            "--backend openai-native needs an OpenAI key: run `kai key openai` or set OPENAI_API_KEY"
+        );
+    }
+    anyhow::anyhow!(
+        "--backend openai-native: the native OpenAI computer-use runner (kai_core::cua) is not wired into this build yet"
+    )
+}
+
+/// One line per key slot for `kai doctor`. Never prints a key.
+pub fn key_report() -> Vec<String> {
+    use kai_os::secrets as k;
+    [
+        (k::VLLM, "VLLM_API_KEY", "vllm", "vllm (DigitalOcean)"),
+        (k::GEMINI, "GEMINI_API_KEY", "gemini", "gemini"),
+        (
+            k::GATEWAY,
+            "AI_GATEWAY_API_KEY",
+            "gateway",
+            "gateway (Vercel AI Gateway)",
+        ),
+        (
+            k::OPENAI,
+            "OPENAI_API_KEY",
+            "openai",
+            "openai, openai-native",
+        ),
+    ]
+    .into_iter()
+    .map(|(slot, env, which, label)| {
+        let from_env = std::env::var(env).is_ok_and(|v| !v.is_empty());
+        let state = if from_env {
+            format!("key set (from {env})")
+        } else if k::get(slot).is_some() {
+            "key set (keychain)".to_string()
+        } else {
+            format!("no key (`kai key {which}` or {env})")
+        };
+        format!("{label:<30} {state}")
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_defaults_to_gemma_and_model_fills_both_slots() {
+        let s = settings_for(BackendArg::Gateway, None).unwrap();
+        assert_eq!(s.backend, BackendChoice::Gateway);
+        assert_eq!(s.fast_model, GATEWAY_DEFAULT_MODEL);
+        let s = settings_for(BackendArg::Gateway, Some("openai/gpt-5-mini")).unwrap();
+        assert_eq!(s.fast_model, "openai/gpt-5-mini");
+        assert_eq!(s.careful_model, "openai/gpt-5-mini");
+        assert!(settings_for(BackendArg::OpenAi, None).is_err());
+        let s = settings_for(BackendArg::OpenAi, Some("gpt-5-mini")).unwrap();
+        assert_eq!(s.backend, BackendChoice::OpenAi);
+        assert_eq!(model_label(BackendArg::Replay, &s), "recorded");
+    }
+
+    #[test]
+    fn missing_keys_are_named() {
+        let keys = Keys::default();
+        let e = require_key(BackendArg::Gateway, &keys)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("kai key gateway") && e.contains("AI_GATEWAY_API_KEY"));
+        assert!(require_key(BackendArg::Mock, &keys).is_ok());
+        let e = native_unavailable(&keys).to_string();
+        assert!(e.contains("OPENAI_API_KEY"));
+        let keys = Keys {
+            openai: Some("x".into()),
+            ..Default::default()
+        };
+        assert!(native_unavailable(&keys).to_string().contains("not wired"));
+    }
+}

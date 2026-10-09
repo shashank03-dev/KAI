@@ -1,11 +1,37 @@
-# Kai benchmark: 10 tasks a judge would understand.
-# setup/check run in the shell (sh on Linux, PowerShell on Windows); a check
-# that exits 0 is a pass. Tasks without a check are judged by the run's own
-# outcome, and the results file says which was used.
-# `mock` holds recorded replies for `kai bench --backend mock`.
+# Kai benchmark: everyday tasks people actually do on a computer.
+#
+# Fields
+#   id, title, prompt   what the model is asked to do.
+#   kind                terminal | gui | mixed (how a person would normally do it).
+#   needs               things that must exist on this machine, or the task is
+#                       skipped (not failed): browser, internet, server, display,
+#                       mousepad, pcmanfm, libreoffice, imagemagick.
+#                       `--force` runs it anyway.
+#   setup               shell (sh on Linux, PowerShell on Windows), idempotent.
+#                       Creates fixtures / opens the right app. Runs before the task.
+#   check               exit 0 = pass. Without one, the run's own outcome decides,
+#                       and the results file says which was used.
+#   teardown            optional; closes what the task opened.
+#   mock                recorded replies. `kai bench --backend mock` plays them on a
+#                       scripted screen (nothing touched); `--backend replay` runs
+#                       them for real on this desktop.
+#   replay              real (default): the replies do the task the way the prompt
+#                       means, GUI included. terminal: the replies reach the same
+#                       end state from the terminal; replay then proves setup and
+#                       check, not GUI skill. skip: cannot be replayed (needs the
+#                       internet or a screen whose marks are unknown in advance).
+#
+# setup/check/teardown see KAI_BENCH_DIR = the folder holding this file, so
+# fixtures live in $KAI_BENCH_DIR/fixtures. The local web server
+# (fixtures/server.py) listens on 127.0.0.1:8765; nothing leaves the machine.
+
+# ---------------------------------------------------------------- web ----
 
 - id: search-web
   title: Open a search engine and search
+  kind: gui
+  needs: [browser, internet]
+  replay: skip
   prompt: Search the web for "Gemma 4 model card" and open the result from Google.
   check:
     linux: xdotool getactivewindow getwindowname | grep -qi gemma
@@ -16,8 +42,103 @@
     - '{"thought":"open first result","action":"click","target":3,"risk":"none","expect":"model card page"}'
     - '{"thought":"Gemma 4 model card is open","action":"done","risk":"none"}'
 
+- id: open-site-find
+  title: Open a site and find a page
+  kind: gui
+  needs: [browser, internet]
+  replay: skip
+  prompt: Open bmsce.ac.in and find the IEEE CS page.
+  check:
+    linux: xdotool getactivewindow getwindowname | grep -qi ieee
+    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'IEEE' }) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"go to the site","action":"open_url","text":"https://bmsce.ac.in","risk":"none","expect":"college home page"}'
+    - '{"thought":"open the result","action":"click","target":3,"risk":"none","expect":"IEEE CS page"}'
+    - '{"thought":"IEEE CS page is open","action":"done","risk":"none"}'
+
+- id: play-video
+  title: Play a video
+  kind: gui
+  needs: [browser, internet]
+  replay: skip
+  prompt: Play "lofi hip hop radio" on YouTube.
+  check:
+    linux: xdotool getactivewindow getwindowname | grep -qi youtube
+    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'YouTube' }) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"go straight to results","action":"open_url","text":"https://www.youtube.com/results?search_query=lofi+hip+hop+radio","risk":"none","expect":"results"}'
+    - '{"thought":"play first result","action":"click","target":3,"risk":"none","expect":"video playing"}'
+    - '{"thought":"video is playing","action":"done","risk":"none"}'
+
+- id: fill-form
+  title: Fill a form from text
+  kind: gui
+  needs: [browser, server]
+  replay: skip
+  prompt: 'Fill the form on screen with: name Asha Rao, email asha@example.com. Do not submit.'
+  setup:
+    linux: rm -f ~/kai-bench/server/submission.json; "$KAI_BENCH_DIR/fixtures/start-server.sh" && "$KAI_BENCH_DIR/fixtures/open-browser.sh" http://127.0.0.1:8765/contact.html
+  check:
+    # Filled but not submitted: nothing may reach the server.
+    linux: test ! -e ~/kai-bench/server/submission.json
+  teardown:
+    linux: pkill -f '/firefox' >/dev/null 2>&1; pkill -x soffice.bin; true
+  mock:
+    - '{"thought":"name field","action":"type","target":5,"text":"Asha Rao","risk":"none","expect":"name filled"}'
+    - '{"thought":"email field","action":"type","target":6,"text":"asha@example.com","risk":"none","expect":"email filled"}'
+    - '{"thought":"filled, not submitted","action":"done","risk":"none"}'
+
+- id: web-form-submit
+  title: Fill in and send a contact form
+  kind: gui
+  needs: [browser, server]
+  replay: terminal
+  prompt: 'Open http://127.0.0.1:8765/contact.html in the browser and send the contact form: name Ravi Kumar, email ravi@example.com, topic Billing, message "Please send a copy of my March invoice".'
+  setup:
+    linux: rm -f ~/kai-bench/server/submission.json && "$KAI_BENCH_DIR/fixtures/start-server.sh"
+  check:
+    linux: |-
+      f=~/kai-bench/server/submission.json
+      grep -q '"name": "Ravi Kumar"' $f && grep -q '"email": "ravi@example.com"' $f && grep -q '"topic": "billing"' $f && grep -qi 'march invoice' $f
+  teardown:
+    linux: pkill -f '/firefox' >/dev/null 2>&1; pkill -x soffice.bin; true
+  mock:
+    - '{"thought":"open the form","action":"open_url","text":"http://127.0.0.1:8765/contact.html","risk":"none","expect":"contact form"}'
+    - '{"thought":"send the form fields","action":"shell","text":"curl -sf -d name=Ravi+Kumar -d email=ravi@example.com -d topic=billing --data-urlencode \"message=Please send a copy of my March invoice\" http://127.0.0.1:8765/submit","risk":"low","expect":"thank you page"}'
+    - '{"thought":"form sent","action":"done","risk":"none"}'
+
+- id: local-price-lookup
+  title: Look up a price on a web page
+  kind: mixed
+  needs: [server]
+  prompt: The page http://127.0.0.1:8765/prices.html lists kitchen products. What does the Blue Kettle cost? Write just the price into kai-bench/price.txt in my home folder.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/price.txt && "$KAI_BENCH_DIR/fixtures/start-server.sh"
+  check:
+    linux: grep -q '34\.99' ~/kai-bench/price.txt
+  mock:
+    - '{"thought":"read the price table","action":"shell","text":"curl -sf http://127.0.0.1:8765/prices.html | grep -A1 \"Blue Kettle\"","risk":"low","expect":"price row"}'
+    - '{"thought":"save the price","action":"shell","text":"curl -sf http://127.0.0.1:8765/prices.html | grep \"Blue Kettle\" | grep -oE \"[0-9]+[.][0-9]+\" | head -1 > ~/kai-bench/price.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"Blue Kettle costs 34.99","action":"done","risk":"none"}'
+
+- id: download-file
+  title: Download a file
+  kind: mixed
+  needs: [server]
+  prompt: Download the invoice from http://127.0.0.1:8765/files/invoice-2026-03.txt into my Downloads folder.
+  setup:
+    linux: mkdir -p ~/Downloads && rm -f ~/Downloads/invoice-2026-03.txt && "$KAI_BENCH_DIR/fixtures/start-server.sh"
+  check:
+    linux: cmp -s ~/Downloads/invoice-2026-03.txt "$KAI_BENCH_DIR/fixtures/site/files/invoice-2026-03.txt"
+  mock:
+    - '{"thought":"download with curl","action":"shell","text":"curl -sfL -o ~/Downloads/invoice-2026-03.txt http://127.0.0.1:8765/files/invoice-2026-03.txt && ls -l ~/Downloads/invoice-2026-03.txt","risk":"low","expect":"file saved"}'
+    - '{"thought":"invoice downloaded","action":"done","risk":"none"}'
+
+# -------------------------------------------------------------- files ----
+
 - id: write-note
   title: Write and save a note
+  kind: terminal
   prompt: Create a file called kai-note.txt in my home folder that says "Hello from Kai".
   setup:
     linux: rm -f ~/kai-note.txt
@@ -31,6 +152,7 @@
 
 - id: rename-files
   title: Rename files in a folder
+  kind: terminal
   prompt: In the folder kai-bench/rename in my home folder, add the prefix "2026-" to every file name.
   setup:
     linux: rm -rf ~/kai-bench/rename && mkdir -p ~/kai-bench/rename && touch ~/kai-bench/rename/a.txt ~/kai-bench/rename/b.txt ~/kai-bench/rename/c.txt
@@ -43,8 +165,263 @@
     - '{"thought":"add the prefix","action":"shell","text":"cd ~/kai-bench/rename && for f in *; do mv -n \"$f\" \"2026-$f\"; done","risk":"low","expect":"renamed"}'
     - '{"thought":"renamed 3 files","action":"done","risk":"none"}'
 
+- id: find-largest
+  title: Find the largest file
+  kind: terminal
+  prompt: Which file in kai-bench/big in my home folder is the largest? Write only its file name into kai-bench/largest.txt.
+  setup:
+    linux: rm -rf ~/kai-bench/big && mkdir -p ~/kai-bench/big && head -c 1000 /dev/zero > ~/kai-bench/big/small.bin && head -c 90000 /dev/zero > ~/kai-bench/big/huge.bin && head -c 20000 /dev/zero > ~/kai-bench/big/medium.bin && rm -f ~/kai-bench/largest.txt
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\big; New-Item -ItemType Directory -Force $HOME\kai-bench\big | Out-Null; [IO.File]::WriteAllBytes("$HOME\kai-bench\big\small.bin", (New-Object byte[] 1000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\huge.bin", (New-Object byte[] 90000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\medium.bin", (New-Object byte[] 20000))
+  check:
+    linux: grep -q "huge.bin" ~/kai-bench/largest.txt
+    windows: if ((Get-Content $HOME\kai-bench\largest.txt -Raw) -match 'huge.bin') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"list by size","action":"shell","text":"ls -S ~/kai-bench/big | head -1","risk":"low","expect":"largest name"}'
+    - '{"thought":"save it","action":"shell","text":"ls -S ~/kai-bench/big | head -1 > ~/kai-bench/largest.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"huge.bin is largest","action":"done","risk":"none"}'
+
+- id: sort-downloads
+  title: Tidy a messy folder by file type
+  kind: terminal
+  prompt: Tidy up kai-bench/mess in my home folder - move every PDF into a subfolder called PDFs and every JPG into a subfolder called Images.
+  setup:
+    linux: rm -rf ~/kai-bench/mess && mkdir -p ~/kai-bench/mess && cd ~/kai-bench/mess && touch bank-statement.pdf ticket.pdf cv.pdf beach.jpg cat.jpg notes.txt
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\mess; New-Item -ItemType Directory -Force $HOME\kai-bench\mess | Out-Null; 'bank-statement.pdf','ticket.pdf','cv.pdf','beach.jpg','cat.jpg','notes.txt' | % { New-Item "$HOME\kai-bench\mess\$_" | Out-Null }
+  check:
+    linux: d=~/kai-bench/mess; test -f $d/PDFs/cv.pdf && test -f $d/PDFs/ticket.pdf && test -f $d/PDFs/bank-statement.pdf && test -f $d/Images/beach.jpg && test -f $d/Images/cat.jpg && test -f $d/notes.txt && ! ls $d/*.pdf $d/*.jpg >/dev/null 2>&1
+    windows: $d="$HOME\kai-bench\mess"; if ((Test-Path "$d\PDFs\cv.pdf") -and (Test-Path "$d\Images\cat.jpg") -and -not (Test-Path "$d\*.pdf") -and -not (Test-Path "$d\*.jpg")) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"make folders and move by type","action":"shell","text":"cd ~/kai-bench/mess && mkdir -p PDFs Images && mv -n *.pdf PDFs/ && mv -n *.jpg Images/ && ls -R","risk":"low","expect":"sorted"}'
+    - '{"thought":"3 PDFs and 2 images moved","action":"done","risk":"none"}'
+
+- id: search-in-files
+  title: Find which file mentions something
+  kind: terminal
+  prompt: One of the notes in kai-bench/notes in my home folder mentions "passport renewal". Write that note's file name into kai-bench/found.txt.
+  setup:
+    linux: |
+      rm -rf ~/kai-bench/notes ~/kai-bench/found.txt && mkdir -p ~/kai-bench/notes && cd ~/kai-bench/notes &&
+      printf 'Buy milk\nCall the plumber\n' > groceries.txt &&
+      printf 'Q1 goals\nShip the release\n' > work.txt &&
+      printf 'Dentist on Tuesday\nBook the passport renewal appointment\n' > todo-march.txt &&
+      printf 'Birthday ideas: books\n' > ideas.txt
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\notes, $HOME\kai-bench\found.txt; New-Item -ItemType Directory -Force $HOME\kai-bench\notes | Out-Null; Set-Content $HOME\kai-bench\notes\groceries.txt "Buy milk"; Set-Content $HOME\kai-bench\notes\work.txt "Ship the release"; Set-Content $HOME\kai-bench\notes\todo-march.txt "Book the passport renewal appointment"; Set-Content $HOME\kai-bench\notes\ideas.txt "Birthday ideas"
+  check:
+    linux: grep -q 'todo-march.txt' ~/kai-bench/found.txt && ! grep -q 'groceries' ~/kai-bench/found.txt
+    windows: if ((Get-Content $HOME\kai-bench\found.txt -Raw) -match 'todo-march.txt') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"search the notes","action":"shell","text":"grep -ril \"passport renewal\" ~/kai-bench/notes","risk":"low","expect":"one file"}'
+    - '{"thought":"save the name","action":"shell","text":"grep -ril \"passport renewal\" ~/kai-bench/notes | xargs -n1 basename > ~/kai-bench/found.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"todo-march.txt mentions it","action":"done","risk":"none"}'
+
+- id: zip-folder
+  title: Compress a folder into a zip
+  kind: terminal
+  prompt: Compress the folder kai-bench/photos in my home folder into kai-bench/photos.zip so I can email it.
+  setup:
+    linux: rm -rf ~/kai-bench/photos ~/kai-bench/photos.zip && mkdir -p ~/kai-bench/photos && for n in beach sunset family; do head -c 2048 /dev/urandom > ~/kai-bench/photos/$n.jpg; done
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\photos, $HOME\kai-bench\photos.zip; New-Item -ItemType Directory -Force $HOME\kai-bench\photos | Out-Null; 'beach','sunset','family' | % { [IO.File]::WriteAllBytes("$HOME\kai-bench\photos\$_.jpg", (New-Object byte[] 2048)) }
+  check:
+    linux: unzip -l ~/kai-bench/photos.zip | grep -q 'beach.jpg' && unzip -l ~/kai-bench/photos.zip | grep -q 'sunset.jpg' && unzip -l ~/kai-bench/photos.zip | grep -q 'family.jpg'
+    windows: Add-Type -A System.IO.Compression.FileSystem; $n=[IO.Compression.ZipFile]::OpenRead("$HOME\kai-bench\photos.zip").Entries.Name; if (($n -contains 'beach.jpg') -and ($n -contains 'family.jpg')) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"zip the folder","action":"shell","text":"cd ~/kai-bench && zip -r photos.zip photos && unzip -l photos.zip","risk":"low","expect":"3 files in zip"}'
+    - '{"thought":"photos.zip created","action":"done","risk":"none"}'
+
+- id: extract-archive
+  title: Extract a backup archive
+  kind: terminal
+  prompt: Extract kai-bench/backup.tar.gz in my home folder into a new folder kai-bench/restored.
+  setup:
+    linux: |
+      rm -rf ~/kai-bench/restored ~/kai-bench/backup.tar.gz ~/kai-bench/.backup-src && mkdir -p ~/kai-bench/.backup-src/docs &&
+      printf 'tax 2025\n' > ~/kai-bench/.backup-src/docs/taxes.txt && printf 'wifi: kai-home\n' > ~/kai-bench/.backup-src/wifi.txt &&
+      tar -czf ~/kai-bench/backup.tar.gz -C ~/kai-bench/.backup-src . && rm -rf ~/kai-bench/.backup-src
+  check:
+    linux: grep -q 'tax 2025' ~/kai-bench/restored/docs/taxes.txt && test -f ~/kai-bench/restored/wifi.txt
+  mock:
+    - '{"thought":"look inside first","action":"shell","text":"tar -tzf ~/kai-bench/backup.tar.gz","risk":"low","expect":"file list"}'
+    - '{"thought":"extract into restored","action":"shell","text":"mkdir -p ~/kai-bench/restored && tar -xzf ~/kai-bench/backup.tar.gz -C ~/kai-bench/restored && ls -R ~/kai-bench/restored","risk":"low","expect":"files restored"}'
+    - '{"thought":"backup extracted","action":"done","risk":"none"}'
+
+- id: open-folder
+  title: Open a folder in the file manager
+  kind: gui
+  needs: [display, pcmanfm]
+  prompt: Show me the kai-bench/photos folder (in my home folder) in the file manager.
+  setup:
+    linux: pkill -x pcmanfm; mkdir -p ~/kai-bench/photos && touch ~/kai-bench/photos/beach.jpg
+  check:
+    linux: wmctrl -l | grep -qi 'photos'
+  teardown:
+    linux: pkill -x pcmanfm; true
+  mock:
+    - '{"thought":"open the folder in pcmanfm","action":"shell","text":"setsid -f pcmanfm ~/kai-bench/photos >/dev/null 2>&1 </dev/null; sleep 2; wmctrl -l","risk":"low","expect":"file manager on photos"}'
+    - '{"thought":"photos folder is open","action":"done","risk":"none"}'
+
+# ------------------------------------------------------- apps / office ----
+
+- id: mousepad-write
+  title: Write and save a document in the text editor
+  kind: gui
+  needs: [display, mousepad]
+  prompt: 'Open the text editor (Mousepad), write "Shopping list: milk, eggs, bread" and save it as kai-bench/shopping.txt in my home folder.'
+  setup:
+    linux: pkill -x mousepad; sleep 1; mkdir -p ~/kai-bench && rm -f ~/kai-bench/shopping.txt
+  check:
+    linux: grep -q 'Shopping list. milk, eggs, bread' ~/kai-bench/shopping.txt
+  teardown:
+    linux: pkill -x mousepad; true
+  mock:
+    - '{"thought":"open the editor","action":"open_app","text":"mousepad","risk":"none","expect":"empty document"}'
+    - '{"thought":"type the list into the editor","action":"shell","text":"for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -a Mousepad; sleep 0.5; xdotool type --delay 5 \"Shopping list: milk, eggs, bread\"","risk":"low","expect":"text in editor"}'
+    - '{"thought":"save","action":"key","keys":["ctrl","s"],"risk":"none","expect":"save dialog"}'
+    - '{"thought":"type the file path","action":"shell","text":"sleep 1; xdotool type --delay 5 \"$HOME/kai-bench/shopping.txt\"; sleep 1","risk":"low","expect":"path typed"}'
+    - '{"thought":"confirm","action":"key","keys":["enter"],"risk":"none","expect":"saved"}'
+    - '{"thought":"wait for the save","action":"wait","risk":"none","expect":"title shows shopping.txt"}'
+    - '{"thought":"saved shopping.txt","action":"done","risk":"none"}'
+
+- id: close-app
+  title: Close an app window
+  kind: gui
+  needs: [display, mousepad]
+  prompt: Close the text editor window that is open.
+  setup:
+    linux: pkill -x mousepad; sleep 1; mkdir -p ~/kai-bench && printf 'draft\n' > ~/kai-bench/draft.txt && (setsid -f mousepad ~/kai-bench/draft.txt >/dev/null 2>&1 </dev/null) && for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -l | grep -q Mousepad
+  check:
+    linux: sleep 1; ! wmctrl -l | grep -qi mousepad
+  teardown:
+    linux: pkill -x mousepad; true
+  mock:
+    - '{"thought":"focus the editor and quit it","action":"shell","text":"wmctrl -a Mousepad; sleep 0.5","risk":"low","expect":"editor focused"}'
+    - '{"thought":"quit with the shortcut","action":"key","keys":["ctrl","q"],"risk":"none","expect":"window gone"}'
+    - '{"thought":"editor closed","action":"done","risk":"none"}'
+
+- id: mousepad-line-numbers
+  title: Change an app preference (line numbers)
+  kind: gui
+  needs: [display, mousepad]
+  replay: terminal
+  prompt: Turn on line numbers in the Mousepad text editor.
+  setup:
+    linux: pkill -x mousepad; gsettings set org.xfce.mousepad.preferences.view show-line-numbers false
+  check:
+    linux: gsettings get org.xfce.mousepad.preferences.view show-line-numbers | grep -q true
+  teardown:
+    linux: pkill -x mousepad; true
+  mock:
+    - '{"thought":"set the preference key directly","action":"shell","text":"gsettings set org.xfce.mousepad.preferences.view show-line-numbers true","risk":"low","expect":"line numbers on"}'
+    - '{"thought":"line numbers are on","action":"done","risk":"none"}'
+
+- id: spreadsheet-budget
+  title: Make a small budget spreadsheet with a total
+  kind: gui
+  needs: [display, libreoffice]
+  prompt: 'In LibreOffice Calc make a budget: column A has Rent, Food, Transport and column B has 1200, 450, 120. In row 4 put "Total" in A4 and a SUM formula in B4. Save it as kai-bench/budget.ods in my home folder.'
+  setup:
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-libreoffice.sh"; mkdir -p ~/kai-bench && rm -f ~/kai-bench/budget.ods'
+  check:
+    linux: '"$KAI_BENCH_DIR/fixtures/check-sheet.sh" ~/kai-bench/budget.ods "^Total,1770$" formula'
+  teardown:
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-libreoffice.sh"'
+  mock:
+    - '{"thought":"open Calc","action":"open_app","text":"LibreOffice Calc","risk":"none","expect":"empty sheet"}'
+    - '{"thought":"wait for Calc and dismiss the tip","action":"shell","text":"for i in $(seq 1 80); do wmctrl -l | grep -q \"LibreOffice Calc\" && break; sleep 0.25; done; sleep 3; wmctrl -l | grep -q \"Tip of the Day\" && xdotool key Escape; sleep 0.5; wmctrl -l","risk":"low","expect":"sheet focused"}'
+    - '{"thought":"enter the rows","action":"shell","text":"wmctrl -a \"LibreOffice Calc\"; sleep 0.5; for row in Rent:1200 Food:450 Transport:120 \"Total:=SUM(B1:B3)\"; do xdotool type --delay 10 \"${row%%:*}\"; xdotool key Tab; xdotool type --delay 10 \"${row#*:}\"; xdotool key Return; done; sleep 0.5","risk":"low","expect":"total 1770"}'
+    - '{"thought":"save as","action":"key","keys":["ctrl","shift","s"],"risk":"none","expect":"save dialog"}'
+    - '{"thought":"type the file path","action":"shell","text":"sleep 1.5; xdotool type --delay 5 \"$HOME/kai-bench/budget.ods\"; sleep 1","risk":"low","expect":"path typed"}'
+    - '{"thought":"confirm","action":"key","keys":["enter"],"risk":"none","expect":"saved"}'
+    - '{"thought":"wait for the save","action":"wait","risk":"none","expect":"title shows budget.ods"}'
+    - '{"thought":"budget.ods saved with total 1770","action":"done","risk":"none"}'
+
+- id: csv-total
+  title: Total a column in a spreadsheet file
+  kind: mixed
+  prompt: kai-bench/sales.csv in my home folder has an Amount column. Add up the amounts and write the total into kai-bench/sales-total.txt.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/sales-total.txt && printf 'Date,Customer,Amount\n2026-03-01,Lee,120.50\n2026-03-02,Okafor,75.25\n2026-03-05,Silva,310.00\n2026-03-09,Nakamura,42.75\n' > ~/kai-bench/sales.csv
+    windows: New-Item -ItemType Directory -Force $HOME\kai-bench | Out-Null; Remove-Item -ErrorAction SilentlyContinue $HOME\kai-bench\sales-total.txt; Set-Content $HOME\kai-bench\sales.csv "Date,Customer,Amount`n2026-03-01,Lee,120.50`n2026-03-02,Okafor,75.25`n2026-03-05,Silva,310.00`n2026-03-09,Nakamura,42.75"
+  check:
+    linux: grep -Eq '548[.]50?([^0-9]|$)' ~/kai-bench/sales-total.txt
+    windows: if ((Get-Content $HOME\kai-bench\sales-total.txt -Raw) -match '548\.50?') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"look at the file","action":"shell","text":"head -3 ~/kai-bench/sales.csv","risk":"low","expect":"header and rows"}'
+    - '{"thought":"sum the third column","action":"shell","text":"tail -n +2 ~/kai-bench/sales.csv | cut -d, -f3 | paste -sd+ | bc | tee ~/kai-bench/sales-total.txt","risk":"low","expect":"548.50"}'
+    - '{"thought":"total is 548.50","action":"done","risk":"none"}'
+
+- id: tip-calculator
+  title: Do a quick calculation
+  kind: mixed
+  prompt: My restaurant bill is 86.40 and I want to leave a 17.5% tip. What is the total including the tip? Write it with two decimals into kai-bench/tip.txt in my home folder.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/tip.txt
+    windows: New-Item -ItemType Directory -Force $HOME\kai-bench | Out-Null; Remove-Item -ErrorAction SilentlyContinue $HOME\kai-bench\tip.txt
+  check:
+    linux: grep -q '101\.52' ~/kai-bench/tip.txt
+    windows: if ((Get-Content $HOME\kai-bench\tip.txt -Raw) -match '101\.52') { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"compute with bc","action":"shell","text":"echo \"scale=2; 86.40*1.175/1\" | bc | tee ~/kai-bench/tip.txt","risk":"low","expect":"101.52"}'
+    - '{"thought":"total with tip is 101.52","action":"done","risk":"none"}'
+
+- id: email-draft
+  title: Write an email draft (not sent)
+  kind: mixed
+  prompt: 'Draft an email to priya@example.com with the subject "Team lunch Friday" asking whether 12:30 at Olive Garden works for her. Do not send it; save the draft as kai-bench/drafts/team-lunch.eml in my home folder.'
+  setup:
+    linux: rm -rf ~/kai-bench/drafts && mkdir -p ~/kai-bench/drafts
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\drafts; New-Item -ItemType Directory -Force $HOME\kai-bench\drafts | Out-Null
+  check:
+    linux: f=~/kai-bench/drafts/team-lunch.eml; grep -qi '^To:.*priya@example.com' $f && grep -qi '^Subject:.*Team lunch Friday' $f && grep -q '12:30' $f
+    windows: $t = Get-Content $HOME\kai-bench\drafts\team-lunch.eml -Raw; if (($t -match '(?m)^To:.*priya@example.com') -and ($t -match '(?m)^Subject:.*Team lunch Friday') -and ($t -match '12:30')) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"write the draft file","action":"shell","text":"printf \"To: priya@example.com\\nSubject: Team lunch Friday\\nContent-Type: text/plain; charset=utf-8\\n\\nHi Priya,\\n\\nDoes 12:30 at Olive Garden on Friday work for you?\\n\\nThanks\\n\" > ~/kai-bench/drafts/team-lunch.eml && cat ~/kai-bench/drafts/team-lunch.eml","risk":"low","expect":"draft saved"}'
+    - '{"thought":"draft saved, not sent","action":"done","risk":"none"}'
+
+- id: calendar-event
+  title: Create a calendar event file
+  kind: mixed
+  prompt: Make a calendar event "Dentist" on 3 November 2026 from 10:00 to 10:30 and save it as kai-bench/dentist.ics in my home folder so I can import it into my calendar.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/dentist.ics
+    windows: New-Item -ItemType Directory -Force $HOME\kai-bench | Out-Null; Remove-Item -ErrorAction SilentlyContinue $HOME\kai-bench\dentist.ics
+  check:
+    linux: f=~/kai-bench/dentist.ics; grep -q 'BEGIN:VEVENT' $f && grep -qi 'SUMMARY:.*Dentist' $f && grep -Eq 'DTSTART[^:]*:20261103T1000' $f && grep -Eq 'DTEND[^:]*:20261103T1030' $f
+    windows: $t = Get-Content $HOME\kai-bench\dentist.ics -Raw; if (($t -match 'BEGIN:VEVENT') -and ($t -match 'SUMMARY:.*Dentist') -and ($t -match 'DTSTART[^:]*:20261103T1000')) { exit 0 } else { exit 1 }
+  mock:
+    - '{"thought":"write an iCalendar file","action":"shell","text":"printf \"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Kai//EN\\r\\nBEGIN:VEVENT\\r\\nUID:dentist-20261103@kai\\r\\nDTSTAMP:20261009T120000Z\\r\\nDTSTART:20261103T100000\\r\\nDTEND:20261103T103000\\r\\nSUMMARY:Dentist\\r\\nEND:VEVENT\\r\\nEND:VCALENDAR\\r\\n\" > ~/kai-bench/dentist.ics && cat ~/kai-bench/dentist.ics","risk":"low","expect":"ics saved"}'
+    - '{"thought":"event file saved","action":"done","risk":"none"}'
+
+- id: resize-image
+  title: Make a smaller copy of a photo
+  kind: mixed
+  needs: [imagemagick]
+  prompt: Make a copy of kai-bench/photo.jpg (in my home folder) that is 800 pixels wide, keeping the proportions, and save it as kai-bench/photo-small.jpg.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/photo-small.jpg && convert -size 1600x1200 gradient:skyblue-navy ~/kai-bench/photo.jpg
+  check:
+    linux: test "$(identify -format '%wx%h' ~/kai-bench/photo-small.jpg)" = 800x600
+  mock:
+    - '{"thought":"resize with ImageMagick","action":"shell","text":"convert ~/kai-bench/photo.jpg -resize 800x ~/kai-bench/photo-small.jpg && identify ~/kai-bench/photo-small.jpg","risk":"low","expect":"800x600"}'
+    - '{"thought":"photo-small.jpg is 800x600","action":"done","risk":"none"}'
+
+- id: screenshot
+  title: Save a screenshot
+  kind: mixed
+  needs: [display, imagemagick]
+  prompt: Take a screenshot of the whole screen and save it as kai-bench/screen.png in my home folder.
+  setup:
+    linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/screen.png
+  check:
+    linux: file ~/kai-bench/screen.png | grep -q 'PNG image data' && test "$(identify -format '%w' ~/kai-bench/screen.png)" -ge 640
+  mock:
+    - '{"thought":"capture the root window","action":"shell","text":"(command -v scrot >/dev/null && scrot -o ~/kai-bench/screen.png) || import -window root ~/kai-bench/screen.png; file ~/kai-bench/screen.png","risk":"low","expect":"png saved"}'
+    - '{"thought":"screenshot saved","action":"done","risk":"none"}'
+
+# ------------------------------------------------- settings / terminal ----
+
 - id: dark-mode
   title: Change a setting (dark mode)
+  kind: mixed
   prompt: Switch my computer to dark mode.
   setup:
     linux: gsettings set org.gnome.desktop.interface color-scheme default
@@ -58,6 +435,7 @@
 
 - id: disk-space
   title: Answer a question from the terminal
+  kind: terminal
   prompt: How much free disk space do I have on my home drive? Write just the number in GB to kai-bench/answer.txt in my home folder.
   setup:
     linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/answer.txt
@@ -70,52 +448,37 @@
     - '{"thought":"write the answer","action":"shell","text":"df -BG --output=avail ~ | tail -1 | tr -dc 0-9 > ~/kai-bench/answer.txt","risk":"low","expect":"saved"}'
     - '{"thought":"answer saved","action":"done","risk":"none"}'
 
-- id: find-largest
-  title: Find the largest file
-  prompt: Which file in kai-bench/big in my home folder is the largest? Write only its file name into kai-bench/largest.txt.
+- id: count-errors
+  title: Count errors in a log file
+  kind: terminal
+  prompt: How many lines in kai-bench/app.log (in my home folder) contain ERROR? Write just the number into kai-bench/errors.txt.
   setup:
-    linux: rm -rf ~/kai-bench/big && mkdir -p ~/kai-bench/big && head -c 1000 /dev/zero > ~/kai-bench/big/small.bin && head -c 90000 /dev/zero > ~/kai-bench/big/huge.bin && head -c 20000 /dev/zero > ~/kai-bench/big/medium.bin && rm -f ~/kai-bench/largest.txt
-    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\big; New-Item -ItemType Directory -Force $HOME\kai-bench\big | Out-Null; [IO.File]::WriteAllBytes("$HOME\kai-bench\big\small.bin", (New-Object byte[] 1000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\huge.bin", (New-Object byte[] 90000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\medium.bin", (New-Object byte[] 20000))
+    linux: |
+      mkdir -p ~/kai-bench && rm -f ~/kai-bench/errors.txt && : > ~/kai-bench/app.log &&
+      for i in $(seq 1 40); do
+        case $((i % 6)) in 0) echo "2026-10-09 10:$((i+10)):00 ERROR upload failed (retry $i)";; *) echo "2026-10-09 10:$((i+10)):00 INFO request ok";; esac >> ~/kai-bench/app.log;
+      done
   check:
-    linux: grep -q "huge.bin" ~/kai-bench/largest.txt
-    windows: if ((Get-Content $HOME\kai-bench\largest.txt -Raw) -match 'huge.bin') { exit 0 } else { exit 1 }
+    linux: test "$(tr -dc 0-9 < ~/kai-bench/errors.txt)" = "$(grep -c ERROR ~/kai-bench/app.log)"
   mock:
-    - '{"thought":"list by size","action":"shell","text":"ls -S ~/kai-bench/big | head -1","risk":"low","expect":"largest name"}'
-    - '{"thought":"save it","action":"shell","text":"ls -S ~/kai-bench/big | head -1 > ~/kai-bench/largest.txt","risk":"low","expect":"saved"}'
-    - '{"thought":"huge.bin is largest","action":"done","risk":"none"}'
+    - '{"thought":"count matching lines","action":"shell","text":"grep -c ERROR ~/kai-bench/app.log | tee ~/kai-bench/errors.txt","risk":"low","expect":"a number"}'
+    - '{"thought":"6 error lines","action":"done","risk":"none"}'
 
-- id: open-site-find
-  title: Open a site and find a page
-  prompt: Open bmsce.ac.in and find the IEEE CS page.
+- id: run-script
+  title: Run a script and keep its output
+  kind: terminal
+  prompt: Run the script kai-bench/jobs/build.sh in my home folder and save everything it prints into kai-bench/jobs/build.log.
+  setup:
+    linux: rm -rf ~/kai-bench/jobs && mkdir -p ~/kai-bench/jobs && printf '#!/bin/sh\necho "compiling 3 files"\nsleep 1\necho "linking"\necho "BUILD OK" >&2\n' > ~/kai-bench/jobs/build.sh && chmod +x ~/kai-bench/jobs/build.sh
   check:
-    linux: xdotool getactivewindow getwindowname | grep -qi ieee
-    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'IEEE' }) { exit 0 } else { exit 1 }
+    linux: grep -q 'compiling 3 files' ~/kai-bench/jobs/build.log && grep -q 'BUILD OK' ~/kai-bench/jobs/build.log
   mock:
-    - '{"thought":"go to the site","action":"open_url","text":"https://bmsce.ac.in","risk":"none","expect":"college home page"}'
-    - '{"thought":"open the result","action":"click","target":3,"risk":"none","expect":"IEEE CS page"}'
-    - '{"thought":"IEEE CS page is open","action":"done","risk":"none"}'
-
-- id: play-video
-  title: Play a video
-  prompt: Play "lofi hip hop radio" on YouTube.
-  check:
-    linux: xdotool getactivewindow getwindowname | grep -qi youtube
-    windows: if (Get-Process | ? { $_.MainWindowTitle -match 'YouTube' }) { exit 0 } else { exit 1 }
-  mock:
-    - '{"thought":"go straight to results","action":"open_url","text":"https://www.youtube.com/results?search_query=lofi+hip+hop+radio","risk":"none","expect":"results"}'
-    - '{"thought":"play first result","action":"click","target":3,"risk":"none","expect":"video playing"}'
-    - '{"thought":"video is playing","action":"done","risk":"none"}'
-
-- id: fill-form
-  title: Fill a form from text
-  prompt: 'Fill the form on screen with: name Asha Rao, email asha@example.com. Do not submit.'
-  mock:
-    - '{"thought":"name field","action":"type","target":5,"text":"Asha Rao","risk":"none","expect":"name filled"}'
-    - '{"thought":"email field","action":"type","target":6,"text":"asha@example.com","risk":"none","expect":"email filled"}'
-    - '{"thought":"filled, not submitted","action":"done","risk":"none"}'
+    - '{"thought":"run it, keep stdout and stderr","action":"shell","text":"cd ~/kai-bench/jobs && ./build.sh > build.log 2>&1; cat build.log","risk":"low","expect":"BUILD OK"}'
+    - '{"thought":"build ran, log saved","action":"done","risk":"none"}'
 
 - id: pc-checkup
   title: Security check-up of this PC
+  kind: terminal
   prompt: Is my firewall turned on? Check, and tell me what to do if it is off.
   mock:
     - '{"thought":"check firewall","action":"shell","text":"ufw status 2>/dev/null || echo no ufw","risk":"low","expect":"status"}'
