@@ -2,12 +2,7 @@
 //! bar around the current page, plus the palette, toasts and the run flow.
 
 use crate::{
-    AgentHandle, approval,
-    i18n::t,
-    mini,
-    onboarding::Onboarding,
-    pages,
-    state::{Phase, RunState},
+    AgentHandle, approval, i18n::t, onboarding::Onboarding, pages, runs::RunEntry, state::RunState,
 };
 use ely_gpui_component::{
     buttons::IconButton,
@@ -18,7 +13,6 @@ use ely_gpui_component::{
     shell::{ActivityBar, ActivityItem, ResizeBorder, TitleBar},
     theme::{ActiveTheme, ControlSize, Mode, Theme},
 };
-use futures::StreamExt;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyBinding,
     ParentElement, Render, Styled, Window, actions, div,
@@ -88,8 +82,20 @@ pub enum Conn {
 pub struct KaiApp {
     pub focus: FocusHandle,
     pub page: Page,
+    /// The run on screen: the selected run, or `idle` for a new task.
     pub run: Entity<RunState>,
+    pub idle: Entity<RunState>,
+    pub runs: Vec<RunEntry>,
+    pub selected: Option<u64>,
+    /// The run that has the screen.
+    pub active: Option<u64>,
+    /// The user stopped Kai: queued runs wait until they resume the queue.
+    pub queue_held: bool,
+    pub next_id: u64,
     pub draft: Entity<TextInput>,
+    pub steer_draft: Entity<TextInput>,
+    /// Which pane the run view shows: "steps", "terminal" or "team".
+    pub run_tab: String,
     pub settings: Settings,
     pub skills: Vec<Skill>,
     pub toaster: Entity<Toaster>,
@@ -120,13 +126,25 @@ impl KaiApp {
             let this = cx.entity().downgrade();
             cx.new(|cx| Onboarding::new(settings.clone(), this, window, cx))
         });
-        let run = cx.new(|_| RunState::default());
-        cx.observe(&run, |_, _, cx| cx.notify()).detach();
+        let steer_draft = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line(1, 4)
+                .placeholder("Tell Kai something mid-run, e.g. \"use Firefox, not Chrome\"")
+        });
+        let idle = cx.new(|_| RunState::default());
         Self {
             focus,
             page: Page::Run,
-            run,
+            run: idle.clone(),
+            idle,
+            runs: Vec::new(),
+            selected: None,
+            active: None,
+            queue_held: false,
+            next_id: 0,
             draft,
+            steer_draft,
+            run_tab: "steps".into(),
             team: settings.team_mode,
             pages: pages::PageState::new(&settings, window, cx),
             settings,
@@ -200,90 +218,6 @@ impl KaiApp {
             .filter(|s| !self.pages.disabled.contains(&s.front.name))
             .cloned()
             .collect()
-    }
-
-    /// Start a run from the composer (or `task`), hand the screen to Kai and
-    /// stream its progress into the run state.
-    pub fn start_run(&mut self, task: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
-        let task = task.unwrap_or_else(|| self.draft.read(cx).text().trim().to_string());
-        if task.is_empty() || matches!(self.run.read(cx).phase, Phase::Running | Phase::Waiting) {
-            return;
-        }
-        self.draft.update(cx, |d, cx| d.set_text("", cx));
-        self.page = Page::Run;
-        let (max_steps, _) = self.settings.limits();
-        let team = self.team;
-        self.run.update(cx, |r, cx| {
-            r.start(task.clone(), team, max_steps);
-            cx.notify();
-        });
-        let agent = cx.global::<AgentHandle>().0.clone();
-        let rx = agent.run(
-            task,
-            team,
-            self.settings.clone(),
-            kai_os::secrets::keys(),
-            self.enabled_skills(),
-        );
-
-        // Get out of Kai's way: the mini window takes over, the main window steps aside.
-        let main = window.window_handle();
-        mini::open(self.run.clone(), cx);
-        if self.capture.is_none() {
-            window.minimize_window();
-        }
-        mini::exclude_windows(&agent, cx);
-
-        let run = self.run.clone();
-        cx.spawn(async move |this, cx| {
-            let mut rx = rx;
-            while let Some(msg) = rx.next().await {
-                run.update(cx, |r, cx| {
-                    r.apply(msg);
-                    cx.notify();
-                });
-            }
-            mini::close(cx);
-            let _ = main.update(cx, |_, window, _| window.activate_window());
-            let _ = this.update(cx, |app, cx| app.finished(cx));
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn finished(&mut self, cx: &mut Context<Self>) {
-        let r = self.run.read(cx);
-        let toast = match (&r.error, r.outcome()) {
-            (Some(e), _) => Toast::new("Kai stopped")
-                .body(e.clone())
-                .severity(Severity::Danger),
-            (None, Some(kai_core::Outcome::Success)) => {
-                Toast::new("Done").severity(Severity::Success)
-            }
-            (None, Some(o)) => Toast::new(format!("Run ended: {o:?}")).severity(Severity::Warning),
-            (None, None) => Toast::new("Run ended").severity(Severity::Info),
-        };
-        self.toast(toast, cx);
-        self.pages.reload_history();
-        cx.notify();
-    }
-
-    pub fn stop(&mut self, cx: &mut Context<Self>) {
-        cx.global::<AgentHandle>().0.stop();
-        if let Some(p) = self.run.update(cx, |r, _| r.approval.take()) {
-            let _ = p.reply.send(kai_core::ApprovalChoice::Stop);
-        }
-        cx.notify();
-    }
-
-    pub fn answer(&mut self, choice: kai_core::ApprovalChoice, cx: &mut Context<Self>) {
-        if let Some(p) = self.run.update(cx, |r, cx| {
-            r.phase = Phase::Running;
-            cx.notify();
-            r.approval.take()
-        }) {
-            let _ = p.reply.send(choice);
-        }
     }
 
     pub fn go(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -410,15 +344,16 @@ impl Render for KaiApp {
             Page::Settings => pages::settings::render(self, window, cx).into_any_element(),
         };
         let me = cx.entity();
-        let approval = {
-            let r = self.run.read(cx);
+        let approval = self.active_state().and_then(|state| {
+            let r = state.read(cx);
             r.approval
                 .as_ref()
                 .map(|p| approval::dialog(p, me.clone(), r).into_any_element())
-        };
-        let shortcuts = self
-            .shortcuts
-            .then(|| pages::shortcuts_dialog(me.clone(), window, cx).into_any_element());
+        });
+        let shortcuts = self.shortcuts.then(|| {
+            pages::shortcuts_dialog(me.clone(), self.pages.shortcut_search.clone())
+                .into_any_element()
+        });
         let palette = self.palette.then(|| self.palette(cx).into_any_element());
         let status = self.status_bar(cx).into_any_element();
 
@@ -434,7 +369,7 @@ impl Render for KaiApp {
                 })
             })
             .on_action(move |_: &StopRun, _, cx| on_stop.update(cx, |a, cx| a.stop(cx)))
-            .on_action(move |_: &NewTask, _, cx| on_new.update(cx, |a, cx| a.go(Page::Run, cx)))
+            .on_action(move |_: &NewTask, _, cx| on_new.update(cx, |a, cx| a.select(None, cx)))
             .on_action(move |_: &ShowShortcuts, _, cx| {
                 on_short.update(cx, |a, cx| {
                     a.shortcuts = true;

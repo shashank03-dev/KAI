@@ -3,7 +3,6 @@
 use crate::app::KaiApp;
 use crate::i18n::t;
 use crate::pages::running;
-use crate::state::Phase;
 use ely_gpui_component::{
     agent::{ComputerUseViewer, HumanInputRequest, ToolCallCard},
     buttons::{Button, ButtonVariant},
@@ -144,8 +143,10 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .variant(ButtonVariant::Secondary)
                 .icon(IconName::Play)
                 .on_click(move |_, window, cx| {
-                    let task = again_task.clone();
-                    again.update(cx, |a, cx| a.start_run(Some(task), window, cx))
+                    again.update(cx, |a, cx| match a.selected {
+                        Some(id) => a.retry(id, window, cx),
+                        None => a.start_run(Some(again_task.clone()), window, cx),
+                    })
                 }),
         )
         .child(
@@ -164,15 +165,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             Button::new("new", "New task")
                 .variant(ButtonVariant::Ghost)
                 .icon(IconName::Plus)
-                .on_click(move |_, _, cx| {
-                    fresh.update(cx, |a, cx| {
-                        a.run.update(cx, |r, cx| {
-                            r.phase = Phase::Idle;
-                            cx.notify();
-                        });
-                        cx.notify()
-                    })
-                }),
+                .on_click(move |_, _, cx| fresh.update(cx, |a, cx| a.select(None, cx))),
         );
 
     let follow_ups = ok.then(|| {
@@ -226,6 +219,22 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .child(actions)
             .children(follow_ups)
             .children(failed)
+            .children((!r.outputs.is_empty()).then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().text_color(theme.colors.fg_muted).child("Terminal"))
+                    .child(crate::pages::panes::terminal(r, cx))
+            }))
+            .children((!r.team_view.subs.is_empty()).then(|| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().text_color(theme.colors.fg_muted).child("Sub-agents"))
+                    .child(crate::pages::panes::team_tree(r, cx))
+            }))
             .children(ok.then(|| Confetti::new("confetti", 1))),
     )
 }

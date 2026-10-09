@@ -15,7 +15,9 @@ path = "src/main.rs"
 kai-core = { path = "../kai-core" }
 kai-os = { path = "../kai-os" }
 gpui.workspace = true
-gpui_platform.workspace = true
+# Without x11/wayland, gpui-pre-linux builds a headless-only platform and no
+# window is ever shown on Linux (the features are ignored on Windows).
+gpui_platform = { workspace = true, features = ["x11", "wayland"] }
 ely-gpui-component.workspace = true
 anyhow.workspace = true
 log.workspace = true

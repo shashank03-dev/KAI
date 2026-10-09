@@ -5,12 +5,11 @@ use crate::i18n::t;
 use ely_gpui_component::{
     chat::{PromptInput, SuggestionChips, WelcomeScreen},
     feedback::Banner,
-    forms::{Choice, Select, Switch},
+    forms::Switch,
     primitives::{IconName, Severity},
-    theme::{ActiveTheme, ControlSize, TextSize},
+    theme::{ActiveTheme, TextSize},
 };
 use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
-use kai_core::settings::MODELS;
 
 /// One starter per skill, worded as a task.
 const STARTERS: &[(&str, &str, IconName)] = &[
@@ -57,17 +56,8 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .collect();
     let chosen = starters.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>();
 
-    let (send, pick, model_pick, team_pick) = (cx.entity(), cx.entity(), cx.entity(), cx.entity());
-    let model = Select::new("model", MODELS.iter().map(|m| Choice::new(m.id, m.label)))
-        .label("Model")
-        .size(ControlSize::Sm)
-        .selected(app.settings.fast_model.clone())
-        .on_change(move |id, _, cx| {
-            model_pick.update(cx, |a, cx| {
-                a.settings.fast_model = id.to_string();
-                a.save_settings(cx);
-            })
-        });
+    let (send, pick, team_pick) = (cx.entity(), cx.entity(), cx.entity());
+    let model = crate::switcher::switcher("composer-model", app, cx);
     let team = Switch::new("team", app.team)
         .label(t(cx, "home.team", &[]))
         .on_change(move |on, _, cx| {
@@ -89,6 +79,9 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         }
         _ => None,
     };
+    let busy = app.active.map(|_| {
+        "Kai is working on another task. New tasks wait in the queue and start when the screen is free."
+    });
     let no_hands = (!cx.global::<crate::AgentHandle>().0.can_act())
         .then(|| Banner::new("no-hands", Severity::Danger, "Kai can't control the mouse and keyboard on this desktop. On Linux, log in with an Xorg session."));
 
@@ -109,6 +102,14 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                             .text_color(theme.colors.fg_muted)
                             .child(t(cx, "home.ask", &[])),
                     )
+                    .children(busy.map(|b| {
+                        div()
+                            .w_full()
+                            .text_center()
+                            .text_size(theme.text_size(TextSize::Xs))
+                            .text_color(theme.colors.fg_muted)
+                            .child(b)
+                    }))
                     .child(
                         PromptInput::new("composer", &app.draft, move |window, cx| {
                             send.update(cx, |a, cx| a.start_run(None, window, cx))

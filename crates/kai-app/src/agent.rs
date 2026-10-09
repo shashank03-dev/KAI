@@ -3,6 +3,7 @@
 //! through a one-shot the UI answers. The UI thread never waits on the
 //! network, the screen or the model.
 
+use crate::control::RunControl;
 use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
 use kai_core::engine::{ApprovalChoice, Approver, EngineEvent, EventSink};
@@ -25,10 +26,24 @@ pub enum Ui {
     },
     Approval(Pending),
     Plan(Plan),
-    /// Team mode's final report.
-    Report(String),
+    /// Team mode's final report: the plan that ran and each sub-agent's end.
+    Report {
+        summary: String,
+        plan: Plan,
+        results: Vec<SubOutcome>,
+    },
+    /// The engine is holding at a pause (true) or went on (false).
+    Paused(bool),
     Finished(Box<Trace>),
     Failed(String),
+}
+
+/// How one sub-agent ended.
+#[derive(Debug, Clone)]
+pub struct SubOutcome {
+    pub id: String,
+    pub outcome: Option<kai_core::Outcome>,
+    pub steps: usize,
 }
 
 /// A risky step waiting on the user.
@@ -81,6 +96,7 @@ impl Agent {
     }
 
     /// Start a run. Events arrive on the returned receiver until `Finished`.
+    /// `control` pauses, stops and steers this run.
     pub fn run(
         &self,
         task: String,
@@ -88,6 +104,7 @@ impl Agent {
         settings: Settings,
         keys: Keys,
         skills: Vec<Skill>,
+        control: Arc<RunControl>,
     ) -> mpsc::UnboundedReceiver<Ui> {
         let (tx, rx) = mpsc::unbounded();
         let Some(actuator) = self.actuator.clone() else {
@@ -99,13 +116,18 @@ impl Agent {
         };
         self.kill.reset();
         self.running.store(true, Ordering::SeqCst);
-        let (kill, perceptor, running) = (
-            self.kill.clone(),
-            self.perceptor.clone(),
-            self.running.clone(),
-        );
+        let (held_tx, mut held_rx) = mpsc::unbounded();
+        control.report_to(held_tx);
+        let forward = tx.clone();
+        self.runtime.spawn(async move {
+            use futures::StreamExt;
+            while let Some(held) = held_rx.next().await {
+                let _ = forward.unbounded_send(Ui::Paused(held));
+            }
+        });
+        let (perceptor, running) = (self.perceptor.clone(), self.running.clone());
         self.runtime.spawn(kai_os::kill::watch_corner(
-            kill.clone(),
+            self.kill.clone(),
             actuator.input.clone(),
             running.clone(),
         ));
@@ -117,11 +139,13 @@ impl Agent {
                 keys,
                 skills,
                 &tx,
-                &kill,
+                control.as_ref(),
                 perceptor.as_ref(),
                 actuator.as_ref(),
             )
             .await;
+            // Close the pause reporter so the UI's receiver ends with the run.
+            control.detach_reporter();
             running.store(false, Ordering::SeqCst);
             if let Err(e) = result {
                 let _ = tx.unbounded_send(Ui::Failed(friendly(&e)));
@@ -182,7 +206,7 @@ async fn drive(
     keys: Keys,
     skills: Vec<Skill>,
     tx: &mpsc::UnboundedSender<Ui>,
-    kill: &KillSwitch,
+    control: &RunControl,
     perceptor: &DesktopPerceptor,
     actuator: &DesktopActuator,
 ) -> anyhow::Result<()> {
@@ -209,7 +233,7 @@ async fn drive(
             screen: perceptor,
             actuator,
             approver: &approver,
-            interrupt: kill,
+            interrupt: control,
             sink: &sink,
             skills: &skills,
             config,
@@ -228,7 +252,20 @@ async fn drive(
         }
         trace.finish(report.outcome());
         save(&dir, &trace);
-        let _ = tx.unbounded_send(Ui::Report(report.summary));
+        let results = report
+            .results
+            .iter()
+            .map(|r| SubOutcome {
+                id: r.subtask.id.clone(),
+                outcome: r.trace.outcome,
+                steps: r.trace.steps.len(),
+            })
+            .collect();
+        let _ = tx.unbounded_send(Ui::Report {
+            summary: report.summary,
+            plan: report.plan,
+            results,
+        });
         let _ = tx.unbounded_send(Ui::Finished(Box::new(trace)));
     } else {
         let engine = Engine {
@@ -237,9 +274,9 @@ async fn drive(
             perceptor,
             actuator,
             approver: &approver,
-            interrupt: kill,
+            interrupt: control,
             sink: &sink,
-            steering: &kai_core::engine::NoSteering,
+            steering: control,
             verifier: None,
             skills: &skills,
             config,

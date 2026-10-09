@@ -2,6 +2,7 @@
 //! window read one `Entity<RunState>`; the agent's messages update it.
 
 use crate::agent::{Pending, Ui};
+use crate::team::{OutputView, SteerView, Team};
 use ely_gpui_component::chat::StepState;
 use kai_core::engine::EngineEvent;
 use kai_core::orchestrator::Plan;
@@ -14,6 +15,8 @@ use std::time::{Duration, Instant};
 pub enum Phase {
     #[default]
     Idle,
+    /// Waiting for an earlier run to finish with the screen.
+    Queued,
     Running,
     /// Waiting on the user: an approval.
     Waiting,
@@ -29,6 +32,10 @@ pub struct StepView {
     pub state: StepState,
     pub timings: Option<Timings>,
     pub json: String,
+    /// How the action was carried out (a11y, mouse, keyboard, os, shell…)
+    /// and which backend decided it; known once the run's trace arrives.
+    pub path: Option<String>,
+    pub backend: Option<String>,
 }
 
 #[derive(Default)]
@@ -54,6 +61,16 @@ pub struct RunState {
     pub started: Option<Instant>,
     pub elapsed: Duration,
     pub last_model_ms: Option<u64>,
+    /// Model time of every step that called a model, in order (ms).
+    pub model_ms: Vec<u64>,
+    /// "Gemma 4 26B A4B · Gateway": what this run was started with.
+    pub model: String,
+    /// The user asked to pause; `held` once the engine actually waits.
+    pub paused: bool,
+    pub held: bool,
+    pub outputs: Vec<OutputView>,
+    pub steers: Vec<SteerView>,
+    pub team_view: Team,
 }
 
 impl RunState {
@@ -68,6 +85,42 @@ impl RunState {
         };
     }
 
+    /// Waiting in the queue; `begin` starts the clock.
+    pub fn queue(&mut self, task: String, team: bool, max_steps: u32, model: String) {
+        *self = Self {
+            phase: Phase::Queued,
+            task,
+            team,
+            max_steps,
+            model,
+            ..Self::default()
+        };
+    }
+
+    pub fn begin(&mut self) {
+        self.phase = Phase::Running;
+        self.started = Some(Instant::now());
+    }
+
+    /// Cancelled before it started.
+    pub fn cancel(&mut self) {
+        self.phase = Phase::Done;
+        self.error = Some("Cancelled before it started.".into());
+    }
+
+    pub fn is_live(&self) -> bool {
+        matches!(self.phase, Phase::Running | Phase::Waiting)
+    }
+
+    /// The user sent a message to the running agent.
+    pub fn sent(&mut self, text: String) {
+        self.steers.push(SteerView {
+            text,
+            sent_at: self.current_step(),
+            read_at: None,
+        });
+    }
+
     pub fn current_step(&self) -> u32 {
         self.steps.len() as u32
     }
@@ -78,7 +131,8 @@ impl RunState {
 
     /// Apply one message from the agent.
     pub fn apply(&mut self, msg: Ui) {
-        if let Some(t) = self.started {
+        // The clock stops when the run is done.
+        if let Some(t) = self.started.filter(|_| self.phase != Phase::Done) {
             self.elapsed = t.elapsed();
         }
         match msg {
@@ -98,8 +152,20 @@ impl RunState {
                 );
                 self.approval = Some(p);
             }
-            Ui::Plan(p) => self.plan = Some(p),
-            Ui::Report(r) => self.report = Some(r),
+            Ui::Plan(p) => {
+                self.team_view = Team::from_plan(&p);
+                self.plan = Some(p);
+            }
+            Ui::Report {
+                summary,
+                plan,
+                results,
+            } => {
+                self.team_view.report(&plan, &results);
+                self.plan = Some(plan);
+                self.report = Some(summary);
+            }
+            Ui::Paused(held) => self.held = held && self.paused,
             Ui::Finished(trace) => {
                 self.phase = Phase::Done;
                 self.thinking = false;
@@ -114,12 +180,22 @@ impl RunState {
                 {
                     last.state = StepState::Failed;
                 }
+                for rec in &trace.steps {
+                    if let Some(v) = self.steps.iter_mut().find(|v| v.index == rec.index) {
+                        v.path = rec.path.clone();
+                        v.backend = Some(rec.backend.clone());
+                    }
+                }
                 self.trace = Some(*trace);
+                self.paused = false;
+                self.held = false;
+                self.team_view.settle();
             }
             Ui::Failed(e) => {
                 self.phase = Phase::Done;
                 self.thinking = false;
                 self.error = Some(e);
+                self.team_view.settle();
             }
         }
     }
@@ -162,6 +238,8 @@ impl RunState {
                     state: StepState::Working,
                     timings: None,
                     json: serde_json::to_string_pretty(&*decision).unwrap_or_default(),
+                    path: None,
+                    backend: None,
                 });
             }
             EngineEvent::AwaitingApproval { .. } => self.phase = Phase::Waiting,
@@ -171,6 +249,9 @@ impl RunState {
                 self.last_model_ms = Some(timings.model_ms)
                     .filter(|ms| *ms > 0)
                     .or(self.last_model_ms);
+                if timings.model_ms > 0 {
+                    self.model_ms.push(timings.model_ms);
+                }
                 if let Some(s) = self.steps.iter_mut().rev().find(|s| s.index == step) {
                     s.timings = Some(timings);
                     s.state = StepState::Done;
@@ -183,11 +264,40 @@ impl RunState {
                         state: StepState::Done,
                         timings: Some(timings),
                         json: String::new(),
+                        path: None,
+                        backend: None,
                     });
                 }
             }
-            EngineEvent::Finished { .. } => self.thinking = false,
-            EngineEvent::Output { .. } | EngineEvent::Steered { .. } => {}
+            EngineEvent::Finished { .. } => {
+                self.thinking = false;
+                if self.team {
+                    self.team_view.one_finished();
+                }
+            }
+            EngineEvent::Output {
+                step,
+                command,
+                output,
+            } => self.outputs.push(OutputView {
+                step,
+                command,
+                output,
+            }),
+            EngineEvent::Steered { step, message } => {
+                match self
+                    .steers
+                    .iter_mut()
+                    .find(|s| s.read_at.is_none() && s.text == message)
+                {
+                    Some(s) => s.read_at = Some(step),
+                    None => self.steers.push(SteerView {
+                        text: message,
+                        sent_at: step,
+                        read_at: Some(step),
+                    }),
+                }
+            }
         }
     }
 }
@@ -277,6 +387,27 @@ mod tests {
         s.apply(Ui::Finished(Box::new(t)));
         assert_eq!(s.phase, Phase::Done);
         assert_eq!(s.steps[0].state, StepState::Failed);
+    }
+
+    #[test]
+    fn steering_is_marked_read_when_the_agent_takes_it() {
+        let mut s = RunState::default();
+        s.queue("t".into(), false, 40, "m".into());
+        assert_eq!(s.phase, Phase::Queued);
+        s.begin();
+        s.sent("use Firefox".into());
+        assert_eq!(s.steers[0].read_at, None);
+        s.apply(Ui::Event(EngineEvent::Steered {
+            step: 2,
+            message: "use Firefox".into(),
+        }));
+        assert_eq!(s.steers[0].read_at, Some(2));
+        s.apply(Ui::Event(EngineEvent::Output {
+            step: 3,
+            command: "ls".into(),
+            output: "a\nb".into(),
+        }));
+        assert_eq!(s.outputs.len(), 1);
     }
 
     #[test]

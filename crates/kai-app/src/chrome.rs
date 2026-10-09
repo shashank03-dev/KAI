@@ -21,12 +21,18 @@ impl KaiApp {
             Conn::Fallback(s) => (Connectivity::Reconnecting, format!("Gemini fallback · {s}")),
             Conn::Offline(_) => (Connectivity::Offline, "No model reachable".to_string()),
         };
-        let run = self.run.read(cx);
+        let run = self.active_state().unwrap_or_else(|| self.run.clone());
         let latency = run
+            .read(cx)
             .last_model_ms
             .map(|ms| format!("last step {ms} ms"))
             .unwrap_or_else(|| "no steps yet".into());
-        let model = self.settings.fast_model.clone();
+        let queued = self.queued_count(cx);
+        let (stop_keys, stop_label) = match crate::StopHotkey::label(cx) {
+            Some(k) => (Some(KbdCombo::new(&k)), "stops Kai"),
+            None => (None, "Stop: top-left corner or Ctrl+."),
+        };
+        let switcher = crate::switcher::switcher("status-model", self, cx);
         let this = cx.entity();
         StatusBar::new()
             .left(ConnectionStatus::new("conn", state))
@@ -38,17 +44,28 @@ impl KaiApp {
                         this.update(cx, |app, cx| app.check_connection(window, cx))
                     }),
             )
-            .left(StatusBarItem::new("model").icon(IconName::Cpu).label(model))
+            .left(switcher)
+            .right(
+                StatusBarItem::new("queue")
+                    .icon(IconName::ListOrdered)
+                    .label(match (queued, self.queue_held) {
+                        (0, _) => "queue empty".to_string(),
+                        (n, true) => format!("{n} queued · paused"),
+                        (n, false) => format!("{n} queued"),
+                    }),
+            )
             .right(
                 StatusBarItem::new("latency")
                     .icon(IconName::Gauge)
                     .label(latency),
             )
-            .right(
-                StatusBarItem::new("stop-key")
-                    .leading(KbdCombo::new("ctrl-alt-escape"))
-                    .label("stops Kai"),
-            )
+            .right({
+                let item = StatusBarItem::new("stop-key").label(stop_label);
+                match stop_keys {
+                    Some(k) => item.leading(k),
+                    None => item,
+                }
+            })
     }
 
     pub(crate) fn palette(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -71,6 +88,8 @@ impl KaiApp {
             [
                 cmd("new", "New task", IconName::Plus, Some("ctrl-n")),
                 cmd("stop", "Stop Kai", IconName::CircleStop, Some("ctrl-.")),
+                cmd("pause", "Pause the running task", IconName::Pause, None),
+                cmd("resume", "Resume the running task", IconName::Play, None),
                 cmd(
                     "theme",
                     "Toggle light / dark",
@@ -96,6 +115,27 @@ impl KaiApp {
             ],
         )
         .group(
+            "Switch model",
+            kai_core::settings::MODELS
+                .iter()
+                .map(|m| cmd(&format!("model:{}", m.id), m.label, IconName::Cpu, None))
+                .collect::<Vec<_>>(),
+        )
+        .group(
+            "Switch backend",
+            crate::switcher::BACKENDS
+                .iter()
+                .map(|b| {
+                    cmd(
+                        &format!("backend:{}", crate::switcher::backend_key(*b)),
+                        crate::runs::backend_label(*b),
+                        IconName::Server,
+                        None,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .group(
             "Run a skill",
             self.skills
                 .iter()
@@ -113,7 +153,18 @@ impl KaiApp {
             runner.update(cx, |app, cx| {
                 app.palette = false;
                 match value.as_ref() {
-                    "new" => app.go(Page::Run, cx),
+                    "new" => app.select(None, cx),
+                    "pause" | "resume" => {
+                        if let Some(id) = app.active {
+                            app.set_paused(id, value.as_ref() == "pause", cx)
+                        }
+                    }
+                    v if v.starts_with("model:") => crate::switcher::set_model(app, &v[6..], cx),
+                    v if v.starts_with("backend:") => {
+                        let b = crate::switcher::backend_from_key(&v[8..]);
+                        crate::switcher::set_backend(app, b, cx);
+                        app.check_connection(window, cx);
+                    }
                     "stop" => app.stop(cx),
                     "theme" => Self::toggle_theme(cx),
                     "shortcuts" => app.shortcuts = true,
@@ -127,8 +178,7 @@ impl KaiApp {
                         if let Some(s) = app.skills.iter().find(|s| s.front.name == name) {
                             let hint = format!("Use the {} skill: ", s.front.name);
                             app.draft.update(cx, |d, cx| d.set_text(hint, cx));
-                            app.go(Page::Run, cx);
-                            let _ = window;
+                            app.select(None, cx);
                         }
                     }
                     _ => {}

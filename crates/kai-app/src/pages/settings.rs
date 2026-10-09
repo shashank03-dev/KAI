@@ -1,11 +1,10 @@
 //! Settings: model and server, safety, appearance, privacy, shortcuts, about.
 
-use crate::AgentHandle;
 use crate::app::KaiApp;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, SegmentedControl},
-    feedback::{ErrorView, InlineMessage, Toast},
-    forms::{Choice, PasswordInput, Select, Switch, UrlInput},
+    feedback::Toast,
+    forms::Switch,
     layout::ScrollArea,
     overlays::ConfirmDialog,
     primitives::{IconName, Severity},
@@ -14,9 +13,9 @@ use ely_gpui_component::{
 };
 use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
 use kai_core::risk::ApprovalLevel;
-use kai_core::settings::{BackendChoice, MODELS, Settings};
+use kai_core::settings::Settings;
 
-fn row(
+pub(crate) fn row(
     label: &str,
     hint: &str,
     control: impl IntoElement,
@@ -36,105 +35,6 @@ fn row(
                 .child(hint.to_string()),
         )
         .child(control)
-}
-
-fn save_keys(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
-    app.settings.vllm_endpoint = app.pages.endpoint.read(cx).text().trim().to_string();
-    for (field, name) in [
-        (app.pages.vllm_key.clone(), kai_os::secrets::VLLM),
-        (app.pages.gemini_key.clone(), kai_os::secrets::GEMINI),
-    ] {
-        let v = field.read(cx).text().trim().to_string();
-        if !v.is_empty() {
-            match kai_os::secrets::set(name, &v) {
-                Ok(()) => field.update(cx, |f, cx| f.set_text("", cx)),
-                Err(e) => app.toast(
-                    Toast::new("Key not saved")
-                        .body(e.to_string())
-                        .severity(Severity::Danger),
-                    cx,
-                ),
-            }
-        }
-    }
-    app.save_settings(cx);
-}
-
-fn test(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
-    save_keys(app, cx);
-    app.pages.testing = true;
-    app.pages.test_result = None;
-    let rx = cx
-        .global::<AgentHandle>()
-        .0
-        .test_connection(app.settings.clone(), kai_os::secrets::keys());
-    cx.spawn(async move |this, cx| {
-        let r = rx
-            .await
-            .unwrap_or_else(|_| Err("Kai's agent stopped.".into()));
-        let _ = this.update(cx, |a, cx| {
-            a.pages.testing = false;
-            a.pages.test_result =
-                Some(r.map(|(d, b)| {
-                    format!("{b} answered an image request in {} ms.", d.as_millis())
-                }));
-            cx.notify();
-        });
-    })
-    .detach();
-}
-
-fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
-    let (backend, fast, careful, saver, tester) = (
-        cx.entity(),
-        cx.entity(),
-        cx.entity(),
-        cx.entity(),
-        cx.entity(),
-    );
-    let keys = kai_os::secrets::keys();
-    let stored = |k: &Option<String>| {
-        if k.is_some() {
-            "A key is stored in the OS keychain. Type a new one to replace it."
-        } else {
-            "No key stored yet."
-        }
-    };
-    let choice = match app.settings.backend {
-        BackendChoice::Both => "both",
-        BackendChoice::Vllm => "vllm",
-        BackendChoice::Gemini => "gemini",
-        BackendChoice::Gateway => "gateway",
-        BackendChoice::OpenAi => "openai",
-        BackendChoice::Mock => "mock",
-    };
-    let result = match &app.pages.test_result {
-        Some(Ok(m)) => Some(InlineMessage::new(Severity::Success, m.clone()).into_any_element()),
-        Some(Err(e)) => Some(
-            ErrorView::new("test-err", IconName::TriangleAlert, "The test didn't pass")
-                .detail(e.clone())
-                .into_any_element(),
-        ),
-        None => None,
-    };
-    let models = || MODELS.iter().map(|m| Choice::new(m.id, m.label));
-    SettingsSection::new("Model & server")
-        .description("Where Gemma 4 runs. Screenshots go only to these endpoints.")
-        .row(row("Backend", "Both tries your DigitalOcean server first and falls back to Gemini for a step when it is down or slow.", SegmentedControl::new("backend", choice)
-            .segment("both", "Both", None).segment("vllm", "DigitalOcean", None).segment("gemini", "Gemini", None)
-            .on_change(move |v, _, cx| backend.update(cx, |a, cx| {
-                a.settings.backend = match v.as_ref() { "vllm" => BackendChoice::Vllm, "gemini" => BackendChoice::Gemini, _ => BackendChoice::Both };
-                a.save_settings(cx);
-            })), cx))
-        .row(row("DigitalOcean server", "The address deploy/digitalocean/up.sh printed, ending in /v1.", UrlInput::new(&app.pages.endpoint), cx))
-        .row(row("Server API key", stored(&keys.vllm), PasswordInput::new(&app.pages.vllm_key), cx))
-        .row(row("Gemini API key", stored(&keys.gemini), PasswordInput::new(&app.pages.gemini_key), cx))
-        .row(row("Fast model", "Used for every step.", Select::new("fast", models()).selected(app.settings.fast_model.clone()).on_change(move |v, _, cx| fast.update(cx, |a, cx| { a.settings.fast_model = v.to_string(); a.save_settings(cx); })), cx))
-        .row(row("Careful model", "Used for one step after a failed one, then Kai drops back.", Select::new("careful", models()).selected(app.settings.careful_model.clone()).on_change(move |v, _, cx| careful.update(cx, |a, cx| { a.settings.careful_model = v.to_string(); a.save_settings(cx); })), cx))
-        .row(div().flex().gap_2()
-            .child(Button::new("save-model", "Save").variant(ButtonVariant::Secondary).on_click(move |_, _, cx| saver.update(cx, save_keys)))
-            .child(Button::new("test-model", "Save and test").variant(ButtonVariant::Primary).loading(app.pages.testing).on_click(move |_, _, cx| tester.update(cx, test))))
-        .row(div().children(result))
 }
 
 fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
@@ -237,7 +137,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             ))
             .into_any_element(),
         "about" => about(cx).into_any_element(),
-        _ => model(app, cx).into_any_element(),
+        _ => crate::pages::model_settings::model(app, cx).into_any_element(),
     };
     let picker = cx.entity();
     let confirm = app.pages.confirm_delete.then(|| {

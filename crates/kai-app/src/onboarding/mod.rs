@@ -4,23 +4,25 @@
 use crate::AgentHandle;
 use crate::app::KaiApp;
 use ely_gpui_component::{
-    buttons::{Button, ButtonVariant, SegmentedControl},
-    chat::{CapabilityCards, SuggestionChips},
-    data_display::{Badge, Tone},
+    buttons::{Button, ButtonVariant},
+    chat::CapabilityCards,
     feedback::{Callout, ErrorView, InlineMessage},
-    forms::{HotkeyInput, PasswordInput, RadioCard, TextInput, UrlInput},
+    forms::{PasswordInput, RadioCard, TextInput, UrlInput},
     onboarding::{OnboardingStep, OnboardingWizard},
     primitives::{IconName, Severity},
     theme::{ActiveTheme, TextSize},
 };
 use gpui::{
-    AppContext, Context, Entity, IntoElement, Keystroke, ParentElement, Render, Styled, WeakEntity,
-    Window, div,
+    AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, WeakEntity, Window,
+    div,
 };
-use kai_core::risk::ApprovalLevel;
 use kai_core::settings::{BackendChoice, Settings};
-use kai_os::permissions::{Check, Status};
+use kai_os::permissions::Check;
 use std::time::Duration;
+
+mod steps;
+
+pub use steps::gh_to_gpui;
 
 const DEMO: &str = "Open bmsce.ac.in and find the IEEE CS page";
 
@@ -31,6 +33,8 @@ pub struct Onboarding {
     endpoint: Entity<TextInput>,
     vllm_key: Entity<TextInput>,
     gemini_key: Entity<TextInput>,
+    gateway_key: Entity<TextInput>,
+    openai_key: Entity<TextInput>,
     testing: bool,
     tested: Option<Result<(Duration, String), String>>,
     checks: Vec<Check>,
@@ -60,6 +64,18 @@ impl Onboarding {
                 .label("Gemini API key")
                 .masked()
         });
+        let gateway_key = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .placeholder("Vercel AI Gateway key")
+                .label("Vercel AI Gateway key")
+                .masked()
+        });
+        let openai_key = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .placeholder("OpenAI API key")
+                .label("OpenAI API key")
+                .masked()
+        });
         let me = Self {
             app,
             step: 0,
@@ -67,6 +83,8 @@ impl Onboarding {
             endpoint,
             vllm_key,
             gemini_key,
+            gateway_key,
+            openai_key,
             testing: false,
             tested: None,
             checks: Vec::new(),
@@ -101,13 +119,19 @@ impl Onboarding {
         cx.notify();
     }
 
+    /// The keys typed here, falling back to any already stored, so a Test
+    /// works with a key set earlier or in the environment.
     fn keys(&self, cx: &Context<Self>) -> kai_core::settings::Keys {
-        let v = self.vllm_key.read(cx).text().trim().to_string();
-        let g = self.gemini_key.read(cx).text().trim().to_string();
+        let typed = |f: &Entity<TextInput>| {
+            let v = f.read(cx).text().trim().to_string();
+            (!v.is_empty()).then_some(v)
+        };
+        let stored = kai_os::secrets::keys();
         kai_core::settings::Keys {
-            vllm: (!v.is_empty()).then_some(v),
-            gemini: (!g.is_empty()).then_some(g),
-            ..Default::default()
+            vllm: typed(&self.vllm_key).or(stored.vllm),
+            gemini: typed(&self.gemini_key).or(stored.gemini),
+            gateway: typed(&self.gateway_key).or(stored.gateway),
+            openai: typed(&self.openai_key).or(stored.openai),
         }
     }
 
@@ -134,12 +158,14 @@ impl Onboarding {
     }
 
     fn finish(&mut self, demo: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let keys = self.keys(cx);
-        for (name, value) in [
-            (kai_os::secrets::VLLM, keys.vllm),
-            (kai_os::secrets::GEMINI, keys.gemini),
+        for (name, field) in [
+            (kai_os::secrets::VLLM, &self.vllm_key),
+            (kai_os::secrets::GEMINI, &self.gemini_key),
+            (kai_os::secrets::GATEWAY, &self.gateway_key),
+            (kai_os::secrets::OPENAI, &self.openai_key),
         ] {
-            if let Some(v) = value
+            let v = field.read(cx).text().trim().to_string();
+            if !v.is_empty()
                 && let Err(e) = kai_os::secrets::set(name, &v)
             {
                 log::error!("onboarding: key not stored: {e}");
@@ -251,6 +277,26 @@ impl Onboarding {
                             .description("Gemma 4 through Google's API with your key.")
                             .icon(IconName::Globe)
                             .on_select(pick(BackendChoice::Gemini, cx)),
+                    )
+                    .child(
+                        RadioCard::new(
+                            "b-gateway",
+                            b == BackendChoice::Gateway,
+                            "Vercel AI Gateway",
+                        )
+                        .description(
+                            "Gemma 4 (and GPT models for comparison) with one Gateway key.",
+                        )
+                        .icon(IconName::Network)
+                        .on_select(pick(BackendChoice::Gateway, cx)),
+                    )
+                    .child(
+                        RadioCard::new("b-openai", b == BackendChoice::OpenAi, "OpenAI")
+                            .description(
+                                "GPT models with your OpenAI key, to compare against Gemma.",
+                            )
+                            .icon(IconName::Sparkles)
+                            .on_select(pick(BackendChoice::OpenAi, cx)),
                     ),
             )
             .children(wants_vllm.then(|| {
@@ -262,6 +308,8 @@ impl Onboarding {
                     .child(PasswordInput::new(&self.vllm_key))
             }))
             .children(wants_gemini.then(|| PasswordInput::new(&self.gemini_key)))
+            .children((b == BackendChoice::Gateway).then(|| PasswordInput::new(&self.gateway_key)))
+            .children((b == BackendChoice::OpenAi).then(|| PasswordInput::new(&self.openai_key)))
             .child(
                 Button::new("test", "Test with a real image")
                     .variant(ButtonVariant::Primary)
@@ -270,132 +318,6 @@ impl Onboarding {
             )
             .children(result)
     }
-
-    fn access(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let theme = cx.theme();
-        let fixer = cx.entity();
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .children(self.checks.iter().map(|c| {
-                let (label, tone) = match c.status {
-                    Status::Granted => ("Granted", Tone::Success),
-                    Status::Limited => ("Limited", Tone::Warning),
-                    Status::Missing => ("Missing", Tone::Danger),
-                };
-                let fix = (c.status == Status::Missing && c.name == "Accessibility").then(|| {
-                    let f = fixer.clone();
-                    Button::new("fix-a11y", "Turn it on")
-                        .variant(ButtonVariant::Secondary)
-                        .on_click(move |_, _, cx| {
-                            f.update(cx, |_, cx| {
-                                cx.global::<AgentHandle>().0.enable_accessibility()
-                            })
-                        })
-                });
-                div()
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(theme.colors.border)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().child(c.name))
-                            .child(Badge::new(label).tone(tone)),
-                    )
-                    .child(
-                        div()
-                            .text_size(theme.text_size(TextSize::Sm))
-                            .text_color(theme.colors.fg_muted)
-                            .child(c.why),
-                    )
-                    .children((c.status != Status::Granted).then(|| {
-                        div()
-                            .text_size(theme.text_size(TextSize::Sm))
-                            .child(c.fix.clone())
-                    }))
-                    .children(fix)
-            }))
-            .children(
-                self.checks
-                    .is_empty()
-                    .then(|| div().text_color(theme.colors.fg_muted).child("Checking…")),
-            )
-    }
-
-    fn safety(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let (level, key) = (cx.entity(), cx.entity());
-        let selected = match self.settings.approval {
-            ApprovalLevel::Every => "every",
-            ApprovalLevel::HighRiskOnly => "high",
-            ApprovalLevel::Autopilot => "auto",
-        };
-        let stroke = Keystroke::parse(&gh_to_gpui(&self.settings.kill_hotkey)).ok();
-        div().flex().flex_col().gap_4()
-            .child(div().child("When should Kai ask you first?"))
-            .child(SegmentedControl::new("approval", selected)
-                .segment("every", "Every action", None)
-                .segment("high", "Risky actions only", None)
-                .segment("auto", "Autopilot", None)
-                .on_change(move |v, _, cx| level.update(cx, |o, cx| {
-                    o.settings.approval = match v.as_ref() { "every" => ApprovalLevel::Every, "auto" => ApprovalLevel::Autopilot, _ => ApprovalLevel::HighRiskOnly };
-                    cx.notify();
-                })))
-            .child(div().text_size(cx.theme().text_size(TextSize::Sm)).text_color(cx.theme().colors.fg_muted).child("Autopilot still always asks for payments and passwords."))
-            .child(div().child("Stop shortcut (works from any app)"))
-            .child(HotkeyInput::new("kill", stroke).on_change(move |k, _, cx| key.update(cx, |o, cx| {
-                if let Some(k) = k { o.settings.kill_hotkey = gpui_to_gh(&k); }
-                cx.notify();
-            })))
-            .child(Callout::new(Severity::Warning).title("Three ways to stop Kai").child("Press the stop shortcut, push the mouse into the top-left corner of the screen, or press Stop in the mini window."))
-    }
-
-    fn try_it(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let go = cx.entity();
-        div().flex().flex_col().gap_4()
-            .child(div().child("Try a safe task. Kai will open your browser and look around; nothing is sent or changed."))
-            .child(SuggestionChips::new("demo", [(DEMO, IconName::Globe)], move |_, window, cx| go.update(cx, |o, cx| o.finish(true, window, cx))))
-    }
-}
-
-/// "ctrl+alt+Escape" (global-hotkey) ⇄ "ctrl-alt-escape" (gpui).
-pub fn gh_to_gpui(s: &str) -> String {
-    s.split('+')
-        .map(|p| p.trim().to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-pub fn gpui_to_gh(k: &Keystroke) -> String {
-    let mut parts = Vec::new();
-    if k.modifiers.control {
-        parts.push("ctrl".to_string());
-    }
-    if k.modifiers.alt {
-        parts.push("alt".to_string());
-    }
-    if k.modifiers.shift {
-        parts.push("shift".to_string());
-    }
-    if k.modifiers.platform {
-        parts.push("super".to_string());
-    }
-    let key = match k.key.as_str() {
-        "escape" => "Escape".to_string(),
-        "end" => "End".to_string(),
-        "space" => "Space".to_string(),
-        other if other.len() == 1 => other.to_ascii_uppercase(),
-        other => other.to_string(),
-    };
-    parts.push(key);
-    parts.join("+")
 }
 
 impl Render for Onboarding {
@@ -436,38 +358,31 @@ impl Render for Onboarding {
             _ => self.try_it(cx).into_any_element(),
         };
         let (walk, done, skip) = (cx.entity(), cx.entity(), cx.entity());
-        div().size_full().flex().justify_center().p_8().child(
-            div().w_full().max_w(gpui::rems(36.)).child(
-                OnboardingWizard::new(
-                    "onboarding",
-                    steps,
-                    self.step,
-                    move |to, _, cx| {
-                        walk.update(cx, |o, cx| {
-                            o.step = to;
-                            cx.notify();
-                        })
-                    },
-                    move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)),
-                )
-                .content(content)
-                .ready(self.ready())
-                .on_skip(move |window, cx| skip.update(cx, |o, cx| o.finish(false, window, cx))),
-            ),
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hotkeys_convert_both_ways() {
-        assert_eq!(gh_to_gpui("ctrl+alt+Escape"), "ctrl-alt-escape");
-        let k = Keystroke::parse("ctrl-alt-escape").unwrap();
-        assert_eq!(gpui_to_gh(&k), "ctrl+alt+Escape");
-        let k = Keystroke::parse("ctrl-shift-k").unwrap();
-        assert_eq!(gpui_to_gh(&k), "ctrl+shift+K");
+        // Scrolls on short windows (the Connect step is the tallest).
+        ely_gpui_component::layout::ScrollArea::new("onboarding-scroll")
+            .vertical()
+            .child(
+                div().w_full().flex().justify_center().p_8().child(
+                    div().w_full().max_w(gpui::rems(36.)).child(
+                        OnboardingWizard::new(
+                            "onboarding",
+                            steps,
+                            self.step,
+                            move |to, _, cx| {
+                                walk.update(cx, |o, cx| {
+                                    o.step = to;
+                                    cx.notify();
+                                })
+                            },
+                            move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)),
+                        )
+                        .content(content)
+                        .ready(self.ready())
+                        .on_skip(move |window, cx| {
+                            skip.update(cx, |o, cx| o.finish(false, window, cx))
+                        }),
+                    ),
+                ),
+            )
     }
 }
