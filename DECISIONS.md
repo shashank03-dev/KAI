@@ -193,3 +193,62 @@ billing.
   skill on filler words alone.
 - No OpenAI comparison runner: no key was supplied, so per the prompt the README
   says the comparison was not run.
+
+## Phase 3/4 — design and the app
+
+- **English only.** The prompt suggested a Kannada title and greeting; the
+  owner asked for English only, so the app is "Kai" and every string is
+  English. (Ely's `I18n` also has no Kannada locale at the pinned commit.)
+- **Component names mapped to Ely's real homes** at the pinned commit; full
+  table in `docs/DESIGN.md` (e.g. NavigationRail → `shell::ActivityBar`,
+  StatCard → `data_display::Statistic`, Result → `feedback::ResultView`).
+- **Approval dialog** is composed on `overlays::Dialog` (what Ely's own
+  `ToolApprovalDialog` is built on) because the run needs Stop / Skip /
+  Approve and `ToolApprovalDialog` only has Run / Deny. Escape, the scrim and
+  Stop all stop. The mini window shows the same three answers inline, since the
+  main window is minimised during a run.
+- **SystemNotification** is unfinished in Ely (`prove`); Kai uses the mini
+  window's amber state and a toast instead. TrayIcon is macOS-only in Ely and
+  not used.
+- **Shortcut cheat-sheet** opens on `Ctrl+/` and `F1`, not `?`: a root binding
+  on `?` would swallow the character typed into the composer.
+- **Kai saffron accent** replaces only Ely's `accent` token: light `#B45309`
+  (white label 5.0:1, on page 4.8:1), dark `#F59E0B` (dark label 7.1:1, on page
+  7.1:1); a test holds both modes at WCAG AA. Status colours stay Ely's.
+- **Save as skill** drafts the `SKILL.md` locally from the trace (leading
+  URL/app/shortcut steps become deterministic steps, the rest becomes
+  instructions); the user edits it beside a live preview and spec validation.
+  It does not yet ask Gemma to polish the draft.
+- **Voice input** is not shipped: no speech-to-text was implemented, so the
+  composer has no voice button (as the prompt requires).
+- **Zoomed crop** on a missed grid click is still not requested automatically.
+
+## Screenshots — not captured here (honest)
+
+The app builds, runs and passes its tests here, and `KAI_CAPTURE=<dir>
+kai-app` walks all 21 screens/states in light and dark. But in this headless
+container **GPUI cannot present frames to Xvfb**: every capture, and even a
+root-window grab with ImageMagick, is black — and Ely's own `docs_start`
+example behaves the same, with default Vulkan, Mesa's software Vulkan
+(lavapipe) and GLX enabled. So `screenshots/` has no PNGs from this build. On
+a real Linux or Windows desktop run:
+
+```sh
+KAI_CAPTURE=screenshots cargo run --release -p kai-app
+```
+
+and review/commit the 42 PNGs. Keyboard-only and mouse-only walkthroughs of the
+flow were likewise not performed here.
+
+## Phase 5 — ship
+
+- CI (`.github/workflows/ci.yml`) runs on Ubuntu 24.04 and Windows: fmt,
+  clippy `-D warnings`, all tests, `kai skill validate skills`, mock bench.
+  macOS is not a target (owner: Linux and Windows).
+- Release (`release.yml`) on `v*` tags builds `kai-app` + `kai` and attaches
+  `kai-linux-x86_64.tar.gz` and `kai-windows-x86_64.zip`. Unsigned; the README
+  explains SmartScreen. Release `kai-app` on Windows uses the GUI subsystem.
+- The repo is **private** at the time of writing; the hackathon requires it
+  public — flip it before submission.
+- Commits are authored by the repo owner's account with no co-author lines, at
+  the owner's request.

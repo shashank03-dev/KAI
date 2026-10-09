@@ -1,0 +1,182 @@
+# The Kai harness
+
+Kai's harness is the code between Gemma 4 and the computer. It lives in
+`crates/kai-core` (OS-free, model-agnostic, fully tested) and `crates/kai-os`
+(the real eyes and hands on Linux and Windows).
+
+## The loop
+
+One action per step: **observe → ground → decide → act → verify**.
+
+```mermaid
+flowchart LR
+    subgraph OS["kai-os (Linux / Windows)"]
+        CAP[Capture<br/>xcap, primary display] --> MASK[Mask Kai's own windows]
+        TREE[Accessibility tree<br/>AT-SPI2 / UI Automation]
+        ACT[Act<br/>enigo input · launcher · shell]
+    end
+    subgraph CORE["kai-core"]
+        GROUND[Ground<br/>numbered marks or grid]
+        PROMPT[Prompt<br/>stable prefix first]
+        DECIDE[Decide<br/>one JSON action]
+        CHECK[Validate + clamp<br/>risk classifier]
+        VERIFY[Verify<br/>perceptual hash · expect]
+    end
+    MODEL[(Gemma 4<br/>vLLM on DigitalOcean<br/>or Gemini API)]
+    MASK --> GROUND
+    TREE --> GROUND
+    GROUND --> PROMPT --> DECIDE
+    DECIDE <--> MODEL
+    DECIDE --> CHECK
+    CHECK -->|high risk| APPROVE{{You approve?}}
+    APPROVE -->|yes| ACT
+    CHECK -->|otherwise| ACT
+    ACT --> VERIFY --> CAP
+    VERIFY -.->|no progress x2| ASK[Stop and ask you]
+```
+
+### 1. Observe
+`DesktopPerceptor::observe` captures the primary display and reads the
+accessibility tree **in parallel**, both off the UI thread. Kai's own windows
+never reach the model: Windows excludes them with
+`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`; Linux has no such API, so
+the app reports its window rectangles and they are painted over before the
+frame is hashed or encoded. The frame is downscaled to 1280 px on the long side
+with SIMD resize and JPEG-encoded at quality 75.
+
+### 2. Ground (Set-of-Marks)
+`a11y::ground` keeps visible, interactive elements, numbers them in reading
+order (lines top to bottom, left to right within a line), and drops duplicate
+boxes. `marks::draw` puts a box and a numbered tag on the model's copy of the
+screenshot; the model also gets a text list:
+
+```
+#14 button "Save" (enabled)
+#15 password "Password" (secure)
+```
+
+When the tree has fewer than two useful elements (games, canvases, some
+Electron apps), Kai falls back to a **numbered grid** sized to roughly 120 px
+cells. Either way the model answers with one integer `target`; it never
+returns pixel coordinates. The tree read has a 600 ms budget; past it, the grid
+is used.
+
+![What the model sees](img/set-of-marks-gtk.jpg)
+
+*A real frame from `gtk3-widget-factory` on Linux: 81 elements from AT-SPI,
+captured in ~20 ms, tree in ~150 ms, marks and JPEG in ~45 ms.*
+
+### 3. Decide
+One model call returns one JSON object:
+
+```json
+{ "thought": "≤ 25 words", "action": "click | double_click | right_click | type | key | scroll | open_app | open_url | wait | ask_user | done | shell",
+  "target": 14, "text": "…", "keys": ["ctrl","s"], "direction": "down", "amount": 3,
+  "risk": "none | low | high", "expect": "what the screen should show next" }
+```
+
+`Decision::parse` rejects unknown fields (`serde(deny_unknown_fields)`) and
+tolerates code fences or prose around the object. `validate_and_clamp` then
+forces every field into range: thought cut to 25 words, scroll amount 1–20,
+text capped, key names normalised (`Command`→`cmd`, `Return`→`enter`), and
+required fields enforced per action (`click` needs `target`, `type` needs
+`text`, …). On the vLLM backend the same schema is sent as a structured-output
+JSON schema, so replies are always valid; on Gemini, JSON mode plus **one
+repair retry** that tells the model what was wrong.
+
+`shell` is Kai's addition: terminal work (files, diagnostics, builds) runs as a
+command and its output is fed back into the next step, which is faster and
+more exact than clicking through a file manager.
+
+### 4. Act
+`DesktopActuator` clicks the centre of the target's box through `enigo` on a
+dedicated input thread. Text longer than 32 characters is pasted through the
+clipboard, and the user's clipboard is restored afterwards. `open_app` and
+`open_url` are **fast paths** straight to the OS (`.desktop` entries on Linux,
+`start` on Windows; only `http`, `https` and `mailto` URLs). `shell` runs in
+`sh` (Linux) or PowerShell (Windows) in its own process group, with a 180 s
+timeout and a 12 KB output cap, and is killed with its whole process tree when
+the kill switch trips.
+
+### 5. Verify
+After acting, `settle` waits until two captures in a row match (instead of a
+fixed sleep), up to a limit. The next observation's perceptual hash (dHash,
+≤ 3 bits apart counts as the same screen) is compared with the last one. One
+step without change adds a warning to the next prompt; two in a row stop the
+run and ask the user. Three undecodable replies or failed actions in a row also
+stop and ask. `wait` and `shell` steps don't count as "no progress".
+
+## Speed — what makes it fast
+
+| Technique | Where |
+| --- | --- |
+| MoE `gemma-4-26b-a4b-it` (~4B active) by default; `gemma-4-31b-it` only for the one step after a failure, then back | `Engine.careful`, `engine.rs` |
+| Stable system prompt and schema first, changing parts last → vLLM prefix-cache hits every step | `prompt.rs` |
+| Only the last 3 steps as text history; never old screenshots | `prompt::user_turn` |
+| `thought` ≤ 25 words, `max_tokens` 192, temperature 0 | `Config`, `schema.rs` |
+| One keep-alive HTTP/2 connection (ALPN), warmed when the app opens | `VllmClient`, `KaiApp::after_open` |
+| Fast paths that skip the model: `open_app`, `open_url`, and a skill's deterministic `steps` | `engine.rs`, `skill.rs` |
+| Capture and tree read in parallel; SIMD downscale; bitmap-font marks | `desktop.rs`, `frame.rs`, `marks.rs` |
+| Shell steps return the moment the command exits (no polling delay) | `shell.rs` |
+| Sub-agents: independent terminal subtasks run concurrently | `orchestrator.rs` |
+| Every step records capture · tree · encode · model · act timings | `trace.rs`, shown in the UI and saved |
+
+Measured here (Xvfb, 4 vCPU, no GPU): observe ≈ 200 ms; **Kai's own per-step
+overhead p50 65 ms / p95 93 ms** in the `replay` benchmark (model time
+excluded). Model latency depends on the Droplet and is measured with
+`kai bench --backend vllm` on the demo machine.
+
+## Sub-agents
+
+`Orchestrator` makes one planning call that splits a task into up to 8
+subtasks, each `shell` or `gui`, with optional `depends_on`. Subtasks run in
+waves: within a wave, terminal sub-agents run **concurrently** (bounded by a
+semaphore, default 4); GUI sub-agents share the one screen and mouse, so they
+take a lock and run in turn. A dependent subtask receives its parents' outputs
+in its goal. A final call writes the report. Unknown or forward dependencies are
+dropped, so a bad plan can't deadlock. Example: "audit my site example.com"
+becomes DNS, TLS and header checks in parallel, then one summary.
+
+## Safety
+
+- **Risk is decided by Kai, not the model.** `risk::classify` takes the model's
+  risk as a floor and raises it: a password field (from the tree) is always
+  high; effect words on the target or in the action (send, buy, pay, delete,
+  submit, transfer, …) make it high; destructive shell commands (`rm -rf`,
+  `mkfs`, `sudo`, `| sh`, `Remove-Item`, `diskpart`, …) are high.
+- **Approval levels:** ask for every action, ask for risky actions only
+  (default), or autopilot — which still always asks for payments and passwords.
+- **Kill switch:** `Ctrl+Alt+Esc` from any app (falls back to `Ctrl+Alt+End`
+  if taken), the pointer in the top-left corner, or the Stop button. The engine
+  checks the flag before every step; a running command is killed with its
+  process tree. Tested: stopped within one step, every time.
+- **Limits:** 40 steps / 10 minutes per task by default.
+- **Privacy:** screenshots go only to the configured model endpoint. Traces
+  (JSON + frames) stay in the local config folder. Keys live in the OS keychain.
+
+## Model backends
+
+All behind `ModelClient`:
+
+- `VllmClient` — OpenAI-compatible `/v1/chat/completions` with image parts and
+  `response_format: json_schema`, to the DigitalOcean Droplet.
+- `GeminiClient` — `generateContent` with `inlineData`, `systemInstruction`,
+  `responseMimeType: application/json`, `thinkingLevel: low`; if the model
+  rejects the thinking field, it retries without it once and remembers.
+- `FailoverClient` — Droplet first; on timeout, transport error or 5xx it uses
+  Gemini for the step and stays there for 30 s, then tries the Droplet again.
+  The status bar says which one answered.
+- `MockClient` — replays recorded replies, for tests, the benchmark and offline
+  UI work.
+
+## Tests
+
+`cargo test --workspace` (110 tests) covers: schema parsing of good, malformed
+and adversarial replies; Set-of-Marks numbering, reading order, dedupe, grid
+mapping and drawing; risk classification (a password field is always high,
+destructive shell is high); failover switching and cooldown; skill loading and
+validation against the spec; the loop end to end with `MockClient` against a
+scripted fake screen (success, approvals, kill switch, no-progress stop, repair
+retry, step limit, skill steps with no model call); parallel sub-agents feeding
+a dependent; the shell runner (exit codes, caps, timeout, kill switch); and the
+UI's run state, skill drafting and history timeline.

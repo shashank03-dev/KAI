@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            archive: kai-linux-x86_64.tar.gz
+          - os: windows-latest
+            archive: kai-windows-x86_64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \
+            libfontconfig-dev libdbus-1-dev libxdo-dev libxtst-dev libxrandr-dev libxi-dev \
+            libgbm-dev libegl-dev libpipewire-0.3-dev libclang-dev
+      - run: cargo build --release -p kai-app -p kai-cli
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/kai
+          cp target/release/kai-app target/release/kai dist/kai/
+          cp -r skills bench LICENSE README.md dist/kai/
+          tar -C dist -czf ${{ matrix.archive }} kai
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/kai | Out-Null
+          Copy-Item target/release/kai-app.exe, target/release/kai.exe dist/kai/
+          Copy-Item -Recurse skills, bench dist/kai/
+          Copy-Item LICENSE, README.md dist/kai/
+          Compress-Archive -Path dist/kai -DestinationPath ${{ matrix.archive }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive }}

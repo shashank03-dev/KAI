@@ -1,4 +1,5 @@
 //! Kai: Gemma 4's hands on your computer. The desktop app.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod agent;
 mod app;
