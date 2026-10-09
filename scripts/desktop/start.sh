@@ -59,6 +59,10 @@ _kai_start() {
   export QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
   export SAL_USE_VCLPLUGIN=gtk3
   export MOZ_ENABLE_WAYLAND=0
+  # Web links go to Firefox (the container has no default-browser setting).
+  if [ -z "${BROWSER:-}" ] && command -v firefox >/dev/null 2>&1; then
+    export BROWSER=firefox
+  fi
 
   # 4. AT-SPI bus launcher (it starts the a11y bus and the registry daemon).
   if ! _alive "$(_pid atspi)"; then
@@ -90,6 +94,7 @@ _kai_start() {
     echo "export NO_AT_BRIDGE=0 GTK_MODULES=gail:atk-bridge ACCESSIBILITY_ENABLED=1"
     echo "export GNOME_ACCESSIBILITY=1 QT_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1"
     echo "export SAL_USE_VCLPLUGIN=gtk3 MOZ_ENABLE_WAYLAND=0"
+    [ -n "${BROWSER:-}" ] && echo "export BROWSER=$BROWSER"
   } >"$dir/env"
   echo "Kai desktop up on $DISPLAY (env: $dir/env)"
 }

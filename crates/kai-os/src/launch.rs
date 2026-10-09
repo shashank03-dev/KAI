@@ -25,6 +25,20 @@ pub fn normalise_url(raw: &str) -> anyhow::Result<String> {
 
 pub fn open_url(raw: &str) -> anyhow::Result<()> {
     let url = normalise_url(raw)?;
+    // `$BROWSER` (the usual Unix convention) wins for web links, so a desktop
+    // with no default-browser association doesn't hand them to another app.
+    #[cfg(target_os = "linux")]
+    if url.starts_with("http")
+        && let Some(b) = std::env::var_os("BROWSER").filter(|b| !b.is_empty())
+    {
+        Command::new(b)
+            .arg(&url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        return Ok(());
+    }
     open::that_detached(&url)?;
     Ok(())
 }
