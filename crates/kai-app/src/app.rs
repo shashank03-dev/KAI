@@ -40,6 +40,7 @@ pub fn bind_keys(cx: &mut App) {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
     Run,
+    Models,
     Skills,
     History,
     Bench,
@@ -50,6 +51,7 @@ impl Page {
     fn key(self) -> &'static str {
         match self {
             Page::Run => "run",
+            Page::Models => "models",
             Page::Skills => "skills",
             Page::History => "history",
             Page::Bench => "bench",
@@ -60,6 +62,7 @@ impl Page {
     pub(crate) fn from_key(k: &str) -> Option<Self> {
         [
             Page::Run,
+            Page::Models,
             Page::Skills,
             Page::History,
             Page::Bench,
@@ -105,6 +108,8 @@ pub struct KaiApp {
     pub conn: Conn,
     pub onboarding: Option<Entity<Onboarding>>,
     pub pages: pages::PageState,
+    /// Local open models: hardware, ranking, the download/start job.
+    pub local: Entity<crate::local::LocalState>,
     pub capture: Option<PathBuf>,
 }
 
@@ -122,9 +127,11 @@ impl KaiApp {
                 .multi_line(1, 6)
                 .placeholder(t(cx, "home.placeholder", &[]))
         });
+        let local = cx.new(|_| crate::local::LocalState::new(&settings.local_model));
+        crate::local::stop_on_quit(&local, cx);
         let onboarding = (!settings.onboarded).then(|| {
-            let this = cx.entity().downgrade();
-            cx.new(|cx| Onboarding::new(settings.clone(), this, window, cx))
+            let (this, local) = (cx.entity().downgrade(), local.clone());
+            cx.new(|cx| Onboarding::new(settings.clone(), this, local, window, cx))
         });
         let steer_draft = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -147,6 +154,7 @@ impl KaiApp {
             run_tab: "steps".into(),
             team: settings.team_mode,
             pages: pages::PageState::new(&settings, window, cx),
+            local,
             settings,
             skills: load_skills(),
             toaster: cx.new(|_| Toaster::default()),
@@ -163,10 +171,16 @@ impl KaiApp {
         self.check_connection(window, cx);
         if let Some(dir) = self.capture.clone() {
             crate::pages::capture::start(dir, window, cx);
+        } else {
+            self.detect_local(cx);
         }
     }
 
     pub fn check_connection(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.recheck_connection(cx);
+    }
+
+    pub fn recheck_connection(&mut self, cx: &mut Context<Self>) {
         let rx = cx
             .global::<AgentHandle>()
             .0
@@ -310,6 +324,11 @@ impl Render for KaiApp {
                 t(cx, "nav.run", &[]),
             ))
             .item(ActivityItem::new(
+                "models",
+                IconName::Cpu,
+                t(cx, "nav.models", &[]),
+            ))
+            .item(ActivityItem::new(
                 "skills",
                 IconName::Puzzle,
                 t(cx, "nav.skills", &[]),
@@ -338,6 +357,7 @@ impl Render for KaiApp {
 
         let body = match self.page {
             Page::Run => pages::run_page(self, window, cx).into_any_element(),
+            Page::Models => pages::models::render(self, window, cx).into_any_element(),
             Page::Skills => pages::skills::render(self, window, cx).into_any_element(),
             Page::History => pages::history::render(self, window, cx).into_any_element(),
             Page::Bench => pages::bench::render(self, window, cx).into_any_element(),

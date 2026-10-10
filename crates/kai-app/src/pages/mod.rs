@@ -2,10 +2,13 @@
 
 pub mod bench;
 pub mod capture;
+pub mod capture_models;
 pub mod done;
 pub mod history;
 pub mod home;
 pub mod model_settings;
+pub mod models;
+pub mod models_card;
 pub mod panes;
 pub mod running;
 pub mod sessions;

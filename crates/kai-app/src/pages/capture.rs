@@ -41,14 +41,30 @@ const SHOTS: &[&str] = &[
     "81-shortcuts",
 ];
 
+/// Every shot, or those whose names contain one of the comma-separated
+/// words in `KAI_CAPTURE_ONLY` (e.g. `models,onboarding-local`).
+fn shots() -> Vec<&'static str> {
+    let only = std::env::var("KAI_CAPTURE_ONLY").unwrap_or_default();
+    let words: Vec<&str> = only.split(',').filter(|w| !w.is_empty()).collect();
+    SHOTS
+        .iter()
+        .chain(super::capture_models::SHOTS)
+        .copied()
+        .filter(|s| words.is_empty() || words.iter().any(|w| s.contains(w)))
+        .collect()
+}
+
 pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
     let _ = std::fs::create_dir_all(&dir);
     cx.spawn_in(window, async move |this, cx| {
         for mode in [Mode::Light, Mode::Dark] {
-            for (i, name) in SHOTS.iter().enumerate() {
+            for name in shots() {
                 let ok = this.update_in(cx, |app, window, cx| {
                     Theme::set_mode_now(mode, cx);
-                    stage(app, i, window, cx);
+                    if !super::capture_models::stage(app, name, window, cx) {
+                        let i = SHOTS.iter().position(|s| *s == name).unwrap_or(0);
+                        stage(app, i, window, cx);
+                    }
                     cx.notify();
                 });
                 if ok.is_err() {
@@ -278,9 +294,14 @@ fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiAp
     if i < 5 {
         // The dark pass needs onboarding again after the light pass closed it.
         if app.onboarding.is_none() {
-            let (settings, me) = (app.settings.clone(), cx.entity().downgrade());
-            app.onboarding =
-                Some(cx.new(|cx| crate::onboarding::Onboarding::new(settings, me, window, cx)));
+            let (settings, me, local) = (
+                app.settings.clone(),
+                cx.entity().downgrade(),
+                app.local.clone(),
+            );
+            app.onboarding = Some(
+                cx.new(|cx| crate::onboarding::Onboarding::new(settings, me, local, window, cx)),
+            );
         }
         if let Some(o) = &app.onboarding {
             o.update(cx, |o, cx| o.set_step(i, cx));

@@ -20,6 +20,7 @@ use kai_core::settings::{BackendChoice, Settings};
 use kai_os::permissions::Check;
 use std::time::Duration;
 
+mod local;
 mod steps;
 
 pub use steps::gh_to_gpui;
@@ -38,15 +39,18 @@ pub struct Onboarding {
     testing: bool,
     tested: Option<Result<(Duration, String), String>>,
     checks: Vec<Check>,
+    local: Entity<crate::local::LocalState>,
 }
 
 impl Onboarding {
     pub fn new(
         settings: Settings,
         app: WeakEntity<KaiApp>,
+        local: Entity<crate::local::LocalState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        cx.observe(&local, |_, _, cx| cx.notify()).detach();
         let endpoint = cx.new(|cx| {
             TextInput::new(window, cx)
                 .placeholder("https://<droplet>.sslip.io/v1")
@@ -88,6 +92,7 @@ impl Onboarding {
             testing: false,
             tested: None,
             checks: Vec::new(),
+            local,
         };
         // Poll access once a second while onboarding is open, so the status turns green by itself.
         cx.spawn(async move |this, cx| {
@@ -111,6 +116,13 @@ impl Onboarding {
         })
         .detach();
         me
+    }
+
+    /// Used by the capture harness: Connect with "Run on this computer".
+    pub fn show_local(&mut self, cx: &mut Context<Self>) {
+        self.step = 1;
+        self.settings.backend = BackendChoice::Local;
+        cx.notify();
     }
 
     /// Used by the capture harness to show each step.
@@ -173,8 +185,10 @@ impl Onboarding {
         }
         self.settings.vllm_endpoint = self.endpoint.read(cx).text().trim().to_string();
         self.settings.onboarded = true;
-        let settings = self.settings.clone();
+        let mut settings = self.settings.clone();
         let _ = self.app.update(cx, |app, cx| {
+            // The local flow wrote the model it set up into the app's settings.
+            settings.local_model = app.settings.local_model.clone();
             app.settings = settings;
             app.pages.endpoint.update(cx, |f, cx| {
                 f.set_text(app.settings.vllm_endpoint.clone(), cx)
@@ -188,8 +202,9 @@ impl Onboarding {
         });
     }
 
-    fn ready(&self) -> bool {
+    fn ready(&self, cx: &gpui::App) -> bool {
         match self.step {
+            1 if self.settings.backend == BackendChoice::Local => self.local_ready(cx),
             1 => matches!(self.tested, Some(Ok(_))),
             2 => !self.checks.is_empty() && kai_os::permissions::all_granted(&self.checks),
             _ => true,
@@ -223,6 +238,7 @@ impl Onboarding {
         let wants_vllm = matches!(b, BackendChoice::Both | BackendChoice::Vllm);
         let wants_gemini = matches!(b, BackendChoice::Both | BackendChoice::Gemini);
         let tester = cx.entity();
+        let local_panel = (b == BackendChoice::Local).then(|| self.local_panel(cx));
         let result = match &self.tested {
             Some(Ok((took, backend))) => Some(
                 InlineMessage::new(
@@ -262,6 +278,19 @@ impl Onboarding {
                             .icon(IconName::Layers)
                             .on_select(pick(BackendChoice::Both, cx)),
                     )
+                    .child(
+                        RadioCard::new(
+                            "b-local",
+                            b == BackendChoice::Local,
+                            "Run on this computer — free and private",
+                        )
+                        .description(
+                            "An open model on your own machine. No key, no bill; screenshots never leave it.",
+                        )
+                        .icon(IconName::Cpu)
+                        .on_select(pick(BackendChoice::Local, cx)),
+                    )
+                    .children(local_panel)
                     .child(
                         RadioCard::new(
                             "b-vllm",
@@ -310,13 +339,13 @@ impl Onboarding {
             .children(wants_gemini.then(|| PasswordInput::new(&self.gemini_key)))
             .children((b == BackendChoice::Gateway).then(|| PasswordInput::new(&self.gateway_key)))
             .children((b == BackendChoice::OpenAi).then(|| PasswordInput::new(&self.openai_key)))
-            .child(
+            .children((b != BackendChoice::Local).then(|| {
                 Button::new("test", "Test with a real image")
                     .variant(ButtonVariant::Primary)
                     .loading(self.testing)
-                    .on_click(move |_, _, cx| tester.update(cx, |o, cx| o.test(cx))),
-            )
-            .children(result)
+                    .on_click(move |_, _, cx| tester.update(cx, |o, cx| o.test(cx)))
+            }))
+            .children(result.filter(|_| b != BackendChoice::Local))
     }
 }
 
@@ -377,7 +406,7 @@ impl Render for Onboarding {
                             move |window, cx| done.update(cx, |o, cx| o.finish(false, window, cx)),
                         )
                         .content(content)
-                        .ready(self.ready())
+                        .ready(self.ready(cx))
                         .on_skip(move |window, cx| {
                             skip.update(cx, |o, cx| o.finish(false, window, cx))
                         }),

@@ -52,6 +52,7 @@ do, and how to stop it.
 ```
 Splash ──► Onboarding (first run) ──► Home (AppShell)
                                         ├─ Run        (sessions list | new task ▸ queued ▸ running ▸ done)
+                                        ├─ Models     (this computer ▸ ranked open models ▸ download/start/use)
                                         ├─ Skills     (grid ▸ detail sheet)
                                         ├─ History    (list ▸ trace)
                                         ├─ Benchmarks
@@ -88,7 +89,7 @@ the fix); permissions polling.
 ### 3. Home — `layout::AppShell`
 - **Title bar:** `shell::TitleBar` "Kai" (it draws `WindowControls` per OS
   and its own drag region), theme toggle and palette button as actions.
-- **Sidebar:** `shell::ActivityBar` — Run, Skills, History, Benchmarks;
+- **Sidebar:** `shell::ActivityBar` — Run, Models, Skills, History, Benchmarks;
   Settings in the footer.
 - **Status bar:** `shell::StatusBar` — left: `feedback::ConnectionStatus`
   (Droplet / Gemini fallback / offline) and the active model; right: the last
@@ -175,11 +176,55 @@ traces stay in History).
 ### 4c. Model and backend switcher
 `menus::DropdownMenu` in the status bar and in the composer: the model list
 is `kai_core::settings::MODELS` (new entries appear by themselves) and the
-backends Both · DigitalOcean · Gemini API · AI Gateway · OpenAI. The command
+backends Both · DigitalOcean · Gemini API · AI Gateway · OpenAI · This
+computer, then the downloaded local models (section 4d). The command
 palette has "Switch model" and "Switch backend" groups too. Settings › Model &
 server has a key field and a **Test** button per backend (vLLM, Gemini, Vercel
 AI Gateway, OpenAI), keys in the OS keychain; onboarding offers Gateway and
 OpenAI as `RadioCard`s with their key fields.
+
+### 4d. Models — open models on this computer
+For people with no server and no key: one tap downloads llama.cpp's
+`llama-server` and an open model, starts it on `127.0.0.1`, and makes it
+Kai's backend (`BackendChoice::Local`, `settings.local_model`,
+`settings.local_port`, default 8098).
+
+- **This computer:** a `layout::Card` with a `CardHeader` (local server
+  status, **Stop the server** as its action) over four facts: RAM, CPU
+  threads, graphics card and VRAM, system. A `motion::Spinner` while the
+  hardware probe runs (off the UI thread).
+- **Ranked models:** every catalog model as a card, in rank order: label,
+  maker, parameters (and active parameters for MoE), download size, licence,
+  `data_display::Badge`s for "Computer use: recommended / experimental /
+  untested", "Sees images", "Downloaded", "Running", and the fit badge —
+  **Best for this computer** (accent), Good (green), Slow (amber), Too big
+  (red) — with the reason in plain words ("Needs 24 GB RAM; you have 16
+  GB"). The Best card is the primary one: a 2 px accent border, a larger
+  title and a single large **Download and use** button. Other cards offer
+  **Download**, then **Use** / **Start** or **Stop** / **Remove**. Too-big
+  models are listed but their only button is disabled with the reason.
+- **One tap:** Download and use runs the plan the model still needs
+  (download what is missing, start the server, use it). While it runs the
+  card shows the stage ("Downloading the runtime", "Downloading the model",
+  "Checking the download", "Starting the local server"), a
+  `motion::ProgressBar` (indeterminate while starting or when the size is
+  unknown), "1.9 GB of 5.0 GB · 39%" and **Cancel**. When it ends, a success
+  `feedback::Callout` says **Ready — Kai now runs on this computer** with
+  **Give Kai a task**. Failures show `feedback::ErrorView` with the error as
+  detail and **Try again** (the same plan).
+- **Background:** one job at a time on the agent's tokio runtime; progress
+  comes back through a channel the app entity drains, so a download keeps
+  going while the user is on another page. Nothing is downloaded or started
+  except from a button. The server is stopped when Kai quits.
+- **Elsewhere:** onboarding's Connect step has the `RadioCard` **Run on this
+  computer — free and private**, which opens the same flow for the Best model
+  right under it; the model switcher and the palette list downloaded local
+  models (picking one starts it if needed; "Get a model for this computer…"
+  when there are none); Settings › Model & server shows the local server's
+  status, port and model, with **Open Models**.
+
+States: probing hardware, ranked, downloading, starting, ready, failed
+(with Try again), none fits (`Callout` pointing to the other backends).
 
 ### 5. Done
 The window returns. `feedback::ResultView` success or failure in plain words,

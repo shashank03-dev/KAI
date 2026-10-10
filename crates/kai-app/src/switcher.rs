@@ -1,6 +1,7 @@
 //! The quick model and backend switcher, used in the status bar and the
 //! composer. The model list is `kai_core::settings::MODELS`, so new entries
-//! show up here by themselves.
+//! show up here by themselves, followed by the local models already
+//! downloaded (picking one starts it if needed).
 
 use crate::app::KaiApp;
 use crate::runs::backend_label;
@@ -19,6 +20,7 @@ pub const BACKENDS: &[BackendChoice] = &[
     BackendChoice::Gemini,
     BackendChoice::Gateway,
     BackendChoice::OpenAi,
+    BackendChoice::Local,
 ];
 
 pub fn backend_key(b: BackendChoice) -> &'static str {
@@ -44,6 +46,9 @@ pub fn backend_from_key(k: &str) -> BackendChoice {
 
 /// The short label on the switcher button.
 pub fn short_label(s: &Settings) -> String {
+    if s.backend == BackendChoice::Local {
+        return crate::runs::model_label(s);
+    }
     let model = MODELS
         .iter()
         .find(|m| m.id == s.fast_model)
@@ -63,7 +68,29 @@ pub fn set_backend(app: &mut KaiApp, b: BackendChoice, cx: &mut Context<KaiApp>)
     app.conn = crate::app::Conn::Unknown;
 }
 
-fn menu(app: &KaiApp, me: Entity<KaiApp>) -> Menu {
+/// Downloaded local models as (id, label).
+pub fn installed_local(app: &KaiApp, cx: &gpui::App) -> Vec<(String, String)> {
+    let l = app.local.read(cx);
+    l.installed
+        .iter()
+        .map(|id| (id.clone(), l.label(id)))
+        .collect()
+}
+
+fn menu(app: &KaiApp, local: Vec<(String, String)>, me: Entity<KaiApp>) -> Menu {
+    let on_local = app.settings.backend == BackendChoice::Local;
+    let none = local.is_empty();
+    let locals = local.into_iter().map(|(id, label)| {
+        let me = me.clone();
+        let picked = on_local && app.settings.local_model == id;
+        MenuItem::radio(label, picked)
+            .on_click(move |_, cx| me.update(cx, |a, cx| a.local_use(&id, cx)))
+    });
+    let get = none.then(|| {
+        let me = me.clone();
+        MenuItem::new("Get a model for this computer…")
+            .on_click(move |_, cx| me.update(cx, |a, cx| a.go(crate::app::Page::Models, cx)))
+    });
     let models = MODELS.iter().map(|m| {
         let me = me.clone();
         MenuItem::radio(m.label, app.settings.fast_model == m.id)
@@ -80,6 +107,7 @@ fn menu(app: &KaiApp, me: Entity<KaiApp>) -> Menu {
     });
     Menu::new()
         .group("Model for every step", models)
+        .group("On this computer", locals.chain(get))
         .group("Backend", backends)
         .item(
             MenuItem::new("Gemma runs on all backends; GPT models need AI Gateway or OpenAI")
@@ -89,9 +117,14 @@ fn menu(app: &KaiApp, me: Entity<KaiApp>) -> Menu {
 
 /// A compact button that opens the switcher.
 pub fn switcher(id: &'static str, app: &KaiApp, cx: &Context<KaiApp>) -> DropdownMenu {
-    DropdownMenu::new(id, short_label(&app.settings), menu(app, cx.entity()))
-        .icon(IconName::Cpu)
-        .variant(ButtonVariant::Ghost)
+    let local = installed_local(app, cx);
+    DropdownMenu::new(
+        id,
+        short_label(&app.settings),
+        menu(app, local, cx.entity()),
+    )
+    .icon(IconName::Cpu)
+    .variant(ButtonVariant::Ghost)
 }
 
 #[cfg(test)]

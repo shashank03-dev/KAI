@@ -123,6 +123,46 @@ fn key_row(
     row(label, hint, control, cx).into_any_element()
 }
 
+/// The local server's status and port, and the way to the Models page.
+fn local_row(app: &KaiApp, cx: &Context<KaiApp>) -> AnyElement {
+    let l = app.local.read(cx);
+    let status = crate::pages::models::server_text(l);
+    let (open, using) = (cx.entity(), app.settings.backend == BackendChoice::Local);
+    let model = if app.settings.local_model.is_empty() {
+        "none chosen yet".to_string()
+    } else {
+        l.label(&app.settings.local_model)
+    };
+    let hint = format!(
+        "Port {} on 127.0.0.1 · model: {model}{}",
+        app.settings.local_port,
+        if using { " · Kai uses it now" } else { "" }
+    );
+    let control = div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(InlineMessage::new(
+            if l.server.is_some() {
+                Severity::Success
+            } else {
+                Severity::Info
+            },
+            status,
+        ))
+        .child(
+            div().flex().child(
+                Button::new("open-models", "Open Models")
+                    .variant(ButtonVariant::Secondary)
+                    .icon(IconName::Cpu)
+                    .on_click(move |_, _, cx| {
+                        open.update(cx, |a, cx| a.go(crate::app::Page::Models, cx))
+                    }),
+            ),
+        );
+    row("On this computer (local server)", &hint, control, cx).into_any_element()
+}
+
 pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
     let (backend, fast, careful, saver, tester) = (
         cx.entity(),
@@ -140,6 +180,7 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         (BackendChoice::Gemini, "Gemini"),
         (BackendChoice::Gateway, "AI Gateway"),
         (BackendChoice::OpenAi, "OpenAI"),
+        (BackendChoice::Local, "This computer"),
     ] {
         segments = segments.segment(backend_key(b), label, None);
     }
@@ -158,6 +199,7 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
             segments,
             cx,
         ))
+        .row(local_row(app, cx))
         .row(row(
             "DigitalOcean server",
             "The address deploy/digitalocean/up.sh printed, ending in /v1.",
