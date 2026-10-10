@@ -146,18 +146,37 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
     {
         return true;
     }
-    let h = effect_haystack(decision, grounding).to_ascii_lowercase();
+    // Only what the action touches counts here: the model's own `thought`
+    // ("avoid password/payment") must not turn an email field into a payment,
+    // and "pay" inside "display" is not a payment either.
+    let mut h = decision.text.clone().unwrap_or_default();
+    if let Some(el) = decision.target.and_then(|t| grounding.element(t)) {
+        h.push(' ');
+        h.push_str(&el.name);
+    }
+    let h = h.to_ascii_lowercase();
     [
         "pay",
         "payment",
+        "pay now",
         "checkout",
         "buy",
+        "buy now",
         "purchase",
         "card number",
         "cvv",
     ]
     .iter()
-    .any(|w| h.contains(w))
+    .any(|w| has_phrase(&h, w))
+}
+
+/// `phrase` appears in `hay` on word boundaries.
+fn has_phrase(hay: &str, phrase: &str) -> bool {
+    hay.match_indices(phrase).any(|(i, _)| {
+        let before = hay[..i].chars().next_back();
+        let after = hay[i + phrase.len()..].chars().next();
+        !before.is_some_and(|c| c.is_alphanumeric()) && !after.is_some_and(|c| c.is_alphanumeric())
+    })
 }
 
 fn targets_secure(grounding: &Grounding, mark: u32) -> bool {
@@ -184,6 +203,36 @@ fn effect_haystack(decision: &Decision, grounding: &Grounding) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn payment_check_ignores_the_thought_and_word_fragments() {
+        let field = Element {
+            mark: 1,
+            role: Role::TextField,
+            name: String::new(),
+            bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
+            enabled: true,
+            secure: false,
+            value: None,
+        };
+        let g = grounding_with(field);
+        let d = Decision::parse_checked(
+            r#"{"thought":"avoid password/payment","action":"type","target":1,"text":"asha@example.com","risk":"none"}"#,
+        )
+        .unwrap();
+        assert!(!is_payment_or_password(&d, &g));
+        let d = Decision::parse_checked(
+            r#"{"thought":"x","action":"type","target":1,"text":"display settings","risk":"none"}"#,
+        )
+        .unwrap();
+        assert!(!is_payment_or_password(&d, &g));
+        let d = Decision::parse_checked(
+            r#"{"thought":"x","action":"type","target":1,"text":"4111 card number","risk":"none"}"#,
+        )
+        .unwrap();
+        assert!(is_payment_or_password(&d, &g));
+    }
+
     use super::*;
     use crate::element::{Element, Rect};
 
