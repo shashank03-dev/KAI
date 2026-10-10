@@ -5,8 +5,10 @@
 use super::machine::{AbRecord, Machine};
 use super::runner::{Call, Run};
 use super::tasks::{Kind, ReplayMode};
+use kai_core::failure::Failure;
 use kai_core::trace::{Outcome, Timings};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Nearest-rank percentile on an already-sorted slice (`p` in 0..=1).
 pub fn percentile(sorted: &[u64], p: f64) -> u64 {
@@ -68,6 +70,10 @@ pub struct TaskResult {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub cost_usd: Option<f64>,
+    /// Why the task failed (`docs/DATASET.md` taxonomy); absent when it
+    /// passed or was skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<Failure>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -110,6 +116,22 @@ pub struct Summary {
     pub total_seconds: f64,
     /// What could not be measured on this run, in words.
     pub missing: Vec<String>,
+    /// Failed tasks per failure category.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub failures: BTreeMap<String, usize>,
+}
+
+/// `loop 2 · false_done 1`, or `none`.
+pub fn failures_text(f: &BTreeMap<String, usize>) -> String {
+    if f.is_empty() {
+        return "none".into();
+    }
+    let mut v: Vec<(&String, &usize)> = f.iter().collect();
+    v.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    v.iter()
+        .map(|(k, n)| format!("{k} {n}"))
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn token_sums(calls: &[Call]) -> (Option<u64>, Option<u64>, usize) {
@@ -194,6 +216,7 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
         r.completion_tokens = ct;
         r.model_calls = run.calls.len();
         all_calls.extend(run.calls);
+        r.failure = super::record::label(&trace, run.check, run.setup_failed);
         r.outcome = trace.outcome;
         r.pass = pass;
         r.judged_by = judged_by.into();
@@ -236,6 +259,10 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
     if !meta.recorded && meta.prices.is_none() {
         missing.push("cost: no prices given (--usd-per-mtok-in/--usd-per-mtok-out)".into());
     }
+    let mut failures = BTreeMap::new();
+    for f in results.iter().filter_map(|r| r.failure.as_ref()) {
+        *failures.entry(f.category.to_string()).or_insert(0) += 1;
+    }
     let (step_p50_ms, step_p95_ms) = p50_p95(steps_all);
     let (model_p50_ms, model_p95_ms) = p50_p95(model_all);
     let (observe_p50_ms, observe_p95_ms) = p50_p95(observe_all);
@@ -276,6 +303,7 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
         cost_usd,
         total_seconds: round2(total_secs),
         missing,
+        failures,
         tasks: results,
     }
 }

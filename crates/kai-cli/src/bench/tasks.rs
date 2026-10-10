@@ -1,13 +1,22 @@
 //! `bench/tasks.yaml`: the task list, and what each task needs on this machine.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// A command per OS. Missing means "not available on this OS".
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PerOs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linux: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<String>,
+}
+
+impl PerOs {
+    pub fn is_empty(&self) -> bool {
+        self.linux.is_none() && self.windows.is_none()
+    }
 }
 
 impl PerOs {
@@ -44,7 +53,7 @@ pub enum ReplayMode {
     Skip,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
     pub title: String,
@@ -52,20 +61,28 @@ pub struct Task {
     #[serde(default)]
     pub kind: Kind,
     /// Things that must exist here, or the task is skipped (see [`Need`]).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "PerOs::is_empty")]
     pub setup: PerOs,
     /// Exit code 0 means pass. Without a check, the run's own outcome decides.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "PerOs::is_empty")]
     pub check: PerOs,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "PerOs::is_empty")]
     pub teardown: PerOs,
     /// Recorded replies for the mock and replay backends.
     #[serde(default)]
     pub mock: Vec<String>,
     #[serde(default)]
     pub replay: ReplayMode,
+    /// Values for `{name}` placeholders in title/prompt/setup/check/teardown
+    /// and the recorded replies. The first value of each is the default the
+    /// bench runs; `kai bench variants` renders the others (training data).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub vars: BTreeMap<String, Vec<String>>,
+    /// Set on generated variants: the id of the task they were made from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_of: Option<String>,
 }
 
 /// Every `needs` value the bench understands.
@@ -85,11 +102,29 @@ pub fn load_tasks(path: &Path) -> anyhow::Result<Vec<Task>> {
         .map_err(|e| e.context(format!("in {}", path.display())))
 }
 
+/// Parse and validate, with every `{var}` rendered to its default (first)
+/// value, so tasks with `vars:` run exactly as written before.
 pub fn parse_tasks(text: &str) -> anyhow::Result<Vec<Task>> {
+    let raw = parse_raw(text)?;
+    let tasks: Vec<Task> = raw.iter().map(super::variants::render_default).collect();
+    validate(&tasks)?;
+    Ok(tasks)
+}
+
+/// Parse with placeholders left in place (for `kai bench variants`).
+pub fn parse_raw(text: &str) -> anyhow::Result<Vec<Task>> {
     let tasks: Vec<Task> = serde_yaml::from_str(text)?;
+    for t in &tasks {
+        super::variants::check_vars(t)?;
+    }
+    Ok(tasks)
+}
+
+/// The checks every task list must pass (after rendering).
+pub fn validate(tasks: &[Task]) -> anyhow::Result<()> {
     anyhow::ensure!(!tasks.is_empty(), "no tasks");
     let mut seen = std::collections::HashSet::new();
-    for t in &tasks {
+    for t in tasks {
         anyhow::ensure!(seen.insert(t.id.as_str()), "duplicate task id {}", t.id);
         anyhow::ensure!(!t.mock.is_empty(), "task {} has no recorded replies", t.id);
         for n in &t.needs {
@@ -105,7 +140,7 @@ pub fn parse_tasks(text: &str) -> anyhow::Result<Vec<Task>> {
                 .map_err(|e| anyhow::anyhow!("task {}: bad recorded reply {raw}: {e}", t.id))?;
         }
     }
-    Ok(tasks)
+    Ok(())
 }
 
 /// What this machine has, probed once per run.

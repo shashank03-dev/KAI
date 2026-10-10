@@ -20,6 +20,11 @@
 #                       end state from the terminal; replay then proves setup and
 #                       check, not GUI skill. skip: cannot be replayed (needs the
 #                       internet or a screen whose marks are unknown in advance).
+#   vars                optional `{name: [default, other, ...]}`; `{name}` in the
+#                       title/prompt/setup/check/teardown/mock is replaced. The
+#                       bench ALWAYS runs the first value, so results stay
+#                       comparable. `kai bench variants` writes the other values
+#                       to variants.yaml, for training data only (docs/DATASET.md).
 #
 # setup/check/teardown see KAI_BENCH_DIR = the folder holding this file, so
 # fixtures live in $KAI_BENCH_DIR/fixtures. The local web server
@@ -81,7 +86,10 @@
   kind: gui
   needs: [browser, server]
   replay: skip
-  prompt: 'Fill the form on screen with: name Asha Rao, email asha@example.com. Do not submit.'
+  prompt: 'Fill the form on screen with: name {name}, email {email}. Do not submit.'
+  vars:
+    name: [Asha Rao, Ravi Kumar, Li Wei]
+    email: [asha@example.com, ravi.k@example.org, li.wei@example.net]
   setup:
     linux: '"$KAI_BENCH_DIR/fixtures/reset-browser.sh"; rm -f ~/kai-bench/server/submission.json; "$KAI_BENCH_DIR/fixtures/start-server.sh" && "$KAI_BENCH_DIR/fixtures/open-browser.sh" http://127.0.0.1:8765/contact.html'
   check:
@@ -90,8 +98,8 @@
   teardown:
     linux: pkill -f '/firefox' >/dev/null 2>&1; pkill -x soffice.bin; true
   mock:
-    - '{"thought":"name field","action":"type","target":5,"text":"Asha Rao","risk":"none","expect":"name filled"}'
-    - '{"thought":"email field","action":"type","target":6,"text":"asha@example.com","risk":"none","expect":"email filled"}'
+    - '{"thought":"name field","action":"type","target":5,"text":"{name}","risk":"none","expect":"name filled"}'
+    - '{"thought":"email field","action":"type","target":6,"text":"{email}","risk":"none","expect":"email filled"}'
     - '{"thought":"filled, not submitted","action":"done","risk":"none"}'
 
 - id: web-form-submit
@@ -145,46 +153,53 @@
 - id: write-note
   title: Write and save a note
   kind: terminal
-  prompt: Create a file called kai-note.txt in my home folder that says "Hello from Kai".
+  prompt: Create a file called {note_file} in my home folder that says "{note_text}".
+  vars:
+    note_file: [kai-note.txt, reminder.txt, todo.txt]
+    note_text: [Hello from Kai, Meeting moved to 3pm, Pick up the parcel at 5]
   setup:
-    linux: rm -f ~/kai-note.txt
-    windows: Remove-Item -ErrorAction SilentlyContinue $HOME\kai-note.txt
+    linux: rm -f ~/{note_file}
+    windows: Remove-Item -ErrorAction SilentlyContinue $HOME\{note_file}
   check:
-    linux: grep -q "Hello from Kai" ~/kai-note.txt
-    windows: if ((Get-Content $HOME\kai-note.txt -Raw) -match 'Hello from Kai') { exit 0 } else { exit 1 }
+    linux: grep -q "{note_text}" ~/{note_file}
+    windows: if ((Get-Content $HOME\{note_file} -Raw) -match '{note_text}') { exit 0 } else { exit 1 }
   mock:
-    - '{"thought":"write the file from the terminal","action":"shell","text":"printf \"Hello from Kai\\n\" > ~/kai-note.txt","risk":"low","expect":"file written"}'
+    - '{"thought":"write the file from the terminal","action":"shell","text":"printf \"{note_text}\\n\" > ~/{note_file}","risk":"low","expect":"file written"}'
     - '{"thought":"note saved","action":"done","risk":"none"}'
 
 - id: rename-files
   title: Rename files in a folder
   kind: terminal
-  prompt: In the folder kai-bench/rename in my home folder, add the prefix "2026-" to every file name.
+  prompt: In the folder kai-bench/rename in my home folder, add the prefix "{prefix}" to every file name.
+  vars:
+    prefix: [2026-, archive-, old-]
   setup:
     linux: rm -rf ~/kai-bench/rename && mkdir -p ~/kai-bench/rename && touch ~/kai-bench/rename/a.txt ~/kai-bench/rename/b.txt ~/kai-bench/rename/c.txt
     windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\rename; New-Item -ItemType Directory -Force $HOME\kai-bench\rename | Out-Null; 'a','b','c' | % { New-Item "$HOME\kai-bench\rename\$_.txt" | Out-Null }
   check:
-    linux: test "$(ls ~/kai-bench/rename | grep -c '^2026-')" -eq 3
-    windows: if ((Get-ChildItem $HOME\kai-bench\rename -Name | ? { $_ -like '2026-*' }).Count -eq 3) { exit 0 } else { exit 1 }
+    linux: test "$(ls ~/kai-bench/rename | grep -c '^{prefix}')" -eq 3
+    windows: if ((Get-ChildItem $HOME\kai-bench\rename -Name | ? { $_ -like '{prefix}*' }).Count -eq 3) { exit 0 } else { exit 1 }
   mock:
     - '{"thought":"see the files first","action":"shell","text":"ls -1 ~/kai-bench/rename","risk":"low","expect":"three files"}'
-    - '{"thought":"add the prefix","action":"shell","text":"cd ~/kai-bench/rename && for f in *; do mv -n \"$f\" \"2026-$f\"; done","risk":"low","expect":"renamed"}'
+    - '{"thought":"add the prefix","action":"shell","text":"cd ~/kai-bench/rename && for f in *; do mv -n \"$f\" \"{prefix}$f\"; done","risk":"low","expect":"renamed"}'
     - '{"thought":"renamed 3 files","action":"done","risk":"none"}'
 
 - id: find-largest
   title: Find the largest file
   kind: terminal
   prompt: Which file in kai-bench/big in my home folder is the largest? Write only its file name into kai-bench/largest.txt.
+  vars:
+    big_name: [huge.bin, holiday-video.mp4, backup.iso]
   setup:
-    linux: rm -rf ~/kai-bench/big && mkdir -p ~/kai-bench/big && head -c 1000 /dev/zero > ~/kai-bench/big/small.bin && head -c 90000 /dev/zero > ~/kai-bench/big/huge.bin && head -c 20000 /dev/zero > ~/kai-bench/big/medium.bin && rm -f ~/kai-bench/largest.txt
-    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\big; New-Item -ItemType Directory -Force $HOME\kai-bench\big | Out-Null; [IO.File]::WriteAllBytes("$HOME\kai-bench\big\small.bin", (New-Object byte[] 1000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\huge.bin", (New-Object byte[] 90000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\medium.bin", (New-Object byte[] 20000))
+    linux: rm -rf ~/kai-bench/big && mkdir -p ~/kai-bench/big && head -c 1000 /dev/zero > ~/kai-bench/big/small.bin && head -c 90000 /dev/zero > ~/kai-bench/big/{big_name} && head -c 20000 /dev/zero > ~/kai-bench/big/medium.bin && rm -f ~/kai-bench/largest.txt
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\big; New-Item -ItemType Directory -Force $HOME\kai-bench\big | Out-Null; [IO.File]::WriteAllBytes("$HOME\kai-bench\big\small.bin", (New-Object byte[] 1000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\{big_name}", (New-Object byte[] 90000)); [IO.File]::WriteAllBytes("$HOME\kai-bench\big\medium.bin", (New-Object byte[] 20000))
   check:
-    linux: grep -q "huge.bin" ~/kai-bench/largest.txt
-    windows: if ((Get-Content $HOME\kai-bench\largest.txt -Raw) -match 'huge.bin') { exit 0 } else { exit 1 }
+    linux: grep -q "{big_name}" ~/kai-bench/largest.txt
+    windows: if ((Get-Content $HOME\kai-bench\largest.txt -Raw) -match '{big_name}') { exit 0 } else { exit 1 }
   mock:
     - '{"thought":"list by size","action":"shell","text":"ls -S ~/kai-bench/big | head -1","risk":"low","expect":"largest name"}'
     - '{"thought":"save it","action":"shell","text":"ls -S ~/kai-bench/big | head -1 > ~/kai-bench/largest.txt","risk":"low","expect":"saved"}'
-    - '{"thought":"huge.bin is largest","action":"done","risk":"none"}'
+    - '{"thought":"{big_name} is largest","action":"done","risk":"none"}'
 
 - id: sort-downloads
   title: Tidy a messy folder by file type
@@ -203,21 +218,23 @@
 - id: search-in-files
   title: Find which file mentions something
   kind: terminal
-  prompt: One of the notes in kai-bench/notes in my home folder mentions "passport renewal". Write that note's file name into kai-bench/found.txt.
+  prompt: One of the notes in kai-bench/notes in my home folder mentions "{phrase}". Write that note's file name into kai-bench/found.txt.
+  vars:
+    phrase: [passport renewal, car insurance, school fees]
   setup:
     linux: |
       rm -rf ~/kai-bench/notes ~/kai-bench/found.txt && mkdir -p ~/kai-bench/notes && cd ~/kai-bench/notes &&
       printf 'Buy milk\nCall the plumber\n' > groceries.txt &&
       printf 'Q1 goals\nShip the release\n' > work.txt &&
-      printf 'Dentist on Tuesday\nBook the passport renewal appointment\n' > todo-march.txt &&
+      printf 'Dentist on Tuesday\nBook the {phrase} appointment\n' > todo-march.txt &&
       printf 'Birthday ideas: books\n' > ideas.txt
-    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\notes, $HOME\kai-bench\found.txt; New-Item -ItemType Directory -Force $HOME\kai-bench\notes | Out-Null; Set-Content $HOME\kai-bench\notes\groceries.txt "Buy milk"; Set-Content $HOME\kai-bench\notes\work.txt "Ship the release"; Set-Content $HOME\kai-bench\notes\todo-march.txt "Book the passport renewal appointment"; Set-Content $HOME\kai-bench\notes\ideas.txt "Birthday ideas"
+    windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\notes, $HOME\kai-bench\found.txt; New-Item -ItemType Directory -Force $HOME\kai-bench\notes | Out-Null; Set-Content $HOME\kai-bench\notes\groceries.txt "Buy milk"; Set-Content $HOME\kai-bench\notes\work.txt "Ship the release"; Set-Content $HOME\kai-bench\notes\todo-march.txt "Book the {phrase} appointment"; Set-Content $HOME\kai-bench\notes\ideas.txt "Birthday ideas"
   check:
     linux: grep -q 'todo-march.txt' ~/kai-bench/found.txt && ! grep -q 'groceries' ~/kai-bench/found.txt
     windows: if ((Get-Content $HOME\kai-bench\found.txt -Raw) -match 'todo-march.txt') { exit 0 } else { exit 1 }
   mock:
-    - '{"thought":"search the notes","action":"shell","text":"grep -ril \"passport renewal\" ~/kai-bench/notes","risk":"low","expect":"one file"}'
-    - '{"thought":"save the name","action":"shell","text":"grep -ril \"passport renewal\" ~/kai-bench/notes | xargs -n1 basename > ~/kai-bench/found.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"search the notes","action":"shell","text":"grep -ril \"{phrase}\" ~/kai-bench/notes","risk":"low","expect":"one file"}'
+    - '{"thought":"save the name","action":"shell","text":"grep -ril \"{phrase}\" ~/kai-bench/notes | xargs -n1 basename > ~/kai-bench/found.txt","risk":"low","expect":"saved"}'
     - '{"thought":"todo-march.txt mentions it","action":"done","risk":"none"}'
 
 - id: zip-folder
@@ -271,16 +288,21 @@
   title: Write and save a document in the text editor
   kind: gui
   needs: [display, mousepad]
-  prompt: 'Open the text editor (Mousepad), write "Shopping list: milk, eggs, bread" and save it as kai-bench/shopping.txt in my home folder.'
+  prompt: 'Open the text editor (Mousepad), write "Shopping list: {items}" and save it as kai-bench/shopping.txt in my home folder.'
+  vars:
+    items:
+      - milk, eggs, bread
+      - apples, rice, soap
+      - coffee, tea, sugar
   setup:
     linux: pkill -x mousepad; sleep 1; mkdir -p ~/kai-bench && rm -f ~/kai-bench/shopping.txt
   check:
-    linux: grep -q 'Shopping list. milk, eggs, bread' ~/kai-bench/shopping.txt
+    linux: grep -q 'Shopping list. {items}' ~/kai-bench/shopping.txt
   teardown:
     linux: pkill -x mousepad; true
   mock:
     - '{"thought":"open the editor","action":"open_app","text":"mousepad","risk":"none","expect":"empty document"}'
-    - '{"thought":"type the list into the editor","action":"shell","text":"for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -a Mousepad; sleep 0.5; xdotool type --delay 5 \"Shopping list: milk, eggs, bread\"","risk":"low","expect":"text in editor"}'
+    - '{"thought":"type the list into the editor","action":"shell","text":"for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -a Mousepad; sleep 0.5; xdotool type --delay 5 \"Shopping list: {items}\"","risk":"low","expect":"text in editor"}'
     - '{"thought":"save","action":"key","keys":["ctrl","s"],"risk":"none","expect":"save dialog"}'
     - '{"thought":"type the file path","action":"shell","text":"sleep 1; xdotool type --delay 5 \"$HOME/kai-bench/shopping.txt\"; sleep 1","risk":"low","expect":"path typed"}'
     - '{"thought":"confirm","action":"key","keys":["enter"],"risk":"none","expect":"saved"}'
@@ -372,29 +394,35 @@
 - id: email-draft
   title: Write an email draft (not sent)
   kind: mixed
-  prompt: 'Draft an email to priya@example.com with the subject "Team lunch Friday" asking whether 12:30 at Olive Garden works for her. Do not send it; save the draft as kai-bench/drafts/team-lunch.eml in my home folder.'
+  prompt: 'Draft an email to {to} with the subject "{subject}" asking whether {time} at Olive Garden works for her. Do not send it; save the draft as kai-bench/drafts/team-lunch.eml in my home folder.'
+  vars:
+    to: [priya@example.com, sam@example.com, mei@example.com]
+    subject: [Team lunch Friday, Project kickoff, Quarterly review]
+    time: ['12:30', '13:15', '11:45']
   setup:
     linux: rm -rf ~/kai-bench/drafts && mkdir -p ~/kai-bench/drafts
     windows: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $HOME\kai-bench\drafts; New-Item -ItemType Directory -Force $HOME\kai-bench\drafts | Out-Null
   check:
-    linux: f=~/kai-bench/drafts/team-lunch.eml; grep -qi '^To:.*priya@example.com' $f && grep -qi '^Subject:.*Team lunch Friday' $f && grep -q '12:30' $f
-    windows: $t = Get-Content $HOME\kai-bench\drafts\team-lunch.eml -Raw; if (($t -match '(?m)^To:.*priya@example.com') -and ($t -match '(?m)^Subject:.*Team lunch Friday') -and ($t -match '12:30')) { exit 0 } else { exit 1 }
+    linux: f=~/kai-bench/drafts/team-lunch.eml; grep -qi '^To:.*{to}' $f && grep -qi '^Subject:.*{subject}' $f && grep -q '{time}' $f
+    windows: $t = Get-Content $HOME\kai-bench\drafts\team-lunch.eml -Raw; if (($t -match '(?m)^To:.*{to}') -and ($t -match '(?m)^Subject:.*{subject}') -and ($t -match '{time}')) { exit 0 } else { exit 1 }
   mock:
-    - '{"thought":"write the draft file","action":"shell","text":"printf \"To: priya@example.com\\nSubject: Team lunch Friday\\nContent-Type: text/plain; charset=utf-8\\n\\nHi Priya,\\n\\nDoes 12:30 at Olive Garden on Friday work for you?\\n\\nThanks\\n\" > ~/kai-bench/drafts/team-lunch.eml && cat ~/kai-bench/drafts/team-lunch.eml","risk":"low","expect":"draft saved"}'
+    - '{"thought":"write the draft file","action":"shell","text":"printf \"To: {to}\\nSubject: {subject}\\nContent-Type: text/plain; charset=utf-8\\n\\nHi Priya,\\n\\nDoes {time} at Olive Garden on Friday work for you?\\n\\nThanks\\n\" > ~/kai-bench/drafts/team-lunch.eml && cat ~/kai-bench/drafts/team-lunch.eml","risk":"low","expect":"draft saved"}'
     - '{"thought":"draft saved, not sent","action":"done","risk":"none"}'
 
 - id: calendar-event
   title: Create a calendar event file
   kind: mixed
-  prompt: Make a calendar event "Dentist" on 3 November 2026 from 10:00 to 10:30 and save it as kai-bench/dentist.ics in my home folder so I can import it into my calendar.
+  prompt: Make a calendar event "{summary}" on 3 November 2026 from 10:00 to 10:30 and save it as kai-bench/dentist.ics in my home folder so I can import it into my calendar.
+  vars:
+    summary: [Dentist, Haircut, Car service]
   setup:
     linux: mkdir -p ~/kai-bench && rm -f ~/kai-bench/dentist.ics
     windows: New-Item -ItemType Directory -Force $HOME\kai-bench | Out-Null; Remove-Item -ErrorAction SilentlyContinue $HOME\kai-bench\dentist.ics
   check:
-    linux: f=~/kai-bench/dentist.ics; grep -q 'BEGIN:VEVENT' $f && grep -qi 'SUMMARY:.*Dentist' $f && grep -Eq 'DTSTART[^:]*:20261103T1000' $f && grep -Eq 'DTEND[^:]*:20261103T1030' $f
-    windows: $t = Get-Content $HOME\kai-bench\dentist.ics -Raw; if (($t -match 'BEGIN:VEVENT') -and ($t -match 'SUMMARY:.*Dentist') -and ($t -match 'DTSTART[^:]*:20261103T1000')) { exit 0 } else { exit 1 }
+    linux: f=~/kai-bench/dentist.ics; grep -q 'BEGIN:VEVENT' $f && grep -qi 'SUMMARY:.*{summary}' $f && grep -Eq 'DTSTART[^:]*:20261103T1000' $f && grep -Eq 'DTEND[^:]*:20261103T1030' $f
+    windows: $t = Get-Content $HOME\kai-bench\dentist.ics -Raw; if (($t -match 'BEGIN:VEVENT') -and ($t -match 'SUMMARY:.*{summary}') -and ($t -match 'DTSTART[^:]*:20261103T1000')) { exit 0 } else { exit 1 }
   mock:
-    - '{"thought":"write an iCalendar file","action":"shell","text":"printf \"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Kai//EN\\r\\nBEGIN:VEVENT\\r\\nUID:dentist-20261103@kai\\r\\nDTSTAMP:20261009T120000Z\\r\\nDTSTART:20261103T100000\\r\\nDTEND:20261103T103000\\r\\nSUMMARY:Dentist\\r\\nEND:VEVENT\\r\\nEND:VCALENDAR\\r\\n\" > ~/kai-bench/dentist.ics && cat ~/kai-bench/dentist.ics","risk":"low","expect":"ics saved"}'
+    - '{"thought":"write an iCalendar file","action":"shell","text":"printf \"BEGIN:VCALENDAR\\r\\nVERSION:2.0\\r\\nPRODID:-//Kai//EN\\r\\nBEGIN:VEVENT\\r\\nUID:dentist-20261103@kai\\r\\nDTSTAMP:20261009T120000Z\\r\\nDTSTART:20261103T100000\\r\\nDTEND:20261103T103000\\r\\nSUMMARY:{summary}\\r\\nEND:VEVENT\\r\\nEND:VCALENDAR\\r\\n\" > ~/kai-bench/dentist.ics && cat ~/kai-bench/dentist.ics","risk":"low","expect":"ics saved"}'
     - '{"thought":"event file saved","action":"done","risk":"none"}'
 
 - id: resize-image

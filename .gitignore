@@ -17,3 +17,4 @@ screenshots/*.local.png
 # OS cruft
 .DS_Store
 Thumbs.db
+/bench/runs/

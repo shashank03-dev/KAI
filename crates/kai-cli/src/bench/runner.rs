@@ -3,6 +3,7 @@
 //! [`Metered`], which counts calls and sums the token usage each reply reports,
 //! because the trace itself does not record tokens.
 
+use super::record::{self, Recording};
 use super::tasks::{Available, ReplayMode, Task};
 use crate::console::{Printer, TerminalApprover};
 use async_trait::async_trait;
@@ -77,6 +78,8 @@ pub struct Run {
     /// The task's check command, run right after the task (before teardown).
     /// `None` when there is none for this OS or nothing real was touched.
     pub check: Option<bool>,
+    /// The task's setup command failed (the task ran anyway).
+    pub setup_failed: bool,
 }
 
 /// A scripted screen for the mock backend: a browser-like page whose hash
@@ -177,7 +180,12 @@ pub async fn sh(cmd: &str, bench_dir: &Path) -> bool {
     }
 }
 
-pub async fn run_mock(tasks: &[Task], skills: &[Skill], config: Config) -> Vec<Run> {
+pub async fn run_mock(
+    tasks: &[Task],
+    skills: &[Skill],
+    config: Config,
+    rec: Option<&Recording>,
+) -> Vec<Run> {
     let mut out = Vec::new();
     for t in tasks {
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -202,7 +210,15 @@ pub async fn run_mock(tasks: &[Task], skills: &[Skill], config: Config) -> Vec<R
             config,
         };
         let started = Instant::now();
-        let trace = engine.run(&t.prompt).await;
+        let recorder = rec.and_then(|r| r.start(t));
+        let opts = kai_core::RunOptions {
+            recorder: recorder.as_ref(),
+            ..Default::default()
+        };
+        let trace = engine.run_with(&t.prompt, opts).await;
+        if let Some(r) = &recorder {
+            record::finish(r, &trace, None, false);
+        }
         let calls = std::mem::take(&mut *log.lock().unwrap());
         out.push(Run {
             task: t.clone(),
@@ -211,6 +227,7 @@ pub async fn run_mock(tasks: &[Task], skills: &[Skill], config: Config) -> Vec<R
             calls,
             skipped: None,
             check: None,
+            setup_failed: false,
         });
     }
     out
@@ -229,6 +246,8 @@ pub struct Live<'a> {
     pub force: bool,
     /// Run OpenAI's own computer-use loop instead of Kai's engine.
     pub native: Option<kai_core::cua::CuaConfig>,
+    /// Record every task run as training data.
+    pub record: Option<&'a Recording>,
 }
 
 pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run>> {
@@ -260,12 +279,15 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
                 calls: Vec::new(),
                 skipped: Some(reason),
                 check: None,
+                setup_failed: false,
             });
             continue;
         }
-        if let Some(cmd) = t.setup.here()
-            && !sh(cmd, live.bench_dir).await
-        {
+        let setup_failed = match t.setup.here() {
+            Some(cmd) => !sh(cmd, live.bench_dir).await,
+            None => false,
+        };
+        if setup_failed {
             log::warn!("setup for {} failed; running anyway", t.id);
             eprintln!("  (setup for {} failed; running anyway)", t.id);
         }
@@ -288,10 +310,15 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             skills: live.skills,
             config: live.config,
         };
+        let recorder = live.record.and_then(|r| r.start(t));
+        let opts = kai_core::RunOptions {
+            recorder: recorder.as_ref(),
+            ..Default::default()
+        };
         let started = Instant::now();
         let trace = match &live.native {
             Some(cfg) => native_trace(cfg, &t.prompt, &screen, &hands, &kill).await,
-            None => engine.run(&t.prompt).await,
+            None => engine.run_with(&t.prompt, opts).await,
         };
         let took = started.elapsed();
         let calls = std::mem::take(&mut *log.lock().unwrap());
@@ -302,6 +329,9 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         if let Some(cmd) = t.teardown.here() {
             sh(cmd, live.bench_dir).await;
         }
+        if let Some(r) = &recorder {
+            record::finish(r, &trace, check, setup_failed);
+        }
         out.push(Run {
             task: t.clone(),
             trace: Some(trace),
@@ -309,6 +339,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             calls,
             skipped: None,
             check,
+            setup_failed,
         });
     }
     Ok(out)

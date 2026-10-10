@@ -5,6 +5,7 @@ mod ab;
 mod backend;
 mod bench;
 mod console;
+mod data;
 
 use backend::{BackendArg, BackendOpts};
 use clap::{Parser, Subcommand};
@@ -34,6 +35,16 @@ enum Cmd {
         /// Approve everything except passwords and payments.
         #[arg(long)]
         yes: bool,
+        /// Record this run as training data under this folder
+        /// (`<dir>/<time>-<task>/`, see docs/DATASET.md). Screenshots can
+        /// hold private data; recording stays on this machine.
+        #[arg(long, value_name = "DIR")]
+        record: Option<PathBuf>,
+    },
+    /// Training data: export recorded runs, or summarise them.
+    Data {
+        #[command(subcommand)]
+        cmd: data::DataCmd,
     },
     /// Skill tools.
     Skill {
@@ -152,11 +163,17 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             backend,
             team,
             yes,
-        } => run_task(&backend, &task, team, yes).await,
+            record,
+        } => run_task(&backend, &task, team, yes, record.as_deref()).await,
+        Cmd::Data { cmd } => data::run(cmd),
         Cmd::Bench {
             cmd: Some(bench::BenchCmd::Report { dir, out }),
             ..
         } => bench::report(&dir, out.as_deref()),
+        Cmd::Bench {
+            cmd: Some(bench::BenchCmd::Variants { tasks, out, n }),
+            ..
+        } => bench::variants::write(&tasks, &out, n),
         Cmd::Bench { cmd: None, args } => bench::run(args, &all_skills()).await,
     }
 }
@@ -245,8 +262,23 @@ async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow::Result<ExitCode> {
+async fn run_task(
+    o: &BackendOpts,
+    task: &str,
+    team: bool,
+    yes: bool,
+    record: Option<&Path>,
+) -> anyhow::Result<ExitCode> {
     let (b, s, keys) = live_settings(o)?;
+    let recorder = match record {
+        Some(root) if team => {
+            eprintln!("--record is not supported with --team; not recording");
+            let _ = root;
+            None
+        }
+        Some(root) => Some(run_recorder(root, task, b, &s)?),
+        None => None,
+    };
     let (config, _) = backend::config(&s, &o.ab)?;
     let native = match b {
         BackendArg::OpenaiNative => {
@@ -292,6 +324,9 @@ async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow:
             eprintln!("native loop error: {e}");
         }
         save_trace(&run.trace);
+        if let Some(rec) = &recorder {
+            rec.finish(&run.trace)?;
+        }
         run.trace.outcome == Some(kai_core::Outcome::Success)
     } else if team {
         let orch = kai_core::orchestrator::Orchestrator {
@@ -340,10 +375,14 @@ async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow:
                 task,
                 kai_core::RunOptions {
                     plan_cache: cache.as_ref(),
+                    recorder: recorder.as_ref(),
                 },
             )
             .await;
         save_trace(&trace);
+        if let Some(rec) = &recorder {
+            eprintln!("recorded to {}", rec.dir().display());
+        }
         let (p50, p95) = trace.step_percentiles();
         println!(
             "{:?} in {} steps · step p50 {p50} ms · p95 {p95} ms",
@@ -358,6 +397,29 @@ async fn run_task(o: &BackendOpts, task: &str, team: bool, yes: bool) -> anyhow:
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// A recorder for `kai run --record <root>`: `<root>/<time>-<task slug>/`.
+fn run_recorder(
+    root: &Path,
+    task: &str,
+    b: BackendArg,
+    s: &Settings,
+) -> anyhow::Result<kai_core::TraceRecorder> {
+    let stamp = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string();
+    let slug: String = bench::report::slug(task).chars().take(40).collect();
+    let run_id = format!("{stamp}-{}", slug.trim_end_matches('-'));
+    let backend = match b {
+        BackendArg::Auto => format!("{:?}", s.backend).to_lowercase(),
+        _ => b.name().to_string(),
+    };
+    let mut meta = kai_core::RunMeta::new(&run_id, task, "run", backend, &s.fast_model);
+    meta.kai_version = bench::record::kai_version();
+    let mut rec = kai_core::TraceRecorder::new(root.join(&run_id), meta)?;
+    if s.careful_model != s.fast_model && !s.careful_model.is_empty() {
+        rec = rec.with_careful_model(&s.careful_model);
+    }
+    Ok(rec)
 }
 
 fn save_trace(trace: &kai_core::Trace) {
