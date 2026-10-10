@@ -32,8 +32,8 @@ impl Shell {
             .kill_on_drop(true)
             .current_dir(home())
             .spawn()?;
-        let mut out = child.stdout.take().expect("piped");
-        let mut err = child.stderr.take().expect("piped");
+        let out = child.stdout.take().expect("piped");
+        let err = child.stderr.take().expect("piped");
         let out_buf = Captured::default();
         let err_buf = Captured::default();
         let read_out = tokio::spawn(read_capped(out, out_buf.clone()));
