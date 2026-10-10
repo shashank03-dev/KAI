@@ -324,3 +324,67 @@ Work is pushed to both `ccr-904952eb-q0l216` (the owner's branch) and
 `ccr-fc874938-ukt9kz` (this session's branch); they are identical. Commits are
 authored by the repo owner's account with no co-author lines, at the owner's
 request, so GitHub shows them as unverified (unsigned).
+
+## Round 3 (2026-10-10) — live runs, head-to-head, foundation for training
+
+### Keys and backends used
+- Gemma 4 ran on the **Gemini API with two keys** supplied by the owner (env
+  `GEMINI_API_KEY`, comma-separated; Kai rotates them per request and retries
+  429/5xx on the next key). Keys were only ever passed as environment
+  variables. Gemma 4 31B on the free tier is slow (single calls ~27 s p50) and
+  often answers 500.
+- GPT-5 mini and GPT-4.1 mini ran through the **Vercel AI Gateway** free tier,
+  which throttled to ~1 request/min/model late in the run (60 s waits). Because
+  of that, the GPT comparison uses a **14-task subset** covering every category;
+  Gemma's numbers on exactly those tasks come from the same build.
+- The 2-hour background limit cut Gemma 31B's full 30-task run at task 15; it
+  was re-run on the 14-task subset instead.
+
+### Kai bugs found by live runs, fixed (each made tasks fail for every model)
+- Linux paste: the clipboard handle was dropped right after setting it, so text
+  over 32 characters (pasted, not typed) never arrived on X11.
+- "Nothing changed": a 9x8 dHash missed typing into a form field; replaced by a
+  fine content hash plus the element list.
+- The element list now shows text-field values (never for secure fields).
+- Dropdowns: typing the option text picks it (+Enter); the same click is never
+  batched twice; a click on a dropdown/menu forces a real screenshot.
+- A URL already opened in the run is not reopened (a reload wiped the form).
+- Shell: a background program holding the output pipe (`gio open`) hung the
+  run forever; readers now get 0.5 s after exit. A shell step that just starts
+  a GUI app runs it detached instead of blocking 180 s.
+- Payment/password check read the model's own thought ("avoid
+  password/payment") and matched "pay" inside words; now only typed text and
+  the target's name, on word boundaries.
+- Gemma sometimes streams only whitespace: aborted after 256 characters.
+- Bench environment: Firefox restored ~15 old tabs and crashed-tab pages into
+  every task; browser tasks now start clean. Firefox trusts the system CA store
+  (the container's proxy CA) via p11-kit.
+- Fairness: the release binary was not rebuilt between the four model runs, so
+  all four ran the same build. The last three fixes above (GUI-app shell step,
+  payment check, open_app needs a name) landed after the runs; the README notes
+  which failures they caused.
+
+### Measured (README has the table)
+14-task subset, one run each: Gemma 4 26B **14/14** (75 steps, 104 calls),
+Gemma 4 31B 11/14 (60 steps), GPT-5 mini 12/14 (212 steps), GPT-4.1 mini 8/14
+(155 steps). Gemma 4 26B on all 30 tasks: 23/30. One run per model is not
+statistically solid; docs/ROADMAP.md requires a 100+ task held-out set with
+3 repeats before claiming a winner.
+
+### Foundation for "Gemma beats frontier models over time"
+- `docs/ROADMAP.md`: phased plan with targets and sources. GPT-6 Astra's
+  published computer-use numbers are vendor-only (OpenAI system card,
+  2026-09-03); Astra itself is 403 on the free Gateway key, so not measured.
+- Recording: every `kai bench` task run is saved as training data under
+  `bench/runs/` (gitignored); `kai run --record`; the app records only when
+  Settings › Privacy › "Keep runs as training data" is on (default off, local).
+- `kai data export|stats`, failure taxonomy, `kai bench variants`
+  (training-only variants; never used for head-to-head numbers).
+- `train/`: LoRA SFT, online GRPO with Kai as the environment and bench checks
+  as rewards, eval, Droplet serving of adapters. Validated only by dry runs (no
+  GPU here).
+- Licensing: Gemma 4 is Apache 2.0. Google's Gemini API terms prohibit using
+  the service to develop competing models, which likely covers Gemma *served
+  through the Gemini API*; OpenAI's terms likewise. So the default training
+  data is Gemma's own runs on the owner's Droplet; GPT/Gemini-API runs stay
+  evaluation-only. Not legal advice — the owner should confirm.
