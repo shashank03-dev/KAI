@@ -94,6 +94,11 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
                 enabled: state.contains(State::Enabled) || state.contains(State::Sensitive),
                 visible: state.contains(State::Visible),
                 secure: arole == A::PasswordText,
+                value: if role == Role::TextField && arole != A::Terminal {
+                    field_text(&p).await
+                } else {
+                    None
+                },
                 handle: Some(obj.clone()),
             });
         }
@@ -115,6 +120,18 @@ async fn extents(p: &AccessibleProxy<'_>) -> Option<Rect> {
     let comp = p.proxies().await.ok()?.component().await.ok()?;
     let (x, y, w, h) = comp.get_extents(CoordType::Screen).await.ok()?;
     (w > 0 && h > 0).then(|| Rect::new(x as f32, y as f32, w as f32, h as f32))
+}
+
+/// A text field's contents (first 200 characters), so the model can see what
+/// it typed. Never called for password fields (their role differs).
+async fn field_text(p: &AccessibleProxy<'_>) -> Option<String> {
+    let text = p.proxies().await.ok()?.text().await.ok()?;
+    let n = text.character_count().await.ok()?;
+    if n <= 0 {
+        return None;
+    }
+    let t = text.get_text(0, n.min(200)).await.ok()?;
+    (!t.trim().is_empty()).then_some(t)
 }
 
 async fn label(p: &AccessibleProxy<'_>) -> String {

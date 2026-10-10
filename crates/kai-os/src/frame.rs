@@ -205,6 +205,21 @@ pub fn dhash(img: &RgbImage) -> u64 {
     hash
 }
 
+/// An exact fingerprint fine enough to see a typed word or a ticked box:
+/// 240x135 grayscale at 32 levels, FNV-1a. Used for "did the last action
+/// change anything?" (the coarse `dhash` misses small edits like typing into
+/// a form field, which made the loop wrongly report "no progress").
+pub fn content_hash(img: &RgbImage) -> u64 {
+    let small = image::imageops::resize(img, 240, 135, image::imageops::FilterType::Triangle);
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for p in small.pixels() {
+        let g = (p.0[0] as u32 * 299 + p.0[1] as u32 * 587 + p.0[2] as u32 * 114) / 1000;
+        h ^= (g >> 3) as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    h
+}
+
 /// Frames within this Hamming distance count as unchanged.
 pub const SAME_SCREEN_BITS: u32 = 3;
 
@@ -214,6 +229,22 @@ pub fn same_screen(a: u64, b: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn content_hash_sees_a_small_edit() {
+        let mut a = RgbImage::from_pixel(1920, 1080, image::Rgb([240, 240, 240]));
+        let b = a.clone();
+        assert_eq!(content_hash(&a), content_hash(&b));
+        // A typed word: a 60x14 px dark block inside a form field.
+        for y in 500..514 {
+            for x in 800..860 {
+                a.put_pixel(x, y, image::Rgb([30, 30, 30]));
+            }
+        }
+        assert_ne!(content_hash(&a), content_hash(&b));
+        assert!(same_screen(dhash(&a), dhash(&b)), "dhash alone misses it");
+    }
+
     use super::*;
 
     fn gradient(w: u32, h: u32, flip: bool) -> RgbaImage {

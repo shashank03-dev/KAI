@@ -48,10 +48,18 @@ impl StepReply {
             && let Some(Value::Array(items)) = then_raw
         {
             for item in items.into_iter().take(MAX_THEN) {
-                match follow_up(item) {
-                    Some(d) => then.push(d),
-                    None => break,
+                let Some(d) = follow_up(item) else { break };
+                // The same click twice in a row toggles a dropdown or menu
+                // shut again; it is never a certain follow-up.
+                let prev = then.last().unwrap_or(&decision);
+                if d.action.needs_target()
+                    && d.action != Action::Type
+                    && d.action == prev.action
+                    && d.target == prev.target
+                {
+                    break;
                 }
+                then.push(d);
             }
         }
         Ok(Self {
@@ -107,6 +115,17 @@ fn follow_up(mut item: Value) -> Option<Decision> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn repeated_click_ends_the_batch() {
+        let r = StepReply::parse_checked(
+            r#"{"thought":"x","action":"click","target":34,"risk":"none",
+                "then":[{"action":"click","target":34},{"action":"key","keys":["a"]}]}"#,
+        )
+        .unwrap();
+        assert!(r.then.is_empty());
+    }
+
     use super::*;
 
     #[test]

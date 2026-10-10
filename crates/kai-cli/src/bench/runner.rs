@@ -115,6 +115,7 @@ impl Perceptor for ScriptedScreen {
                 bounds: Rect::new(40.0, 60.0 + i as f32 * 50.0, 300.0, 32.0),
                 enabled: true,
                 secure: false,
+                value: None,
             })
             .collect();
         Ok(Observation {

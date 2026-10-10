@@ -111,6 +111,7 @@ mod tests {
             bounds: Rect::new(10.0, 20.0, 30.0, 40.0),
             enabled: true,
             secure: false,
+            value: None,
         }]);
         let d =
             Decision::parse_checked(r#"{"thought":"","action":"click","target":4,"risk":"none"}"#)

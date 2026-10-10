@@ -11,6 +11,32 @@ use crate::skill::DeterministicStep;
 use crate::trace::{Outcome, StepRecord, Timings};
 use std::time::{Duration, Instant};
 
+/// Refuse to open a URL this run already opened: a reload wipes what was
+/// typed into the page. Returns the note the model sees instead.
+pub(super) fn reopen_guard(opened: &mut Vec<String>, d: &Decision) -> Option<String> {
+    if d.action != Action::OpenUrl {
+        return None;
+    }
+    let url = d
+        .text
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_lowercase();
+    if url.is_empty() {
+        return None;
+    }
+    if opened.contains(&url) {
+        return Some(format!(
+            "Not reopened: {url} is already open. Reopening would clear what you typed; \
+             carry on in the page that is open."
+        ));
+    }
+    opened.push(url);
+    None
+}
+
 impl Engine<'_> {
     /// Perform one action. Returns command output for `shell` (so the model
     /// sees it next step) and the path taken: `a11y`, `mouse`, `keyboard`,
@@ -47,10 +73,23 @@ impl Engine<'_> {
                 } else {
                     "keyboard"
                 };
-                self.actuator
-                    .act(decision, grounding)
-                    .await
-                    .map(|_| (None, path))
+                self.actuator.act(decision, grounding).await?;
+                // Typing into a dropdown picks the matching option; Enter
+                // commits it (a click alone only toggles the list).
+                if decision.action == Action::Type
+                    && decision
+                        .target
+                        .and_then(|t| grounding.element(t))
+                        .is_some_and(|e| e.role == crate::element::Role::ComboBox)
+                {
+                    let mut enter = decision.clone();
+                    enter.action = Action::Key;
+                    enter.target = None;
+                    enter.text = None;
+                    enter.keys = vec!["enter".to_string()];
+                    self.actuator.act(&enter, grounding).await?;
+                }
+                Ok((None, path))
             }
         }
     }
@@ -145,4 +184,23 @@ pub(super) fn fixed_decision(st: &DeterministicStep) -> Decision {
     // into whatever has focus.
     let _ = d.validate_and_clamp();
     d
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_is_opened_once_per_run() {
+        let open = |u: &str| {
+            Decision::parse_checked(&format!(
+                r#"{{"thought":"x","action":"open_url","text":"{u}","risk":"none"}}"#
+            ))
+            .unwrap()
+        };
+        let mut seen = Vec::new();
+        assert!(reopen_guard(&mut seen, &open("http://127.0.0.1:8765/contact.html")).is_none());
+        assert!(reopen_guard(&mut seen, &open("http://127.0.0.1:8765/contact.html/")).is_some());
+        assert!(reopen_guard(&mut seen, &open("https://example.com")).is_none());
+    }
 }

@@ -57,6 +57,15 @@ pub(super) fn text_checkable(action: Action, expect: &str) -> bool {
     }
 }
 
+/// A click on a dropdown or menu opens a popup the tree describes poorly.
+pub(super) fn opens_popup(d: &Decision, g: &Grounding) -> bool {
+    use crate::element::Role;
+    d.action == Action::Click
+        && d.target
+            .and_then(|t| g.element(t))
+            .is_some_and(|e| matches!(e.role, Role::ComboBox | Role::MenuItem))
+}
+
 /// Enter/Return usually submits a form or opens something new.
 pub(super) fn submits(keys: &[String]) -> bool {
     keys.iter().any(|k| {
@@ -117,9 +126,9 @@ impl Engine<'_> {
             && r.failure_streak == 0
             && r.no_progress_streak == 0
             && r.tree_only_streak + 1 < c.full_every
-            && r.pending
-                .as_ref()
-                .is_some_and(|p| text_checkable(p.action, &p.expect) && !submits(&p.keys))
+            && r.pending.as_ref().is_some_and(|p| {
+                text_checkable(p.action, &p.expect) && !submits(&p.keys) && !p.popup
+            })
     }
 
     /// Observe (full or tree-only), verify the last `expect`, update the
@@ -181,7 +190,8 @@ impl Engine<'_> {
         let th = text_hash(&obs.grounding.as_text());
         let no_progress = match r.last_sig {
             Some((_, prev_th, was_tree)) if was_tree || tree_only => prev_th == th,
-            Some((h, _, _)) => h == obs.screen_hash,
+            // Both the pixels and the element list must be unchanged.
+            Some((h, prev_th, _)) => h == obs.screen_hash && prev_th == th,
             None => false,
         };
         if no_progress {

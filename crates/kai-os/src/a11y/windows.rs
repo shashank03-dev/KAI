@@ -86,6 +86,7 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
                 enabled: el.is_cached_enabled().unwrap_or(true),
                 visible: !el.is_cached_offscreen().unwrap_or(false),
                 secure,
+                value: None,
                 handle: Some(UiaRef(el.clone())),
             });
         }

@@ -32,6 +32,7 @@ fn grounding() -> Grounding {
         bounds: Rect::new(x, y, w, h),
         enabled: true,
         secure: false,
+        value: None,
     };
     Grounding::Marks(vec![
         e(1, Role::Tab, "Page 1", 330.0, 4.0, 80.0, 28.0),

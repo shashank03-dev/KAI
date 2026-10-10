@@ -15,10 +15,31 @@ const THINKING_UNKNOWN: u8 = 0;
 const THINKING_SUPPORTED: u8 = 1;
 const THINKING_UNSUPPORTED: u8 = 2;
 
+/// How many 429/5xx replies are retried before giving up.
+const MAX_TRANSIENT_TRIES: u32 = 8;
+
+/// `"a, b"` → `["a", "b"]`; never empty (an empty key fails at the API).
+fn split_keys(raw: &str) -> Vec<String> {
+    let keys: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(String::from)
+        .collect();
+    if keys.is_empty() {
+        vec![String::new()]
+    } else {
+        keys
+    }
+}
+
 pub struct GeminiClient {
     http: reqwest::Client,
     base: String,
-    api_key: String,
+    /// One or more keys (comma-separated in the setting); used in turn, so
+    /// per-key rate limits add up.
+    api_keys: Vec<String>,
+    next_key: std::sync::atomic::AtomicUsize,
     model: String,
     timeout: Duration,
     /// Remembered across calls: does this model accept thinkingConfig?
@@ -30,12 +51,10 @@ pub struct GeminiClient {
 impl GeminiClient {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .pool_idle_timeout(Duration::from_secs(90))
-                .build()
-                .expect("reqwest client"),
+            http: super::http_client(),
             base: "https://generativelanguage.googleapis.com/v1beta".to_string(),
-            api_key: api_key.into(),
+            api_keys: split_keys(&api_key.into()),
+            next_key: std::sync::atomic::AtomicUsize::new(0),
             model: "gemma-4-26b-a4b-it".to_string(),
             timeout: Duration::from_secs(45),
             thinking: AtomicU8::new(THINKING_UNKNOWN),
@@ -122,11 +141,13 @@ impl GeminiClient {
         include_schema: bool,
     ) -> Result<(reqwest::StatusCode, serde_json::Value, Duration), ClientError> {
         let url = format!("{}/models/{}:generateContent", self.base, self.model);
+        let i = self.next_key.fetch_add(1, Ordering::Relaxed);
+        let key = &self.api_keys[i % self.api_keys.len().max(1)];
         let started = Instant::now();
         let resp = self
             .http
             .post(url)
-            .header("x-goog-api-key", &self.api_key)
+            .header("x-goog-api-key", key)
             .json(&self.body(req, include_thinking, include_schema))
             .timeout(self.timeout)
             .send()
@@ -172,6 +193,20 @@ impl ModelClient for GeminiClient {
                         .store(THINKING_SUPPORTED, Ordering::Relaxed);
                 }
                 break (status, v, elapsed);
+            }
+            // Rate limit or a transient server error: the next call uses the
+            // next key. Waits are not model time (`elapsed` is per call).
+            let code = status.as_u16();
+            if (code == 429 || code == 500 || code == 503) && attempts < MAX_TRANSIENT_TRIES {
+                let all_keys_tried = (attempts as usize).is_multiple_of(self.api_keys.len().max(1));
+                let wait = match code {
+                    429 if all_keys_tried => Duration::from_secs(10),
+                    429 => Duration::ZERO,
+                    _ => Duration::from_millis(800),
+                };
+                log::warn!("Gemini {code} on {}; retrying in {wait:?}", self.model);
+                tokio::time::sleep(wait).await;
+                continue;
             }
             if attempts < 3 && thinking && mentions(&v, "thinking") {
                 self.thinking.store(THINKING_UNSUPPORTED, Ordering::Relaxed);
@@ -225,6 +260,16 @@ fn mentions(v: &serde_json::Value, what: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn several_keys_split_on_commas() {
+        assert_eq!(
+            split_keys(" a , b,"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(split_keys(""), vec![String::new()]);
+    }
+
     use super::*;
     use crate::client::Images;
 

@@ -324,6 +324,7 @@ pub fn map_action(a: &serde_json::Value, img: (u32, u32), screen: Rect) -> Mappe
             bounds: Rect::new(gx - 0.5, gy - 0.5, 1.0, 1.0),
             enabled: true,
             secure: false,
+            value: None,
         }])
     };
     let none = || Grounding::Marks(Vec::new());

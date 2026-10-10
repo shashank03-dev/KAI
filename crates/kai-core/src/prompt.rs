@@ -43,6 +43,8 @@ clicking when the task is naturally a command.
 - Use `ask_user` when you genuinely need the user to choose or provide input.
 - Use `done` the moment the task is complete. A command that ended with \
 `[exit 0]` worked; never run the same command twice.
+- Never open a page or app you already have open: reopening clears what you \
+typed. For a dropdown (combobox), use `type` with the option's text.
 - `expect` describes what the screen should show after your action.
 - Only when the next actions are certain (e.g. type, then press Enter), list up \
 to 3 of them in `then`, each like {\"action\":\"key\",\"keys\":[\"enter\"]}. \
@@ -289,6 +291,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            value: None,
         }]);
         let t = user_turn("click save", &g, &[], None, false);
         assert!(t.contains("#1 button \"Save\"\n"));
@@ -381,6 +384,7 @@ mod tests {
                     bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
                     enabled: i != 7,
                     secure: false,
+                    value: None,
                 })
                 .collect(),
         )

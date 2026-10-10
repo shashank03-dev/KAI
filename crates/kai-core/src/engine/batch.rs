@@ -80,7 +80,10 @@ impl Engine<'_> {
                 target: d.target.and_then(|t| grounding.target_rect(t)),
             });
             let t_act = Instant::now();
-            let result = self.act(d, &grounding).await;
+            let result = match super::act::reopen_guard(&mut r.opened, d) {
+                Some(note) => Ok((Some(note), "none")),
+                None => self.act(d, &grounding).await,
+            };
             timings.act_ms = t_act.elapsed().as_millis() as u64;
             let (output, path, ok) = match result {
                 Ok((o, p)) => (o, p, true),
@@ -112,6 +115,7 @@ impl Engine<'_> {
             pending.summary = HistoryItem::from_decision(d).summary;
             pending.action = d.action;
             pending.keys = d.keys.clone();
+            pending.popup = observe::opens_popup(d, &grounding);
             if d.action == Action::Type {
                 pending.typed = d.text.clone();
             }
@@ -140,6 +144,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            value: None,
         }])
     }
 

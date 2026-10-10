@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-10",
+  "backend": "gemini",
+  "model": "gemma-4-26b-a4b-it",
+  "os": "linux",
+  "note": "Live run on the real desktop. Pass is decided by each task's check command where it has one, otherwise by the run's own outcome.",
+  "command": "kai bench --yes --backend gemini --model gemma-4-26b-a4b-it --only web-form-submit",
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "6.18.44-fc-v114",
+    "display": "x11 :97 1920x1080",
+    "a11y_env": "GTK_MODULES=gail:atk-bridge ACCESSIBILITY_ENABLED=1 QT_ACCESSIBILITY=1",
+    "browser": "firefox",
+    "kai_version": "0.1.0",
+    "git_commit": "b25cbab"
+  },
+  "ab": {
+    "no_batch": false,
+    "no_tree_only": false,
+    "no_a11y": false,
+    "no_plan_cache": false,
+    "applied": true
+  },
+  "prices": null,
+  "tasks": [
+    {
+      "id": "web-form-submit",
+      "title": "Fill in and send a contact form",
+      "kind": "gui",
+      "outcome": "success",
+      "pass": false,
+      "judged_by": "check",
+      "steps": 9,
+      "seconds": 48.81,
+      "step_p50_ms": 2368,
+      "step_p95_ms": 4797,
+      "model_p50_ms": 2289,
+      "model_calls": 11,
+      "prompt_tokens": 20091,
+      "completion_tokens": 714,
+      "cost_usd": null
+    }
+  ],
+  "success_rate": 0.0,
+  "passed": 0,
+  "total": 1,
+  "skipped": 0,
+  "step_p50_ms": 2368,
+  "step_p95_ms": 4797,
+  "model_p50_ms": 2289,
+  "model_p95_ms": 4750,
+  "observe_p50_ms": 56,
+  "observe_p95_ms": 91,
+  "act_p50_ms": 57,
+  "act_p95_ms": 476,
+  "mean_seconds_per_task": 48.81,
+  "mean_steps_per_task": 9.0,
+  "mean_model_calls_per_task": 11.0,
+  "model_calls": 11,
+  "calls_with_usage": 11,
+  "prompt_tokens": 20091,
+  "completion_tokens": 714,
+  "cost_usd": null,
+  "total_seconds": 48.81,
+  "missing": [
+    "cost: no prices given (--usd-per-mtok-in/--usd-per-mtok-out)"
+  ]
+}

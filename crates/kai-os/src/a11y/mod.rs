@@ -34,6 +34,8 @@ pub struct RawNode {
     pub enabled: bool,
     pub visible: bool,
     pub secure: bool,
+    /// Current text of a field (Linux: AT-SPI Text). `None` when unknown.
+    pub value: Option<String>,
     /// The live object, for accessibility-first actions. `None` in tests.
     pub handle: Option<NodeRef>,
 }
@@ -152,6 +154,7 @@ fn ground_picked(nodes: &[RawNode], screen: Rect) -> (Grounding, Vec<usize>) {
             bounds: n.bounds,
             enabled: n.enabled,
             secure: n.secure || n.role == Role::PasswordField,
+            value: n.value.clone(),
         });
     }
 
@@ -234,6 +237,7 @@ mod tests {
             enabled: true,
             visible: true,
             secure: false,
+            value: None,
             handle: None,
         }
     }

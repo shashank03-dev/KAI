@@ -159,7 +159,7 @@ impl DesktopPerceptor {
             frame::mask(&mut img, &local(&excluded, at));
             let grounding = a11y::ground_live(&nodes, at);
             let f = frame::downscale(&img);
-            let hash = frame::dhash(&f.image);
+            let hash = frame::content_hash(&f.image);
             let mut marked = f.image;
             marks::draw(&mut marked, &shifted(&grounding, at), f.scale);
             let images = Images {
@@ -264,6 +264,7 @@ mod tests {
             bounds: Rect::new(x, 30.0, 10.0, 10.0),
             enabled: true,
             secure: false,
+            value: None,
         }])
     }
 

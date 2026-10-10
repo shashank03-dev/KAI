@@ -77,6 +77,30 @@ pub struct Element {
     /// True when this is (or sits inside) a password field — forces high risk.
     #[serde(default)]
     pub secure: bool,
+    /// What a text field or dropdown currently holds (never for secure
+    /// fields), so the model can see that its typing landed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+impl Element {
+    /// The field's current value for the model: trimmed, ≤ 40 chars, never
+    /// for secure fields.
+    pub fn shown_value(&self) -> Option<String> {
+        if self.secure {
+            return None;
+        }
+        let v = self.value.as_deref()?.trim();
+        if v.is_empty() {
+            return None;
+        }
+        let short: String = v.chars().take(40).collect();
+        Some(if v.chars().count() > 40 {
+            format!("{short}…")
+        } else {
+            short
+        })
+    }
 }
 
 /// What grounding produced: a set of marks, or a coarse grid fallback when the
@@ -109,7 +133,17 @@ impl Grounding {
                         } else {
                             "enabled"
                         };
-                        format!("#{} {} \"{}\" ({})", e.mark, e.role.label(), e.name, state)
+                        let value = e
+                            .shown_value()
+                            .map(|v| format!(" = \"{v}\""))
+                            .unwrap_or_default();
+                        format!(
+                            "#{} {} \"{}\"{value} ({})",
+                            e.mark,
+                            e.role.label(),
+                            e.name,
+                            state
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -145,6 +179,9 @@ impl Grounding {
                             ""
                         };
                         out.push_str(&format!(" \"{short}{more}\""));
+                    }
+                    if let Some(v) = e.shown_value() {
+                        out.push_str(&format!(" = \"{v}\""));
                     }
                     if !e.enabled {
                         out.push_str(" (disabled)");
@@ -214,6 +251,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
             enabled,
             secure,
+            value: None,
         }
     }
 

@@ -199,6 +199,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: true,
+            value: None,
         }
     }
 
@@ -237,6 +238,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            value: None,
         }]);
         let d = decision(Action::Click, Some(1), Risk::None);
         assert_eq!(classify(&d, &g), Risk::High);
@@ -251,6 +253,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            value: None,
         }]);
         let d = decision(Action::Click, Some(1), Risk::Low);
         assert_eq!(classify(&d, &g), Risk::Low);

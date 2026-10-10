@@ -72,6 +72,8 @@ struct Pending {
     typed: Option<String>,
     /// Keys pressed last; Enter usually submits/navigates, so look properly.
     keys: Vec<String>,
+    /// The last click hit a dropdown/menu: a popup needs a real look.
+    popup: bool,
     /// Indices into `trace.steps` this check confirms.
     records: Vec<usize>,
 }
@@ -98,6 +100,9 @@ struct Run<'t> {
     notes: Vec<String>,
     /// A grid click (cell number, screen rect) that may have missed.
     grid_click: Option<(u32, crate::element::Rect)>,
+    /// URLs already opened in this run (normalised), to refuse a reload that
+    /// would wipe what was typed.
+    opened: Vec<String>,
 }
 
 impl Engine<'_> {
@@ -121,6 +126,7 @@ impl Engine<'_> {
             tree_only_streak: 0,
             last_rich: false,
             pending: None,
+            opened: Vec::new(),
             notes: Vec::new(),
             grid_click: None,
         };
@@ -286,7 +292,12 @@ impl Engine<'_> {
 
         // ---- Act ----
         let t_act = Instant::now();
-        let (output, path) = match self.act(&decision, &obs.grounding).await {
+        let guarded = act::reopen_guard(&mut r.opened, &decision);
+        let acted = match guarded {
+            Some(note) => Ok((Some(note), "none")),
+            None => self.act(&decision, &obs.grounding).await,
+        };
+        let (output, path) = match acted {
             Ok((o, p)) => (o, p),
             Err(e) => {
                 log::error!("act failed at step {step}: {e}");
@@ -315,6 +326,7 @@ impl Engine<'_> {
                 .then(|| decision.text.clone())
                 .flatten(),
             keys: decision.keys.clone(),
+            popup: observe::opens_popup(&decision, &obs.grounding),
             records: vec![r.trace.steps.len() - 1],
         };
         let mut item = HistoryItem::from_decision(&decision);
