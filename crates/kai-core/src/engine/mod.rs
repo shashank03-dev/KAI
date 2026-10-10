@@ -67,6 +67,9 @@ pub struct RunOptions<'a> {
     pub executor: Option<&'a dyn Decider>,
 }
 
+/// Reply budget for the one repair retry (a cut-off script needs room).
+const REPAIR_MAX_TOKENS: u32 = 1536;
+
 /// Trace backend label for actions run from a model reply's `then` list.
 pub const BATCHED: &str = "batched (no model call)";
 /// Trace backend label for skill steps.
@@ -468,13 +471,33 @@ impl Engine<'_> {
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
                 // no-op improvement on vLLM structured outputs).
-                log::warn!("repairing malformed reply: {first}");
+                log::warn!(
+                    "repairing malformed reply: {first}; reply began: {:?}",
+                    reply.raw.chars().take(900).collect::<String>()
+                );
+                // A long command or text (e.g. a script) can overrun the
+                // short reply budget and arrive cut off: the retry gets room.
+                let hint = match &first {
+                    crate::schema::SchemaError::MissingText(crate::schema::Action::Shell) => {
+                        " Put the exact terminal command in `text`, e.g. \
+                         {\"thought\":\"run it\",\"action\":\"shell\",\"text\":\"ls -la\"}."
+                    }
+                    crate::schema::SchemaError::MissingText(_) => {
+                        " Put the text to type or the app name in `text`."
+                    }
+                    _ => " If it held a long command or text, it was cut off: write it in full.",
+                };
                 let repair_text = format!(
-                    "{user_text}\n\nYour previous reply was not valid: {first}. \
+                    "{user_text}\n\nYour previous reply was not valid: {first}.{hint} \
                      Reply with ONLY the JSON object."
                 );
                 let req2 = ModelRequest {
                     user_text: &repair_text,
+                    max_tokens: self
+                        .config
+                        .max_tokens
+                        .saturating_mul(8)
+                        .max(REPAIR_MAX_TOKENS),
                     ..req
                 };
                 let reply2 = client.decide(&req2).await?;

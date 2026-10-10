@@ -113,7 +113,9 @@ pub fn build_turn(t: &TurnInput) -> String {
         s.push_str("Active skill: ");
         s.push_str(&sk.front.name);
         s.push('\n');
-        s.push_str(&sk.body);
+        // `{skill_dir}` lets a skill point at its own helper scripts.
+        let dir = std::fs::canonicalize(&sk.dir).unwrap_or_else(|_| sk.dir.clone());
+        s.push_str(&sk.body.replace("{skill_dir}", &dir.display().to_string()));
         s.push_str("\n\n");
     }
 
@@ -213,15 +215,28 @@ impl HistoryItem {
         if let Some(text) = &d.text
             && !text.is_empty()
         {
-            // Commands are kept whole (a cut command looks like a wrong one);
-            // typed text and URLs are shortened.
-            let cap = if d.action == crate::schema::Action::Shell {
-                300
+            // Short commands are kept whole (a cut command looks like a wrong
+            // one); a long one (a script) shows its start and says it ran in
+            // full, or the model "finishes" it again. Typed text is shortened.
+            if d.action == crate::schema::Action::Shell && text.chars().count() > 300 {
+                let first: String = text
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(160)
+                    .collect();
+                let lines = text.lines().count();
+                summary.push_str(&format!(" \"{first}\" ({lines} lines, ran in full)"));
             } else {
-                30
-            };
-            let short: String = text.chars().take(cap).collect();
-            summary.push_str(&format!(" \"{short}\""));
+                let cap = if d.action == crate::schema::Action::Shell {
+                    300
+                } else {
+                    30
+                };
+                let short: String = text.chars().take(cap).collect();
+                summary.push_str(&format!(" \"{short}\""));
+            }
         }
         if !d.keys.is_empty() {
             summary.push(' ');
