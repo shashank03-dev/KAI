@@ -27,12 +27,32 @@ pub struct RunEntry {
 
 /// A readable name for what a run uses: "Gemma 4 26B A4B · Gateway".
 pub fn model_label(s: &kai_core::settings::Settings) -> String {
+    if s.backend == kai_core::settings::BackendChoice::Local {
+        return format!(
+            "{} · {}",
+            local_label(&s.local_model),
+            backend_label(s.backend)
+        );
+    }
     let model = kai_core::settings::MODELS
         .iter()
         .find(|m| m.id == s.fast_model)
         .map(|m| m.label.to_string())
         .unwrap_or_else(|| s.fast_model.clone());
     format!("{model} · {}", backend_label(s.backend))
+}
+
+/// A local catalog id's label ("Gemma 4 E4B"), or the id itself.
+pub fn local_label(id: &str) -> String {
+    if id.is_empty() {
+        return "No local model".into();
+    }
+    crate::local_api::load_catalog()
+        .models
+        .into_iter()
+        .find(|m| m.id == id)
+        .map(|m| m.label)
+        .unwrap_or_else(|| id.to_string())
 }
 
 pub fn backend_label(b: kai_core::settings::BackendChoice) -> &'static str {
@@ -43,6 +63,7 @@ pub fn backend_label(b: kai_core::settings::BackendChoice) -> &'static str {
         Gemini => "Gemini API",
         Gateway => "AI Gateway",
         OpenAi => "OpenAI",
+        Local => "This computer",
         Mock => "Mock",
     }
 }

@@ -108,6 +108,12 @@ impl KaiApp {
             "Go to",
             [
                 cmd("go:run", "Run", IconName::Play, None),
+                cmd(
+                    "go:models",
+                    "Models (run on this computer)",
+                    IconName::Cpu,
+                    None,
+                ),
                 cmd("go:skills", "Skills", IconName::Puzzle, None),
                 cmd("go:history", "History", IconName::History, None),
                 cmd("go:bench", "Benchmarks", IconName::ChartColumn, None),
@@ -119,6 +125,20 @@ impl KaiApp {
             kai_core::settings::MODELS
                 .iter()
                 .map(|m| cmd(&format!("model:{}", m.id), m.label, IconName::Cpu, None))
+                .collect::<Vec<_>>(),
+        )
+        .group(
+            "Local models",
+            crate::switcher::installed_local(self, cx)
+                .into_iter()
+                .map(|(id, label)| {
+                    cmd(
+                        &format!("local:{id}"),
+                        &format!("Use {label} on this computer"),
+                        IconName::HardDrive,
+                        None,
+                    )
+                })
                 .collect::<Vec<_>>(),
         )
         .group(
@@ -159,6 +179,7 @@ impl KaiApp {
                             app.set_paused(id, value.as_ref() == "pause", cx)
                         }
                     }
+                    v if v.starts_with("local:") => app.local_use(&v[6..], cx),
                     v if v.starts_with("model:") => crate::switcher::set_model(app, &v[6..], cx),
                     v if v.starts_with("backend:") => {
                         let b = crate::switcher::backend_from_key(&v[8..]);

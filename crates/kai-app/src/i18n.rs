@@ -8,6 +8,7 @@ const EN: &[(&str, &str)] = &[
     ("app.tagline", "Gemma 4's hands on your computer"),
     ("splash.waking", "Waking Gemma…"),
     ("nav.run", "Run"),
+    ("nav.models", "Models"),
     ("nav.skills", "Skills"),
     ("nav.history", "History"),
     ("nav.bench", "Benchmarks"),

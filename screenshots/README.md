@@ -6,8 +6,10 @@ Captured with the app's own harness (made-up run data, no model):
 KAI_CAPTURE=screenshots cargo run --release -p kai-app
 ```
 
-It writes `NN-<screen>-<light|dark>.png` for all 25 screens and states and
-quits. These were captured in the headless build container on TigerVNC's
+It writes `NN-<screen>-<light|dark>.png` for all 29 screens and states and
+quits. `KAI_CAPTURE_ONLY=models,onboarding-local` limits it to the shots whose
+names contain one of those words. The local-model shots (06, 90–92) use
+made-up hardware (16 GB, RTX 4060 8 GB) and the app's placeholder catalog. These were captured in the headless build container on TigerVNC's
 `Xvnc` (1600x1000x24) with Mesa's llvmpipe Vulkan driver (lavapipe), which
 gpui's wgpu renderer picked by itself. The sample frame in the run views is
 `docs/img/set-of-marks-gtk.jpg` (its black area is part of that capture).

@@ -9,6 +9,8 @@ mod brand;
 mod chrome;
 mod control;
 mod i18n;
+mod local;
+mod local_api;
 mod mini;
 mod onboarding;
 mod pages;

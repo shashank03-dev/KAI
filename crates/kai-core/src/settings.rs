@@ -76,6 +76,8 @@ pub enum BackendChoice {
     Gateway,
     /// OpenAI directly (comparison runs).
     OpenAi,
+    /// `local_model` served by `llama-server` on 127.0.0.1:`local_port`.
+    Local,
     Mock,
 }
 
@@ -111,6 +113,9 @@ pub struct Settings {
     /// Let a fast local decision model (jevos) carry out Gemma's plan
     /// (docs/EXECUTOR.md). Off until measured.
     pub use_executor: bool,
+    /// Local backend: the catalog id, and the port llama-server uses (127.0.0.1).
+    pub local_model: String,
+    pub local_port: u16,
 }
 
 impl Default for Settings {
@@ -133,6 +138,8 @@ impl Default for Settings {
             record_traces: false,
             executor_endpoint: crate::client::jev::LOCAL_BASE.to_string(),
             use_executor: false,
+            local_model: String::new(),
+            local_port: 8098,
         }
     }
 }
@@ -283,7 +290,14 @@ impl Settings {
                 );
                 Ok(OpenAiClient::openai(key).with_model(model.trim_start_matches("openai/")))
             };
+            let local = || -> anyhow::Result<OpenAiClient> {
+                anyhow::ensure!(!self.local_model.is_empty(), "no local model chosen");
+                let base = format!("http://127.0.0.1:{}/v1", self.local_port);
+                let client = OpenAiClient::openai("").with_base(base); // no key
+                Ok(client.with_model(&self.local_model)) // TODO(merge): served_name
+            };
             Ok(match self.backend {
+                BackendChoice::Local => Box::new(local()?),
                 BackendChoice::Vllm => Box::new(vllm()?),
                 BackendChoice::Gemini => Box::new(gemini()?),
                 BackendChoice::Gateway => Box::new(gateway()?),
