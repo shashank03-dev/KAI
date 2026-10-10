@@ -14,8 +14,8 @@ The decision model is **jevos-v4** ([feder-cr/jev](https://github.com/feder-cr/j
 MIT; 1B parameters, CPU only, OpenVINO int8). It runs as its own binary on
 `http://127.0.0.1:8017` and speaks TypeSafe Jev's typed-question wire format.
 The author reports 28–130 ms per request on a laptop CPU, and accuracy below
-hosted Jev on hard tasks. **Kai has not measured either yet** (see the end of
-this page).
+hosted Jev on hard tasks. Kai's own first measurements are at the end of this
+page.
 
 The executor is **off by default** (`Config::executor = false`). It stays off
 until it is measured on real tasks.
@@ -220,12 +220,31 @@ fake jevos, through the real engine
 These counts only show the mechanism. The fake jevos is always right and
 confident, so they are the best case, not a prediction.
 
-**Not measured (pending a real jevos run).**
+**Measured with the real jevos-v4 (2026-10-10, this repo's container: 4 vCPU,
+no GPU; `jev serve`, OpenVINO 2026.4, int8).**
 
-- jevos latency on Kai's prompts (the author reports 28–130 ms).
-- Its target accuracy and calibration on real element lists.
-- How often the gates escalate in practice.
-- Wall-clock and success-rate effects on `bench/tasks.yaml`.
+- Startup: model ready in 68.8 s. `/health` 0.3 ms median.
+- One executor request on the contact form (10 elements, 3 questions,
+  722 input tokens): **p50 141 ms**, min 133 ms, max 201 ms over 10 calls (the
+  same state each time, so jevos' state cache was warm). Fresh states of the
+  same size: 110–135 ms; one with descriptive option names: 469 ms.
+- Accuracy depends on how the question is put (single hand-checked probes,
+  not a benchmark):
+  - With the **task text in the state** (it mentions "Ravi Kumar"), asked which
+    element receives the email, jevos picked `Full name` (p=0.74) over `Email`
+    (0.18) — wrong — and said the empty Email field already held the address
+    (p=0.97) — wrong.
+  - With **only the element list** in the state and the subgoal in the
+    question, it picked `Email` (p=0.92–0.96) and `Send message` (p=0.94) —
+    right.
+  - Asked whether a field is empty or already filled, it stayed unreliable
+    even with a legend (p=0.32 that the empty field was empty).
+- Changes made from this: the state is now the element list plus a one-line
+  legend (no task text); an "already done" answer never skips a subgoal by
+  default (`Gates::skip_done` = 1.01; it is recorded for tuning).
+
+**Not measured yet:** the success-rate and step effects on `bench/tasks.yaml`
+(the A/B is running), calibration over many element lists, and gate tuning.
 
 The next step is to run `./jev serve` on the bench machine and compare
 `kai bench --executor` with a plain run (n ≥ 3 each), then tune the gates from

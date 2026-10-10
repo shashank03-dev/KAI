@@ -76,7 +76,10 @@ impl Default for Gates {
             ready_min: 0.7,
             target_min: 0.6,
             margin_min: 0.2,
-            skip_done: 0.85,
+            // Never skip on jevos' word alone: measured, it said p=0.97 that an
+            // empty Email field already held the address. > 1 disables Skip;
+            // the answer is still recorded for tuning.
+            skip_done: 1.01,
             met_ok: 0.8,
             met_bad: 0.3,
             max_candidates: 12,
@@ -153,9 +156,17 @@ pub fn label(e: &Element) -> String {
     s
 }
 
-/// The request state: task, subgoal, the previous subgoal's expectation,
-/// and the compact element list.
-pub fn state(task: &str, sg: &Subgoal, g: &Grounding, prev: Option<&Subgoal>) -> serde_json::Value {
+/// The request state: only the element list, with a one-line legend. The
+/// subgoal goes in the questions. Measured on jevos-v4 (2026-10-10): with the
+/// task text in the state it picked the wrong field ("Full name" for an email,
+/// p=0.74, because the task mentions the name); with the bare element list it
+/// picked the right one (p=0.92–0.96).
+pub fn state(
+    _task: &str,
+    _sg: &Subgoal,
+    g: &Grounding,
+    _prev: Option<&Subgoal>,
+) -> serde_json::Value {
     let mut elements = g.as_compact_text();
     if elements.len() > MAX_STATE_CHARS {
         let cut = (0..=MAX_STATE_CHARS)
@@ -165,16 +176,10 @@ pub fn state(task: &str, sg: &Subgoal, g: &Grounding, prev: Option<&Subgoal>) ->
         elements.truncate(cut);
         elements.push_str("\n…");
     }
-    let mut v = serde_json::json!({
-        "task": task,
-        "subgoal": sg.describe(),
-        "expect": sg.expect,
-        "elements": elements,
-    });
-    if let Some(p) = prev {
-        v["previous"] = serde_json::json!({ "subgoal": p.describe(), "expect": p.expect });
-    }
-    v
+    serde_json::Value::String(format!(
+        "Elements on screen (a value after = is what a field contains; no = means \
+         empty):\n{elements}"
+    ))
 }
 
 /// The one request for a subgoal: `target` (when it needs one),

@@ -72,8 +72,9 @@ fn one_request_carries_target_done_ready_and_previous_check() {
     );
     assert_eq!(criteria.last().unwrap().0, NONE);
     let s = state("contact form", &t, &g, Some(&prev));
-    assert_eq!(s["previous"]["expect"], "Name holds Ada");
-    assert!(s["elements"].as_str().unwrap().contains("#5 button"));
+    // Only the element list (with a legend) goes in the state; never the task.
+    let st = s.as_str().unwrap();
+    assert!(st.contains("#5 button") && !st.contains("contact form"));
     // Shell: no target, no already_done.
     let sh = sg(json!({"do":"shell","text":"ls","expect":"listing"}));
     let ids: Vec<String> = questions(&sh, &[], None).into_iter().map(|q| q.0).collect();
@@ -131,9 +132,19 @@ fn gates_escalate_when_unsure_or_skip_when_done() {
             "{c} -> {v:?}"
         );
     }
-    let done = json!({"already_done":{"type":"noul","noul":0.9},
+    // "Already done" never skips by default (jevos was measured wrong on it);
+    // with an explicit gate it still can.
+    let done = json!({"already_done":{"type":"noul","noul":0.99},
                       "ready":{"type":"noul","noul":0.1}});
-    assert_eq!(judge_type(done), Verdict::Skip);
+    assert!(matches!(judge_type(done.clone()), Verdict::Escalate(_)));
+    let g = form();
+    let t = sg(json!({"do":"type","target":"Email","text":"a@b.c","expect":"typed"}));
+    let c = candidates(&g, &t, 12);
+    let gates = Gates {
+        skip_done: 0.85,
+        ..Gates::default()
+    };
+    assert_eq!(judge(&t, &answers(done), &c, &gates).0, Verdict::Skip);
 }
 
 #[test]

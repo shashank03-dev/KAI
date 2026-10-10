@@ -189,7 +189,7 @@ async fn unsure_executor_hands_back_and_pauses_after_two_escalations() {
 }
 
 #[tokio::test]
-async fn not_ready_escalates_and_already_done_skips() {
+async fn not_ready_escalates_and_already_done_never_skips_by_default() {
     let mut j = FakeJevos::confident();
     j.ready = 0.5;
     let o = plain(&[A_PLAN, DONE], Some(&j)).await;
@@ -199,11 +199,11 @@ async fn not_ready_escalates_and_already_done_skips() {
     let mut j = FakeJevos::confident();
     j.done = 0.9;
     let o = plain(&[A_PLAN, DONE], Some(&j)).await;
-    assert_eq!(o.actions, vec!["type #3 Ada"], "all subgoals already held");
+    // jevos' "already done" was measured unreliable, so it never skips work
+    // by default: the subgoals still run.
     let st = o.trace.executor.as_ref().unwrap();
-    assert_eq!((st.skipped, st.acted), (3, 0));
-    // Skips reuse the observation: one request per subgoal, no re-look.
-    assert_eq!(j.count(), 3);
+    assert_eq!(st.skipped, 0);
+    assert!(st.acted >= 3, "{st:?}");
 }
 
 #[tokio::test]
