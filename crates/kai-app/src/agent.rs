@@ -319,6 +319,7 @@ async fn drive(
                 kai_core::RunOptions {
                     plan_cache: cache.as_ref(),
                     recorder: recorder.as_ref(),
+                    ..Default::default()
                 },
             )
             .await;

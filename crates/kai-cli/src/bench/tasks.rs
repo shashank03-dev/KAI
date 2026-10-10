@@ -136,7 +136,7 @@ pub fn validate(tasks: &[Task]) -> anyhow::Result<()> {
             );
         }
         for raw in &t.mock {
-            kai_core::Decision::parse_checked(raw)
+            kai_core::StepReply::parse_checked(raw)
                 .map_err(|e| anyhow::anyhow!("task {}: bad recorded reply {raw}: {e}", t.id))?;
         }
     }

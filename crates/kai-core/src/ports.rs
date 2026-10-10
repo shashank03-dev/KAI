@@ -179,6 +179,12 @@ pub struct Config {
     pub max_batch: u32,
     /// Try the element's accessibility pattern before the mouse.
     pub a11y_actions: bool,
+    /// Let a local decision model (jevos) carry out the model's `plan`
+    /// (needs `RunOptions::executor`; see `docs/EXECUTOR.md`). Off until
+    /// measured on real tasks.
+    pub executor: bool,
+    /// The executor's confidence gates and limits.
+    pub executor_gates: crate::executor::Gates,
 }
 
 impl Default for Config {
@@ -193,6 +199,8 @@ impl Default for Config {
             full_every: 3,
             max_batch: crate::reply::MAX_THEN as u32,
             a11y_actions: true,
+            executor: false,
+            executor_gates: crate::executor::Gates::default(),
         }
     }
 }

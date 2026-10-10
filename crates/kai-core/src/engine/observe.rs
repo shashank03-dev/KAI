@@ -1,12 +1,29 @@
 //! Observation policy: full vs tree-only, the cheap verifier, no-progress
 //! detection, and the zoomed crop after a missed grid click.
 
-use super::{Engine, Run, observe_timings};
+use super::{Engine, Run};
 use crate::element::{Grounding, Rect};
-use crate::ports::{EngineEvent, Observation};
+use crate::ports::{EngineEvent, Observation, ObserveTiming};
 use crate::schema::{Action, Decision};
 use crate::trace::Timings;
 use std::time::Instant;
+
+/// Timings for a step whose observation took `observe_ms` in total.
+fn observe_timings(t: ObserveTiming, observe_ms: u64) -> Timings {
+    if t.capture_ms + t.tree_ms + t.encode_ms > 0 {
+        Timings {
+            capture_ms: t.capture_ms,
+            tree_ms: t.tree_ms,
+            encode_ms: t.encode_ms,
+            ..Default::default()
+        }
+    } else {
+        Timings {
+            capture_ms: observe_ms,
+            ..Default::default()
+        }
+    }
+}
 
 /// A Set-of-Marks list at least this long counts as "rich" (tree-only OK).
 pub const MIN_RICH_ELEMENTS: usize = 8;
@@ -133,10 +150,17 @@ impl Engine<'_> {
 
     /// Observe (full or tree-only), verify the last `expect`, update the
     /// no-progress state, and add the zoom crop after a missed grid click.
-    pub(super) async fn observe_step(&self, r: &mut Run<'_>) -> anyhow::Result<Seen> {
+    /// `exec`: an observation for the executor, which reads text only: tree
+    /// only whenever tree-only steps are allowed, and no verifier (the
+    /// executor checks `expect` itself).
+    pub(super) async fn observe_step(&self, r: &mut Run<'_>, exec: bool) -> anyhow::Result<Seen> {
         let step = r.step;
         let t0 = Instant::now();
-        let mut tree_only = self.want_tree_only(r);
+        let mut tree_only = if exec {
+            self.config.tree_only
+        } else {
+            self.want_tree_only(r)
+        };
         let mut obs = if tree_only {
             self.perceptor.observe_tree_only().await?
         } else {
@@ -158,7 +182,7 @@ impl Engine<'_> {
         // ---- Cheap verifier on the element text ----
         let mut verify_ms = 0;
         let mut p = None;
-        if let (Some(v), Some(pend)) = (self.verifier, r.pending.as_ref())
+        if let (Some(v), Some(pend), false) = (self.verifier, r.pending.as_ref(), exec)
             && !pend.expect.trim().is_empty()
         {
             let state = format!(

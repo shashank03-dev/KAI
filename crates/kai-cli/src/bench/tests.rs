@@ -46,6 +46,7 @@ fn trace(steps: &[(u64, u64, u64)], outcome: Outcome) -> Trace {
             path: None,
             output: None,
             call: Default::default(),
+            executor: None,
         });
     }
     t.finish(outcome);

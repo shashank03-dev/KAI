@@ -5,17 +5,24 @@
 //! Two endpoint shapes exist (both measured to validate requests):
 //! - `POST {base}/v1/evaluate`: question types `boolean | choice | score`.
 //! - `POST {base}/typesafe/v1/systemone`: also `noul` (a probability).
+//! - `POST {base}/v1/systemone`: the same wire format served locally by
+//!   jevos-v4 (`./jev serve`, port 8017; auth only if `JEV_API_KEY` is set),
+//!   used by the executor (`crate::executor`, `docs/EXECUTOR.md`).
 //!
 //! On the Gateway free tier both answer 403 "Free tier users do not have
 //! access"; that surfaces as [`ClientError::Unavailable`], and the verifier
 //! turns itself off and returns `None` so the loop proceeds without it.
 
+pub use super::jev_answer::Answer;
 use super::{ClientError, http_client, send_error};
 use crate::ports::Verifier;
 use async_trait::async_trait;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Where jevos-v4 listens by default (`./jev serve`).
+pub const LOCAL_BASE: &str = "http://127.0.0.1:8017";
 
 /// One typed question.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,50 +43,17 @@ pub enum Question {
         instructions: String,
         criteria: Option<String>,
     },
-}
-
-/// One typed answer.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Answer {
-    Noul(f64),
-    Boolean { probability: f64 },
-    Choice { choice: String },
-    Score(f64),
-}
-
-impl Answer {
-    /// P(yes) for `noul`/`boolean` answers.
-    pub fn probability(&self) -> Option<f64> {
-        match self {
-            Answer::Noul(p) | Answer::Boolean { probability: p } => Some(*p),
-            _ => None,
-        }
-    }
-
-    /// Parse one answer object; tolerant of field-name variants.
-    pub fn parse(v: &serde_json::Value) -> Option<Self> {
-        let num = |keys: &[&str]| keys.iter().find_map(|k| v[*k].as_f64());
-        match v["type"].as_str()? {
-            "noul" => num(&["noul", "probability", "value"]).map(Answer::Noul),
-            "boolean" => {
-                let p = num(&["probability", "noul", "p"]).or_else(|| {
-                    v["value"]
-                        .as_bool()
-                        .or_else(|| v["answer"].as_bool())
-                        .map(|b| if b { 1.0 } else { 0.0 })
-                })?;
-                Some(Answer::Boolean { probability: p })
-            }
-            "choice" => ["choice", "answer", "value"]
-                .iter()
-                .find_map(|k| v[*k].as_str())
-                .map(|c| Answer::Choice {
-                    choice: c.to_string(),
-                }),
-            "score" => num(&["score", "value"]).map(Answer::Score),
-            _ => None,
-        }
-    }
+    /// A choice whose options carry descriptions: sent as `"type":"choice"`
+    /// with `"criteria": {"<option>": "<description>", ...}` (jevos' format).
+    Criteria {
+        instructions: String,
+        criteria: Vec<(String, String)>,
+    },
+    /// A score over named levels: `"type":"score"` with `"criteria": [..]`.
+    Levels {
+        instructions: String,
+        levels: Vec<String>,
+    },
 }
 
 /// Which request shape to send.
@@ -89,6 +63,8 @@ pub enum JevEndpoint {
     Evaluate,
     /// `/typesafe/v1/systemone`.
     SystemOne,
+    /// `/v1/systemone` on a local jevos server (no `/typesafe` prefix).
+    Local,
 }
 
 /// A general client for typed decision questions.
@@ -114,6 +90,34 @@ impl DecisionClient {
         }
     }
 
+    /// jevos-v4 served locally at `base` (e.g. [`LOCAL_BASE`]). No key unless
+    /// [`DecisionClient::with_key`] sets one.
+    pub fn local(base: impl Into<String>) -> Self {
+        Self {
+            http: http_client(),
+            base: String::new(),
+            api_key: String::new(),
+            model: "jev-latest".to_string(),
+            endpoint: JevEndpoint::Local,
+            timeout: Duration::from_secs(3),
+        }
+        .with_base(base)
+    }
+
+    /// Bearer key (empty: no `Authorization` header on the local endpoint).
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = key.into();
+        self
+    }
+
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
+    pub fn endpoint(&self) -> JevEndpoint {
+        self.endpoint
+    }
+
     /// Host root without a path, e.g. `http://127.0.0.1:9000`.
     pub fn with_base(mut self, base: impl Into<String>) -> Self {
         self.base = base.into().trim_end_matches('/').to_string();
@@ -130,13 +134,17 @@ impl DecisionClient {
         self
     }
 
-    pub(crate) fn body(&self, state: &str, questions: &[(&str, Question)]) -> serde_json::Value {
+    pub(crate) fn body(
+        &self,
+        state: serde_json::Value,
+        questions: &[(&str, Question)],
+    ) -> serde_json::Value {
         let mut qs = serde_json::Map::new();
         for (id, q) in questions {
             let v = match q {
                 Question::Noul { instructions } => {
                     let ty = match self.endpoint {
-                        JevEndpoint::SystemOne => "noul",
+                        JevEndpoint::SystemOne | JevEndpoint::Local => "noul",
                         JevEndpoint::Evaluate => "boolean",
                     };
                     serde_json::json!({ "type": ty, "instructions": instructions })
@@ -147,8 +155,38 @@ impl DecisionClient {
                 Question::Choice {
                     instructions,
                     options,
+                } if self.endpoint == JevEndpoint::Local => {
+                    let c: serde_json::Map<_, _> = options
+                        .iter()
+                        .map(|o| (o.clone(), o.as_str().into()))
+                        .collect();
+                    serde_json::json!({
+                        "type": "choice", "instructions": instructions, "criteria": c
+                    })
+                }
+                Question::Choice {
+                    instructions,
+                    options,
                 } => serde_json::json!({
                     "type": "choice", "instructions": instructions, "options": options
+                }),
+                Question::Criteria {
+                    instructions,
+                    criteria,
+                } => {
+                    let c: serde_json::Map<_, _> = criteria
+                        .iter()
+                        .map(|(o, d)| (o.clone(), d.as_str().into()))
+                        .collect();
+                    serde_json::json!({
+                        "type": "choice", "instructions": instructions, "criteria": c
+                    })
+                }
+                Question::Levels {
+                    instructions,
+                    levels,
+                } => serde_json::json!({
+                    "type": "score", "instructions": instructions, "criteria": levels
                 }),
                 Question::Score {
                     instructions,
@@ -173,22 +211,32 @@ impl DecisionClient {
         state: &str,
         questions: &[(&str, Question)],
     ) -> Result<BTreeMap<String, Answer>, ClientError> {
-        if self.api_key.is_empty() {
+        self.ask_value(state.into(), questions).await
+    }
+
+    /// [`DecisionClient::ask`] with the state as a string or a JSON object.
+    pub async fn ask_value(
+        &self,
+        state: serde_json::Value,
+        questions: &[(&str, Question)],
+    ) -> Result<BTreeMap<String, Answer>, ClientError> {
+        if self.api_key.is_empty() && self.endpoint != JevEndpoint::Local {
             return Err(ClientError::MissingKey("AI_GATEWAY_API_KEY"));
         }
         let path = match self.endpoint {
             JevEndpoint::Evaluate => "/v1/evaluate",
             JevEndpoint::SystemOne => "/typesafe/v1/systemone",
+            JevEndpoint::Local => "/v1/systemone",
         };
-        let resp = self
+        let mut req = self
             .http
             .post(format!("{}{path}", self.base))
-            .bearer_auth(&self.api_key)
             .json(&self.body(state, questions))
-            .timeout(self.timeout)
-            .send()
-            .await
-            .map_err(|e| send_error(e, self.timeout))?;
+            .timeout(self.timeout);
+        if !self.api_key.is_empty() {
+            req = req.bearer_auth(&self.api_key);
+        }
+        let resp = req.send().await.map_err(|e| send_error(e, self.timeout))?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         if !status.is_success() {
@@ -201,6 +249,45 @@ impl DecisionClient {
             .iter()
             .filter_map(|(k, a)| Answer::parse(a).map(|a| (k.clone(), a)))
             .collect())
+    }
+
+    /// `GET {base}/health`: the round-trip time when the server answers 2xx.
+    pub async fn health(&self) -> Result<Duration, ClientError> {
+        let t = Instant::now();
+        let timeout = self.timeout.min(Duration::from_secs(2));
+        let mut req = self
+            .http
+            .get(format!("{}/health", self.base))
+            .timeout(timeout);
+        if !self.api_key.is_empty() {
+            req = req.bearer_auth(&self.api_key);
+        }
+        let resp = req.send().await.map_err(|e| send_error(e, timeout))?;
+        let status = resp.status();
+        let _ = resp.bytes().await;
+        if !status.is_success() {
+            return Err(ClientError::Status(status.as_u16(), "health check".into()));
+        }
+        Ok(t.elapsed())
+    }
+}
+
+#[async_trait]
+impl crate::executor::Decider for DecisionClient {
+    async fn ask(
+        &self,
+        state: &serde_json::Value,
+        questions: &[(String, Question)],
+    ) -> Result<BTreeMap<String, Answer>, ClientError> {
+        let qs: Vec<(&str, Question)> = questions
+            .iter()
+            .map(|(id, q)| (id.as_str(), q.clone()))
+            .collect();
+        self.ask_value(state.clone(), &qs).await
+    }
+
+    async fn health(&self) -> Result<Duration, ClientError> {
+        DecisionClient::health(self).await
     }
 }
 
@@ -270,26 +357,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn answers_parse_in_both_shapes() {
-        let n = Answer::parse(&serde_json::json!({"type":"noul","noul":0.98})).unwrap();
-        assert_eq!(n.probability(), Some(0.98));
-        let b = Answer::parse(&serde_json::json!({"type":"boolean","probability":0.2})).unwrap();
-        assert_eq!(b.probability(), Some(0.2));
-        let b2 = Answer::parse(&serde_json::json!({"type":"boolean","value":true})).unwrap();
-        assert_eq!(b2.probability(), Some(1.0));
-        let c = Answer::parse(&serde_json::json!({"type":"choice","choice":"save"})).unwrap();
-        assert_eq!(
-            c,
-            Answer::Choice {
-                choice: "save".into()
-            }
-        );
-        let s = Answer::parse(&serde_json::json!({"type":"score","score":7.5})).unwrap();
-        assert_eq!(s, Answer::Score(7.5));
-        assert!(Answer::parse(&serde_json::json!({"type":"other"})).is_none());
-    }
-
-    #[test]
     fn noul_is_sent_as_boolean_on_evaluate() {
         let q = [(
             "met",
@@ -298,9 +365,9 @@ mod tests {
             },
         )];
         let so = DecisionClient::gateway("k");
-        assert_eq!(so.body("s", &q)["questions"]["met"]["type"], "noul");
+        assert_eq!(so.body("s".into(), &q)["questions"]["met"]["type"], "noul");
         let ev = DecisionClient::gateway("k").with_endpoint(JevEndpoint::Evaluate);
-        let b = ev.body("s", &q);
+        let b = ev.body("s".into(), &q);
         assert_eq!(b["questions"]["met"]["type"], "boolean");
         assert_eq!(b["model"], "typesafe-ai/jev");
         assert_eq!(b["state"], "s");

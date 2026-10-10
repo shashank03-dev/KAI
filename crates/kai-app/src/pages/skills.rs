@@ -412,6 +412,7 @@ mod tests {
             output: None,
             path: None,
             call: Default::default(),
+            executor: None,
         });
         let md = draft_from(&trace.task.clone(), Some(&trace));
         let name = slug(&trace.task);

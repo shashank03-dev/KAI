@@ -9,6 +9,7 @@ use crate::console::{Printer, TerminalApprover};
 use async_trait::async_trait;
 use kai_core::client::{Backend, ClientError, ModelReply, ModelRequest};
 use kai_core::engine::{Actuator, Engine, NullSink, Perceptor};
+use kai_core::executor::Decider;
 use kai_core::trace::Trace;
 use kai_core::{
     Config, Decision, Element, Grounding, Images, MockClient, ModelClient, Observation, Rect, Role,
@@ -185,6 +186,7 @@ pub async fn run_mock(
     skills: &[Skill],
     config: Config,
     rec: Option<&Recording>,
+    executor: Option<&dyn Decider>,
 ) -> Vec<Run> {
     let mut out = Vec::new();
     for t in tasks {
@@ -213,6 +215,7 @@ pub async fn run_mock(
         let recorder = rec.and_then(|r| r.start(t));
         let opts = kai_core::RunOptions {
             recorder: recorder.as_ref(),
+            executor,
             ..Default::default()
         };
         let trace = engine.run_with(&t.prompt, opts).await;
@@ -248,6 +251,8 @@ pub struct Live<'a> {
     pub native: Option<kai_core::cua::CuaConfig>,
     /// Record every task run as training data.
     pub record: Option<&'a Recording>,
+    /// The executor's decision model, when `--executor` is on.
+    pub executor: Option<&'a dyn Decider>,
 }
 
 pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run>> {
@@ -313,6 +318,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         let recorder = live.record.and_then(|r| r.start(t));
         let opts = kai_core::RunOptions {
             recorder: recorder.as_ref(),
+            executor: live.executor,
             ..Default::default()
         };
         let started = Instant::now();

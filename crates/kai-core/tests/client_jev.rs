@@ -79,13 +79,8 @@ async fn evaluate_shape_with_typed_questions() {
         .await
         .unwrap();
     assert_eq!(a["ok"].probability(), Some(0.3));
-    assert_eq!(
-        a["next"],
-        Answer::Choice {
-            choice: "retry".into()
-        }
-    );
-    assert_eq!(a["q"], Answer::Score(4.0));
+    assert_eq!(a["next"].option(), Some("retry"));
+    assert!(matches!(a["q"], Answer::Score { value: Some(v), .. } if v == 4.0));
     let (path, body) = &srv.bodies()[0];
     assert_eq!(path, "/v1/evaluate");
     assert_eq!(body["questions"]["ok"]["type"], "boolean");

@@ -739,6 +739,7 @@ $3.39/hour [Est.], plus API spend for comparisons (~$300–600 [Est.]).
 | Same-harness comparison via the Gateway (GPT models, Gemma) | **Built**; GPT-5 mini / 4.1 mini runs in progress | `client/openai.rs` |
 | OpenAI native computer-use loop | **Built**, tested only against a mock server | `crates/kai-core/src/cua.rs` |
 | Plan cache, skills, `then` batching, tree-only steps, a11y actions | **Built** | HARNESS.md |
+| Executor: Gemma plans, local jevos-v4 grounds and gates routine subgoals | **Built**, tested only with mocks (real jevos latency/accuracy pending) | `docs/EXECUTOR.md` |
 | Trajectory export (`kai data export`) | **Being built** this session | format in `docs/DATASET.md` (being written) |
 | Failure taxonomy | **Being built** | — |
 | Task-variants generator | **Being built** | — |

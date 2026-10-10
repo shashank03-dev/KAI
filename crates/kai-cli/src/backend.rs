@@ -191,6 +191,33 @@ pub fn key_report() -> Vec<String> {
     .collect()
 }
 
+/// `kai doctor`'s executor line: is jevos at the settings' endpoint up, and
+/// how long does `/health` take (median of 5 round trips)?
+pub async fn executor_report(s: &Settings) -> String {
+    let c = s.executor_client();
+    let mut times = Vec::new();
+    for _ in 0..5 {
+        match c.health().await {
+            Ok(t) => times.push(t.as_micros() as u64),
+            Err(e) => {
+                return format!(
+                    "{:<30} unreachable ({e}); start it with `./jev serve` or set KAI_EXECUTOR_URL",
+                    c.base()
+                );
+            }
+        }
+    }
+    times.sort_unstable();
+    let ms = |us: u64| us as f64 / 1000.0;
+    format!(
+        "{:<30} reachable · /health {:.1} ms median, {:.1} ms max over {} calls",
+        c.base(),
+        ms(times[times.len() / 2]),
+        ms(times[times.len() - 1]),
+        times.len()
+    )
+}
+
 /// A stand-in model client for paths that never call Kai's model (the native
 /// OpenAI loop drives itself).
 pub fn placeholder_client() -> Box<dyn kai_core::ModelClient> {

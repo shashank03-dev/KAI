@@ -62,6 +62,58 @@ pub struct StepRecord {
     /// call (batched, cached, skill). Flattened: the fields sit on the step.
     #[serde(flatten, default)]
     pub call: CallRecord,
+    /// What the executor's decision model said before it ran this step
+    /// (`docs/EXECUTOR.md`). Absent on model, batched, cached and skill steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<ExecutorRecord>,
+}
+
+/// The decision-model numbers behind one executor step.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExecutorRecord {
+    /// The planned subgoal, in words.
+    pub subgoal: String,
+    /// Confidence of the chosen target (target-needing subgoals only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_p: Option<f64>,
+    /// Lead of the chosen target over the runner-up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub already_done: Option<f64>,
+    /// P(expect met) after acting, from the next decision request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_met: Option<f64>,
+    /// Wall time of the decision request that chose this step.
+    pub latency_ms: u64,
+}
+
+/// Executor counters for one run.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExecutorStats {
+    /// The executor was asked for (config) and its endpoint answered.
+    pub enabled: bool,
+    /// Why it ran without the executor (health check failed), if it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
+    /// `/health` round trip at the start of the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_ms: Option<u64>,
+    /// Plans the model handed over.
+    pub plans: u32,
+    /// Decision requests sent.
+    pub decisions: u32,
+    /// Subgoals carried out (actions taken).
+    pub acted: u32,
+    /// Subgoals skipped because they already held.
+    pub skipped: u32,
+    /// Times control went back to the model early (unsure, failed, steered).
+    pub escalations: u32,
+    /// Wall time of every decision request, in order.
+    pub latencies_ms: Vec<u64>,
 }
 
 /// What exactly went to and came back from the model on one step. Every field
@@ -104,6 +156,7 @@ impl StepRecord {
             output: None,
             path: None,
             call: CallRecord::default(),
+            executor: None,
         }
     }
 }
@@ -133,6 +186,9 @@ pub struct Trace {
     /// taxonomy ([`crate::failure`]). Absent in old traces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<String>,
+    /// Executor counters, when the run asked for the executor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<ExecutorStats>,
 }
 
 impl Trace {
@@ -144,6 +200,7 @@ impl Trace {
             outcome: None,
             total_ms: 0,
             errors: Vec::new(),
+            executor: None,
         }
     }
 
@@ -228,6 +285,7 @@ mod tests {
                 output: None,
                 path: None,
                 call: Default::default(),
+                executor: None,
             });
         }
         let (p50, p95) = tr.step_percentiles();

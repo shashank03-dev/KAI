@@ -69,7 +69,7 @@ fn ab_text(s: &Summary) -> String {
     match &s.ab {
         None => "—".into(),
         Some(ab) => {
-            let off = ab.flags.disabled();
+            let off = ab.flags.changed();
             let flags = if off.is_empty() {
                 "all on".to_string()
             } else {
@@ -82,6 +82,16 @@ fn ab_text(s: &Summary) -> String {
             }
         }
     }
+}
+
+fn executor_text(s: &Summary) -> String {
+    if !s.executor {
+        return "off".into();
+    }
+    format!(
+        "on · {} decisions · {} escalations · {} / {} ms (p50 / p95)",
+        s.executor_decisions, s.executor_escalations, s.executor_p50_ms, s.executor_p95_ms
+    )
 }
 
 fn machine_text(s: &Summary) -> String {
@@ -137,6 +147,7 @@ fn metric_rows(s: &Summary) -> Vec<(&'static str, String)> {
         ("Failures", failures_text(&s.failures)),
         ("Total time (s)", format!("{:.1}", s.total_seconds)),
         ("A/B flags", ab_text(s)),
+        ("Executor", executor_text(s)),
         ("Machine", machine_text(s)),
     ]
 }

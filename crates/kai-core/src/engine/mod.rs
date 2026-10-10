@@ -11,16 +11,20 @@
 //!   last `expect` is checkable from text, plus an optional cheap verifier and
 //!   a zoomed crop after a missed grid click — `observe.rs`;
 //! - a plan cache that replays a known task's deterministic prefix — `act.rs`
-//!   and [`crate::plan_cache`].
+//!   and [`crate::plan_cache`];
+//! - the executor: a local decision model carries out the reply's `plan`,
+//!   gated by confidence, approvals unchanged — `execute.rs`.
 
 mod act;
 mod batch;
+mod execute;
 mod observe;
 mod record;
 
 pub use crate::ports::*;
 
 use crate::client::{Images, ModelClient, ModelRequest};
+use crate::executor::Decider;
 use crate::plan_cache::PlanCache;
 use crate::prompt::{self, HistoryItem, TurnInput};
 use crate::recorder::TraceRecorder;
@@ -28,7 +32,7 @@ use crate::reply::StepReply;
 use crate::risk;
 use crate::schema::Action;
 use crate::skill::Skill;
-use crate::trace::{Outcome, StepRecord, Timings, Trace};
+use crate::trace::{Outcome, StepRecord, Trace};
 use std::time::{Duration, Instant};
 
 /// All the collaborators the loop drives.
@@ -59,6 +63,8 @@ pub struct RunOptions<'a> {
     /// Record this run as training data (prompts, raw replies, the JPEGs
     /// sent). Off unless set; see `docs/DATASET.md`.
     pub recorder: Option<&'a TraceRecorder>,
+    /// The executor's decision model (jevos); used when `Config::executor`.
+    pub executor: Option<&'a dyn Decider>,
 }
 
 /// Trace backend label for actions run from a model reply's `then` list.
@@ -67,6 +73,8 @@ pub const BATCHED: &str = "batched (no model call)";
 pub const SKILL: &str = "skill (no model call)";
 /// Trace backend label for plan-cache steps.
 pub const CACHED: &str = "plan cache (no model call)";
+/// Trace backend label for executor steps.
+pub const EXECUTOR: &str = crate::executor::BACKEND;
 
 /// What the last action expected, waiting for the next observation to check.
 struct Pending {
@@ -111,6 +119,11 @@ struct Run<'t> {
     /// Where this run is recorded, if anywhere, and the system prompt hash.
     recorder: Option<&'t TraceRecorder>,
     system_hash: Option<String>,
+    /// The executor's decision model, while it is usable this run.
+    decider: Option<&'t dyn Decider>,
+    /// Escalations in a row, and model steps left before plans run again.
+    exec_streak: u32,
+    exec_cooldown: u32,
 }
 
 impl Engine<'_> {
@@ -139,7 +152,11 @@ impl Engine<'_> {
             grid_click: None,
             recorder: opts.recorder,
             system_hash: None,
+            decider: opts.executor.filter(|_| self.config.executor),
+            exec_streak: 0,
+            exec_cooldown: 0,
         };
+        self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
         r.trace.finish(outcome);
         if let Some(rec) = opts.recorder
@@ -159,9 +176,13 @@ impl Engine<'_> {
     }
 
     async fn drive(&self, r: &mut Run<'_>, opts: RunOptions<'_>) -> Outcome {
-        let system = prompt::system_prompt(self.skills);
         let active_skill = prompt::select_skill(r.task, self.skills);
-        let schema = StepReply::json_schema();
+        let (system, schema) = if r.decider.is_some() {
+            let s = prompt::system_prompt_with_plan(self.skills);
+            (s, StepReply::json_schema_with_plan())
+        } else {
+            (prompt::system_prompt(self.skills), StepReply::json_schema())
+        };
         let deadline = Instant::now() + self.config.max_time;
         r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
 
@@ -207,9 +228,10 @@ impl Engine<'_> {
     ) -> Option<Outcome> {
         let step = r.step;
         self.drain_steering(r, step);
+        r.exec_cooldown = r.exec_cooldown.saturating_sub(1);
 
         // ---- Observe + Ground (+ cheap verify of the last expect) ----
-        let seen = match self.observe_step(r).await {
+        let seen = match self.observe_step(r, false).await {
             Ok(s) => s,
             Err(e) => {
                 log::error!("observe failed: {e}");
@@ -385,6 +407,10 @@ impl Engine<'_> {
             // Two steps with no change despite acting: stop and ask.
             return Some(Outcome::AskedUser);
         }
+        // ---- The routine subgoals after this step: the executor ----
+        if acted_ok && !reply.plan.is_empty() {
+            return self.run_plan(r, &reply.plan).await;
+        }
         None
     }
 
@@ -456,23 +482,6 @@ impl Engine<'_> {
                 d.add_usage(&reply);
                 Ok(d)
             }
-        }
-    }
-}
-
-/// Timings for a step whose observation took `observe_ms` in total.
-fn observe_timings(t: ObserveTiming, observe_ms: u64) -> Timings {
-    if t.capture_ms + t.tree_ms + t.encode_ms > 0 {
-        Timings {
-            capture_ms: t.capture_ms,
-            tree_ms: t.tree_ms,
-            encode_ms: t.encode_ms,
-            ..Default::default()
-        }
-    } else {
-        Timings {
-            capture_ms: observe_ms,
-            ..Default::default()
         }
     }
 }

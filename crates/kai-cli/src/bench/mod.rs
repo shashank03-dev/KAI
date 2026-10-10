@@ -7,6 +7,8 @@
 //! and touches nothing. `replay` runs the same replies for real on this
 //! desktop and judges them with each task's check command.
 
+#[cfg(test)]
+mod executor_tests;
 pub mod machine;
 pub mod record;
 pub mod report;
@@ -164,9 +166,18 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         eprintln!("recording runs under {}", r.batch_dir.display());
     }
     let rec = recording.as_ref();
+    // The executor's decision model (jevos), only with `--executor`. Each
+    // run health-checks it and runs without it when it is not there.
+    let jevos = config.executor.then(|| s.executor_client());
+    if let Some(j) = &jevos {
+        eprintln!("executor: jevos at {}", j.base());
+    }
+    let executor = jevos
+        .as_ref()
+        .map(|j| j as &dyn kai_core::executor::Decider);
 
     let runs = match b {
-        BackendArg::Mock => runner::run_mock(&list, skills, config, rec).await,
+        BackendArg::Mock => runner::run_mock(&list, skills, config, rec, executor).await,
         BackendArg::Replay => {
             let live = runner::Live {
                 client: None,
@@ -178,6 +189,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 force: args.force,
                 native: None,
                 record: rec,
+                executor,
             };
             runner::run_live(&list, &live).await?
         }
@@ -193,6 +205,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 force: args.force,
                 native: Some(cfg),
                 record: rec,
+                executor,
             };
             runner::run_live(&list, &live).await?
         }
@@ -209,6 +222,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 force: args.force,
                 native: None,
                 record: rec,
+                executor,
             };
             runner::run_live(&list, &live).await?
         }

@@ -151,6 +151,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             for line in backend::key_report() {
                 println!("  {line}");
             }
+            println!("\nexecutor (local decision model, `--executor`):");
+            println!("  {}", backend::executor_report(&Settings::load()).await);
             Ok(if kai_os::permissions::all_granted(&checks) {
                 ExitCode::SUCCESS
             } else {
@@ -365,6 +367,8 @@ async fn run_task(
             skills: &skills,
             config,
         };
+        // The executor (`--executor`): jevos carries out the model's plans.
+        let jevos = config.executor.then(|| s.executor_client());
         // The plan cache replays the known-good opening of a repeated task.
         let cache =
             o.ab.plan_cache()
@@ -376,6 +380,9 @@ async fn run_task(
                 kai_core::RunOptions {
                     plan_cache: cache.as_ref(),
                     recorder: recorder.as_ref(),
+                    executor: jevos
+                        .as_ref()
+                        .map(|j| j as &dyn kai_core::executor::Decider),
                 },
             )
             .await;

@@ -10,7 +10,9 @@ use clap::Args;
 use kai_core::Config;
 use serde::{Deserialize, Serialize};
 
-/// Every switch defaults to "feature on"; the flags turn one off.
+/// Every speed switch defaults to "feature on" and its flag turns it off;
+/// the executor is the exception (off until measured; `--executor` turns it
+/// on).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Args, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ab {
@@ -26,6 +28,11 @@ pub struct Ab {
     /// Disable the plan cache.
     #[arg(long)]
     pub no_plan_cache: bool,
+    /// Turn on the executor: a local decision model (jevos-v4 at the
+    /// settings' `executor_endpoint`) carries out the model's plan
+    /// (docs/EXECUTOR.md).
+    #[arg(long)]
+    pub executor: bool,
 }
 
 impl Ab {
@@ -41,6 +48,15 @@ impl Ab {
         .filter_map(|(on, name)| on.then_some(name))
         .collect()
     }
+
+    /// Every flag that differs from the defaults, as typed.
+    pub fn changed(&self) -> Vec<&'static str> {
+        let mut v = self.disabled();
+        if self.executor {
+            v.push("--executor");
+        }
+        v
+    }
 }
 
 /// Apply the switches to an engine config. Always `Ok(true)`: every switch
@@ -54,6 +70,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     };
     config.tree_only = !ab.no_tree_only;
     config.a11y_actions = !ab.no_a11y;
+    config.executor = ab.executor;
     Ok(true)
 }
 
@@ -83,5 +100,13 @@ mod tests {
         assert_eq!(c.max_batch, 0);
         assert!(!c.a11y_actions && c.tree_only);
         assert!(ab.plan_cache());
+        assert!(!c.executor, "executor off unless asked for");
+        let ab = Ab {
+            executor: true,
+            ..Default::default()
+        };
+        apply_ab(&mut c, &ab).unwrap();
+        assert!(c.executor);
+        assert_eq!(ab.changed(), vec!["--executor"]);
     }
 }

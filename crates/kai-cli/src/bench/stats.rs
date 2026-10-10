@@ -74,6 +74,11 @@ pub struct TaskResult {
     /// passed or was skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<Failure>,
+    /// Executor decision requests and hand-backs to the model (0 when off).
+    pub executor_decisions: u32,
+    pub executor_escalations: u32,
+    /// Steps the executor carried out.
+    pub executor_steps: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -119,6 +124,16 @@ pub struct Summary {
     /// Failed tasks per failure category.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub failures: BTreeMap<String, usize>,
+    /// The run asked for the executor (`--executor`).
+    pub executor: bool,
+    /// Tasks where the executor's endpoint answered the health check.
+    pub executor_available_tasks: usize,
+    pub executor_decisions: u32,
+    pub executor_escalations: u32,
+    pub executor_steps: u32,
+    /// Decision-request latency over all tasks (ms).
+    pub executor_p50_ms: u64,
+    pub executor_p95_ms: u64,
 }
 
 /// `loop 2 · false_done 1`, or `none`.
@@ -174,6 +189,7 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut all_calls: Vec<Call> = Vec::new();
     let mut total_secs = 0.0;
+    let (mut ex_lat, mut ex_avail) = (Vec::new(), 0usize);
     for mut run in runs {
         if meta.recorded {
             // The mock client makes up usage numbers; no model ran.
@@ -216,6 +232,13 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
         r.completion_tokens = ct;
         r.model_calls = run.calls.len();
         all_calls.extend(run.calls);
+        if let Some(x) = &trace.executor {
+            r.executor_decisions = x.decisions;
+            r.executor_escalations = x.escalations;
+            r.executor_steps = x.acted;
+            ex_lat.extend(x.latencies_ms.iter().copied());
+            ex_avail += usize::from(x.enabled);
+        }
         r.failure = super::record::label(&trace, run.check, run.setup_failed);
         r.outcome = trace.outcome;
         r.pass = pass;
@@ -267,7 +290,21 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
     let (model_p50_ms, model_p95_ms) = p50_p95(model_all);
     let (observe_p50_ms, observe_p95_ms) = p50_p95(observe_all);
     let (act_p50_ms, act_p95_ms) = p50_p95(act_all);
+    let executor = meta.ab.is_some_and(|a| a.flags.executor);
+    if executor && ex_lat.is_empty() {
+        missing.push(format!(
+            "executor latency: no decision requests ({ex_avail} of {n} tasks reached the endpoint)"
+        ));
+    }
+    let (executor_p50_ms, executor_p95_ms) = p50_p95(ex_lat);
     Summary {
+        executor,
+        executor_available_tasks: ex_avail,
+        executor_decisions: results.iter().map(|r| r.executor_decisions).sum(),
+        executor_escalations: results.iter().map(|r| r.executor_escalations).sum(),
+        executor_steps: results.iter().map(|r| r.executor_steps).sum(),
+        executor_p50_ms,
+        executor_p95_ms,
         date: meta.date,
         backend: meta.backend,
         model: meta.model,

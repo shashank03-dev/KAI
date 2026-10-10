@@ -104,6 +104,10 @@ pub struct Settings {
     /// (prompts, raw replies, the screenshots sent; `docs/DATASET.md`).
     /// Off by default; local only, never uploaded.
     pub record_traces: bool,
+    /// Where the executor's local decision model (jevos-v4, `./jev serve`)
+    /// listens. Env `KAI_EXECUTOR_URL` overrides; `JEV_API_KEY`, if set, is
+    /// sent as a bearer key. Used only when a run turns the executor on.
+    pub executor_endpoint: String,
 }
 
 impl Default for Settings {
@@ -124,6 +128,7 @@ impl Default for Settings {
             theme: "system".to_string(),
             onboarded: false,
             record_traces: false,
+            executor_endpoint: crate::client::jev::LOCAL_BASE.to_string(),
         }
     }
 }
@@ -205,7 +210,27 @@ impl Settings {
         {
             self.vllm_endpoint = e;
         }
+        if let Ok(e) = std::env::var("KAI_EXECUTOR_URL")
+            && !e.trim().is_empty()
+        {
+            self.executor_endpoint = e.trim().to_string();
+        }
         self
+    }
+
+    /// The executor's decision client: jevos at `executor_endpoint`, with
+    /// `JEV_API_KEY` as bearer key only when that variable is set.
+    pub fn executor_client(&self) -> crate::client::DecisionClient {
+        let base = if self.executor_endpoint.trim().is_empty() {
+            crate::client::jev::LOCAL_BASE
+        } else {
+            self.executor_endpoint.trim()
+        };
+        let c = crate::client::DecisionClient::local(base);
+        match std::env::var("JEV_API_KEY") {
+            Ok(k) if !k.trim().is_empty() => c.with_key(k.trim()),
+            _ => c,
+        }
     }
 
     pub fn limits(&self) -> (u32, Duration) {
@@ -326,6 +351,8 @@ mod tests {
         assert_eq!(s.max_steps, 40);
         assert_eq!(s.limits().1, Duration::from_secs(600));
         assert_eq!(s.fast_model, "gemma-4-26b-a4b-it");
+        assert_eq!(s.executor_endpoint, "http://127.0.0.1:8017");
+        assert_eq!(s.executor_client().base(), "http://127.0.0.1:8017");
     }
 
     #[test]

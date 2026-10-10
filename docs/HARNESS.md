@@ -175,6 +175,7 @@ step's prompt as "User says (mid-run): …" and force a full frame.
 | Frames sized to Gemma 4's 280-soft-token budget (≈ 645 k px, 1070×602 at 16:9) instead of 1280 px, so the server doesn't resample the marks again | `kai-os/src/frame.rs` |
 | Compact element list (state only when disabled/secure, names ≤ 60 chars): per-step user turn −26 % | `element.rs`, `prompt.rs` |
 | Plan cache: repeated tasks replay their known-good opening | `plan_cache.rs` |
+| Executor (off by default, `--executor`): Gemma's `plan` of routine subgoals is carried out by a local 1B decision model (jevos-v4), gated by confidence, approvals unchanged; see [EXECUTOR.md](EXECUTOR.md) | `executor.rs`, `engine/execute.rs` |
 | Streaming replies with measured time-to-first-token | `client/stream.rs` |
 | Every step records capture · tree · encode · model · act timings | `trace.rs`, shown in the UI and saved |
 

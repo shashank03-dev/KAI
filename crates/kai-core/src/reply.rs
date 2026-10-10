@@ -1,12 +1,14 @@
 //! A step reply: one [`Decision`] plus, optionally, a short list of follow-up
-//! actions the model is certain about (`then`), and a hint that it needs to
-//! see the screen next step (`need_screen`).
+//! actions the model is certain about (`then`), a hint that it needs to see
+//! the screen next step (`need_screen`), and a short `plan` of upcoming
+//! subgoals for the executor (`crate::executor`, `docs/EXECUTOR.md`).
 //!
 //! Backward compatible: a plain single-object reply (the old format) parses
 //! as a reply with no follow-ups. The extra keys are lifted off the JSON
 //! object before the rest is parsed as a strict [`Decision`], so the decision
 //! itself still rejects unknown fields.
 
+pub use crate::plan::{MAX_PLAN, Subgoal, SubgoalKind};
 use crate::schema::{Action, Decision, SchemaError, extract_json_object};
 use serde_json::Value;
 
@@ -20,6 +22,9 @@ pub struct StepReply {
     pub then: Vec<Decision>,
     /// The model asked for a screenshot on the next step.
     pub need_screen: bool,
+    /// Upcoming subgoals for the executor; empty when absent (today's
+    /// behaviour). See [`crate::plan::parse_plan`].
+    pub plan: Vec<Subgoal>,
 }
 
 impl StepReply {
@@ -35,6 +40,7 @@ impl StepReply {
             .as_object_mut()
             .ok_or_else(|| SchemaError::Parse("reply is not a JSON object".to_string()))?;
         let then_raw = obj.remove("then");
+        let plan_raw = obj.remove("plan");
         let need_screen = obj
             .remove("need_screen")
             .and_then(|b| b.as_bool())
@@ -62,11 +68,24 @@ impl StepReply {
                 then.push(d);
             }
         }
+        let plan = if matches!(decision.action, Action::Done | Action::AskUser) {
+            Vec::new()
+        } else {
+            crate::plan::parse_plan(plan_raw)
+        };
         Ok(Self {
             decision,
             then,
             need_screen,
+            plan,
         })
+    }
+
+    /// [`StepReply::json_schema`] plus the optional `plan` (executor on).
+    pub fn json_schema_with_plan() -> Value {
+        let mut s = Self::json_schema();
+        s["properties"]["plan"] = crate::plan::plan_schema();
+        s
     }
 
     /// The JSON schema for structured outputs: the [`Decision`] schema plus
@@ -202,6 +221,24 @@ mod tests {
             StepReply::parse_checked(r#"{"thought":"x","action":"done","risk":"none","evil":1}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn plan_is_optional_and_ignored_on_done() {
+        let r = StepReply::parse_checked(
+            r#"{"thought":"x","action":"wait","risk":"none",
+               "plan":[{"do":"click","target":"Send","expect":"sent"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.plan.len(), 1);
+        let r = StepReply::parse_checked(
+            r#"{"thought":"x","action":"done","risk":"none","plan":[{"do":"click","target":"A"}]}"#,
+        )
+        .unwrap();
+        assert!(r.plan.is_empty());
+        let s = StepReply::json_schema_with_plan();
+        assert_eq!(s["properties"]["plan"]["maxItems"], MAX_PLAN);
+        assert!(StepReply::json_schema()["properties"].get("plan").is_none());
     }
 
     #[test]

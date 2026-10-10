@@ -45,7 +45,7 @@ pub enum Role {
 }
 
 impl Role {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Role::Button => "button",
             Role::Link => "link",

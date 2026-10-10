@@ -35,7 +35,7 @@ fn tmp(name: &str) -> PathBuf {
 async fn record(root: &Path) {
     let tasks = parse_tasks(TASKS).unwrap();
     let rec = Recording::new(root, "2026-10-10", "mock", "recorded");
-    let runs = run_mock(&tasks, &[], kai_core::Config::default(), Some(&rec)).await;
+    let runs = run_mock(&tasks, &[], kai_core::Config::default(), Some(&rec), None).await;
     assert_eq!(runs.len(), 2);
 }
 

@@ -21,6 +21,24 @@ pub fn system_prompt(skills: &[Skill]) -> String {
     s
 }
 
+/// [`system_prompt`] plus the `plan` rule, for runs with the executor on.
+/// Stable for the whole run, so the cached prefix still hits.
+pub fn system_prompt_with_plan(skills: &[Skill]) -> String {
+    let mut s = String::from(SYSTEM_BASE);
+    s.push_str(PLAN_RULE);
+    if !skills.is_empty() {
+        s.push_str(&system_prompt(skills)[SYSTEM_BASE.len()..]);
+    }
+    s
+}
+
+/// The executor addition: short on purpose (it is in every request).
+pub const PLAN_RULE: &str = "\n- When the steps after this one are predictable, add \
+`plan`: up to 6 subgoals like {\"do\":\"type\",\"target\":\"Email field\",\
+\"text\":\"a@b.c\",\"expect\":\"email typed\"} (`do`: click, type, key, select, \
+open_url, open_app, shell or done; name elements in words, not numbers). An \
+executor carries them out and calls you back on any doubt.";
+
 const SYSTEM_BASE: &str = "\
 You are Kai, an agent that operates a computer for the user by looking at the \
 screen and choosing the next action.

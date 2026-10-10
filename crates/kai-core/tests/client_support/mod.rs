@@ -18,6 +18,8 @@ pub enum Reply {
 pub struct Server {
     pub replies: Arc<Mutex<VecDeque<Reply>>>,
     pub seen: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+    /// Raw request heads (request line + headers), in order.
+    pub heads: Arc<Mutex<Vec<String>>>,
 }
 
 impl Server {
@@ -26,6 +28,7 @@ impl Server {
         let srv = Server {
             replies: Arc::new(Mutex::new(replies.into())),
             seen: Arc::default(),
+            heads: Arc::default(),
         };
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -37,6 +40,10 @@ impl Server {
             }
         });
         (srv, format!("http://{addr}"))
+    }
+
+    pub fn heads(&self) -> Vec<String> {
+        self.heads.lock().unwrap().clone()
     }
 
     pub fn bodies(&self) -> Vec<(String, serde_json::Value)> {
@@ -79,6 +86,7 @@ impl Server {
                 serde_json::from_slice(&buf[head_end + 4..total]).unwrap_or_default();
             buf.drain(..total);
             self.seen.lock().unwrap().push((path, body));
+            self.heads.lock().unwrap().push(head);
             let reply = self.replies.lock().unwrap().pop_front();
             let ok = match reply {
                 Some(Reply::Json(code, v)) => {
