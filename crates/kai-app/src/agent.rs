@@ -286,7 +286,42 @@ async fn drive(
             skills: &skills,
             config,
         };
-        let trace = engine.run(&task).await;
+        // Opt-in (Settings › record_traces): keep this run as local training
+        // data. Plan cache: the known-good opening of a repeated task.
+        let run_id = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "run".into());
+        let recorder = settings
+            .record_traces
+            .then(|| {
+                let meta = kai_core::recorder::RunMeta::new(
+                    run_id.clone(),
+                    task.clone(),
+                    "app",
+                    format!("{:?}", settings.backend).to_lowercase(),
+                    settings.fast_model.clone(),
+                );
+                kai_core::recorder::TraceRecorder::new(
+                    kai_core::settings::Settings::runs_dir().join(&run_id),
+                    meta,
+                )
+                .map(|r| r.with_careful_model(settings.careful_model.clone()))
+                .map_err(|e| log::warn!("trace recording off: {e}"))
+                .ok()
+            })
+            .flatten();
+        let cache =
+            kai_core::PlanCache::load(kai_core::settings::Settings::dir().join("plans")).ok();
+        let trace = engine
+            .run_with(
+                &task,
+                kai_core::RunOptions {
+                    plan_cache: cache.as_ref(),
+                    recorder: recorder.as_ref(),
+                },
+            )
+            .await;
         save(&dir, &trace);
         let _ = tx.unbounded_send(Ui::Finished(Box::new(trace)));
     }

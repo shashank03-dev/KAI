@@ -93,6 +93,7 @@ fn appearance(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
 
 fn privacy(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
     let asker = cx.entity();
+    let rec = cx.entity();
     SettingsSection::new("Privacy")
         .description(
             "Kai sends screenshots only to your model endpoint. Traces never leave this computer.",
@@ -116,12 +117,28 @@ fn privacy(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
                 }),
             cx,
         ))
+        .row(
+            Switch::new("record-traces", app.settings.record_traces)
+                .label("Keep runs as training data (prompts, replies and screenshots, saved only on this computer)")
+                .on_change(move |v, _, cx| {
+                    rec.update(cx, |a, cx| {
+                        a.settings.record_traces = v;
+                        a.save_settings(cx);
+                    })
+                }),
+        )
+        .row(row(
+            "Training data folder",
+            &Settings::runs_dir().display().to_string(),
+            div(),
+            cx,
+        ))
 }
 
 fn about(cx: &mut Context<KaiApp>) -> SettingsSection {
     SettingsSection::new("About")
         .row(row("Kai", concat!("Version ", env!("CARGO_PKG_VERSION"), " · MIT licence"), div(), cx))
-        .row(row("Credits", "Gemma 4 by Google DeepMind (Gemma Terms of Use). UI by Ely GPUI Components (MIT) on GPUI. Icons by Lucide (ISC). Fonts: Inter, JetBrains Mono, IBM Plex Sans (OFL).", div(), cx))
+        .row(row("Credits", "Gemma 4 by Google DeepMind (Apache 2.0). UI by Ely GPUI Components (MIT) on GPUI. Icons by Lucide (ISC). Fonts: Inter, JetBrains Mono, IBM Plex Sans (OFL).", div(), cx))
 }
 
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
