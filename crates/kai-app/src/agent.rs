@@ -216,6 +216,7 @@ async fn drive(
         max_steps,
         max_time,
         approval: settings.approval,
+        executor: settings.use_executor,
         ..Config::default()
     };
     let dir = run_dir();
@@ -311,6 +312,7 @@ async fn drive(
                 .ok()
             })
             .flatten();
+        let executor = settings.use_executor.then(|| settings.executor_client());
         let cache =
             kai_core::PlanCache::load(kai_core::settings::Settings::dir().join("plans")).ok();
         let trace = engine
@@ -319,7 +321,9 @@ async fn drive(
                 kai_core::RunOptions {
                     plan_cache: cache.as_ref(),
                     recorder: recorder.as_ref(),
-                    ..Default::default()
+                    executor: executor
+                        .as_ref()
+                        .map(|c| c as &dyn kai_core::executor::Decider),
                 },
             )
             .await;

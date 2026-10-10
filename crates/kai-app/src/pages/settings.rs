@@ -56,6 +56,7 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
             .segment("20", "20 steps", None).segment("40", "40 steps", None).segment("80", "80 steps", None)
             .on_change(move |v, _, cx| steps.update(cx, |a, cx| { a.settings.max_steps = v.parse().unwrap_or(40); a.save_settings(cx); })), cx))
         .row(row("Stop shortcut", &format!("{} from any app, or the pointer in the top-left corner.", app.settings.kill_hotkey), div(), cx))
+        .row(Switch::new("use-executor", app.settings.use_executor).label("Fast executor: a local decision model (jevos) carries out Gemma's plan — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_executor = v; a.save_settings(cx); }) }))
         .row(Switch::new("team-default", app.settings.team_mode).label("Use sub-agents by default").on_change(move |v, _, cx| team.update(cx, |a, cx| { a.settings.team_mode = v; a.team = v; a.save_settings(cx); })))
 }
 

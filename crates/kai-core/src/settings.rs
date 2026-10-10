@@ -108,6 +108,9 @@ pub struct Settings {
     /// listens. Env `KAI_EXECUTOR_URL` overrides; `JEV_API_KEY`, if set, is
     /// sent as a bearer key. Used only when a run turns the executor on.
     pub executor_endpoint: String,
+    /// Let a fast local decision model (jevos) carry out Gemma's plan
+    /// (docs/EXECUTOR.md). Off until measured.
+    pub use_executor: bool,
 }
 
 impl Default for Settings {
@@ -129,6 +132,7 @@ impl Default for Settings {
             onboarded: false,
             record_traces: false,
             executor_endpoint: crate::client::jev::LOCAL_BASE.to_string(),
+            use_executor: false,
         }
     }
 }
