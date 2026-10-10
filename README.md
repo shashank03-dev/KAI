@@ -159,6 +159,6 @@ optional deterministic steps in `metadata.kai`. Validate with
 - [DECISIONS.md](DECISIONS.md) — every assumption and deviation, and what was not run here
 
 ## Credits and licences
-Kai: MIT. Gemma 4 by Google DeepMind (Gemma Terms of Use). Ely GPUI Components
+Kai: MIT. Gemma 4 by Google DeepMind (Apache 2.0, per Google's Gemma 4 announcement, March 2026). Ely GPUI Components
 (MIT) on Zed's GPUI. Lucide icons (ISC). Inter, JetBrains Mono, IBM Plex Sans
 (OFL). vLLM (Apache-2.0).
