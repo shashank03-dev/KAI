@@ -67,10 +67,16 @@ pub fn score(l: &Lesson, cx: &Context, now: i64) -> Option<f32> {
         .count();
     let denom = l.scope.task_words.len().min(cx.task_words.len()).max(1);
     let frac = overlap as f32 / denom as f32;
-    let applies = app_hit
-        || domain_hit
-        || overlap >= 2
-        || (overlap >= 1 && (l.scope.is_global() || frac >= 0.5));
+    // Measured (2026-10-10 live test): matching on shared task words alone
+    // leaked lessons into unrelated tasks (bench prompts share words like
+    // "folder" or "home"). A lesson tied to an app or site applies only when
+    // that app or site is in play; one with neither needs a strong match.
+    let scoped = !l.scope.apps.is_empty() || !l.scope.domains.is_empty();
+    let applies = if scoped {
+        app_hit || domain_hit
+    } else {
+        overlap >= 2 && frac >= 0.6
+    };
     if !applies {
         return None;
     }
@@ -121,4 +127,40 @@ pub fn render(lessons: &[Lesson]) -> Option<String> {
         s.push_str(&l.text);
     }
     Some(s)
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use crate::memory::{Kind, Lesson, Scope, Source};
+
+    fn lesson(apps: &[&str], words: &[&str]) -> Lesson {
+        let scope = Scope {
+            apps: apps.iter().map(|s| s.to_string()).collect(),
+            domains: vec![],
+            task_words: words.iter().map(|s| s.to_string()).collect(),
+        };
+        Lesson::new(
+            Kind::Prefer,
+            "Start Mousepad with open_app, not shell.",
+            scope,
+            Source::Derived,
+        )
+    }
+
+    #[test]
+    fn app_lessons_stay_with_their_app() {
+        let l = lesson(&["mousepad"], &["kai-bench", "folder", "line", "numbers"]);
+        let other = Context::new(
+            "Zip the folder kai-bench/photos in my home folder",
+            &[],
+            &[],
+        );
+        assert!(
+            score(&l, &other, 0).is_none(),
+            "leaked into an unrelated task"
+        );
+        let same = Context::new("Turn on line numbers", &["mousepad".into()], &[]);
+        assert!(score(&l, &same, 0).is_some());
+    }
 }

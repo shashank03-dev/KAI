@@ -69,6 +69,27 @@ pub fn table(runs: &[Run], lessons_stored: usize) -> String {
         "\nLessons in the bench's own store at the end: {lessons_stored} (fresh, in memory; \
          the user's lessons are never used by `kai bench`).\n"
     ));
+    // Which lessons each run saw, so their quality can be judged.
+    let shown: Vec<String> = runs
+        .iter()
+        .filter_map(|r| {
+            let t = r.trace.as_ref()?;
+            (!t.lessons.is_empty()).then(|| {
+                let list: Vec<String> = t.lessons.iter().map(|l| format!("  - {l}")).collect();
+                format!(
+                    "- {} (pass {}):\n{}",
+                    r.task.id,
+                    r.pass + 1,
+                    list.join("\n")
+                )
+            })
+        })
+        .collect();
+    if !shown.is_empty() {
+        s.push_str("\n### Lessons shown\n\n");
+        s.push_str(&shown.join("\n"));
+        s.push('\n');
+    }
     s
 }
 
