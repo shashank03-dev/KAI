@@ -16,12 +16,14 @@
 mod act;
 mod batch;
 mod observe;
+mod record;
 
 pub use crate::ports::*;
 
 use crate::client::{Images, ModelClient, ModelRequest};
 use crate::plan_cache::PlanCache;
 use crate::prompt::{self, HistoryItem, TurnInput};
+use crate::recorder::TraceRecorder;
 use crate::reply::StepReply;
 use crate::risk;
 use crate::schema::Action;
@@ -54,6 +56,9 @@ pub struct RunOptions<'a> {
     /// Replay a cached deterministic prefix for a known task, and record the
     /// prefix of this run if it succeeds.
     pub plan_cache: Option<&'a PlanCache>,
+    /// Record this run as training data (prompts, raw replies, the JPEGs
+    /// sent). Off unless set; see `docs/DATASET.md`.
+    pub recorder: Option<&'a TraceRecorder>,
 }
 
 /// Trace backend label for actions run from a model reply's `then` list.
@@ -103,6 +108,9 @@ struct Run<'t> {
     /// URLs already opened in this run (normalised), to refuse a reload that
     /// would wipe what was typed.
     opened: Vec<String>,
+    /// Where this run is recorded, if anywhere, and the system prompt hash.
+    recorder: Option<&'t TraceRecorder>,
+    system_hash: Option<String>,
 }
 
 impl Engine<'_> {
@@ -129,9 +137,16 @@ impl Engine<'_> {
             opened: Vec::new(),
             notes: Vec::new(),
             grid_click: None,
+            recorder: opts.recorder,
+            system_hash: None,
         };
         let outcome = self.drive(&mut r, opts).await;
         r.trace.finish(outcome);
+        if let Some(rec) = opts.recorder
+            && let Err(e) = rec.finish(&r.trace)
+        {
+            log::warn!("recording the run failed: {e}");
+        }
         self.sink.emit(&EngineEvent::Finished { outcome });
         log::info!("run finished: {outcome:?}, {} steps", r.trace.steps.len());
         if outcome == Outcome::Success
@@ -148,6 +163,7 @@ impl Engine<'_> {
         let active_skill = prompt::select_skill(r.task, self.skills);
         let schema = StepReply::json_schema();
         let deadline = Instant::now() + self.config.max_time;
+        r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
 
         // A skill's deterministic steps, or a cached plan's prefix, run first
         // with no model call.
@@ -197,6 +213,9 @@ impl Engine<'_> {
             Ok(s) => s,
             Err(e) => {
                 log::error!("observe failed: {e}");
+                r.trace
+                    .errors
+                    .push(format!("observe error at step {step}: {e}"));
                 r.step += 1;
                 r.failure_streak += 1;
                 return (r.failure_streak >= self.config.max_failures).then_some(Outcome::Failed);
@@ -219,18 +238,19 @@ impl Engine<'_> {
         });
         let escalate = r.failure_streak > 0 || r.no_progress_streak > 0 || r.careful_next;
         r.careful_next = false;
-        let client = match (escalate, self.careful) {
-            (true, Some(c)) => c,
-            _ => self.client,
+        let (client, careful) = match (escalate, self.careful) {
+            (true, Some(c)) => (c, true),
+            _ => (self.client, false),
         };
         let decided = self
             .decide(client, system, &user_text, &obs.images, schema)
             .await;
         r.step += 1;
-        let (reply, model_time, first_token) = match decided {
+        let decided = match decided {
             Ok(d) => d,
             Err(e) => {
                 log::warn!("undecodable reply at step {step}: {e}");
+                r.trace.errors.push(record::error_line(step, &e));
                 r.failure_streak += 1;
                 r.force_full = true;
                 return (r.failure_streak >= self.config.max_failures)
@@ -238,6 +258,8 @@ impl Engine<'_> {
             }
         };
         r.failure_streak = 0;
+        let call = self.record_call(r, step, &user_text, obs, &decided, careful);
+        let (reply, model_time, first_token) = (decided.reply, decided.total, decided.first_token);
         if reply.need_screen {
             r.force_full = true;
         }
@@ -248,6 +270,10 @@ impl Engine<'_> {
         let backend = client.backend().label();
         let mut rec = StepRecord::new(step, &decision, timings, backend);
         rec.elements = elements;
+        if let Some((shot, call)) = call {
+            rec.screenshot = shot;
+            rec.call = call;
+        }
 
         self.sink.emit(&EngineEvent::Decided {
             step,
@@ -400,7 +426,7 @@ impl Engine<'_> {
         user_text: &str,
         images: &Images,
         schema: &serde_json::Value,
-    ) -> anyhow::Result<(StepReply, Duration, Option<Duration>)> {
+    ) -> anyhow::Result<record::Decided> {
         let req = ModelRequest {
             system,
             user_text,
@@ -412,7 +438,7 @@ impl Engine<'_> {
         let reply = client.decide(&req).await?;
 
         match StepReply::parse_checked(&reply.raw) {
-            Ok(d) => Ok((d, reply.total, reply.first_token)),
+            Ok(d) => Ok(record::Decided::new(d, &reply)),
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
                 // no-op improvement on vLLM structured outputs).
@@ -426,12 +452,9 @@ impl Engine<'_> {
                     ..req
                 };
                 let reply2 = client.decide(&req2).await?;
-                let total = reply.total + reply2.total;
-                Ok((
-                    StepReply::parse_checked(&reply2.raw)?,
-                    total,
-                    reply2.first_token,
-                ))
+                let mut d = record::Decided::new(StepReply::parse_checked(&reply2.raw)?, &reply2);
+                d.add_usage(&reply);
+                Ok(d)
             }
         }
     }

@@ -299,6 +299,7 @@ mod tests {
                 verified: true,
                 output: None,
                 path: None,
+                call: Default::default(),
             });
         }
         let (spans, end) = spans(&t);

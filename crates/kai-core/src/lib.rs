@@ -10,10 +10,12 @@ pub mod client;
 pub mod cua;
 pub mod element;
 pub mod engine;
+pub mod failure;
 pub mod orchestrator;
 pub mod plan_cache;
 pub mod ports;
 pub mod prompt;
+pub mod recorder;
 pub mod reply;
 pub mod risk;
 pub mod schema;
@@ -29,7 +31,9 @@ pub use engine::{
     Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Interrupt,
     Observation, ObserveTiming, Perceptor, RunOptions,
 };
+pub use failure::{Category, Failure};
 pub use plan_cache::PlanCache;
+pub use recorder::{RunMeta, TraceRecorder};
 pub use reply::StepReply;
 pub use risk::ApprovalLevel;
 pub use schema::{Action, Decision, Direction, Risk};

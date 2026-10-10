@@ -8,12 +8,14 @@
 //! desktop and judges them with each task's check command.
 
 pub mod machine;
+pub mod record;
 pub mod report;
 pub mod runner;
 pub mod stats;
 pub mod tasks;
 #[cfg(test)]
 mod tests;
+pub mod variants;
 
 use crate::backend::{self, BackendArg, BackendOpts};
 use clap::{Args, Subcommand};
@@ -49,6 +51,13 @@ pub struct BenchArgs {
     /// Output price in US$ per million tokens, for the cost column.
     #[arg(long)]
     pub usd_per_mtok_out: Option<f64>,
+    /// Record every task run as training data under
+    /// `<runs>/<date>-<backend>-<model>/<task-id>/` (docs/DATASET.md).
+    #[arg(long, default_value = "bench/runs")]
+    pub runs: PathBuf,
+    /// Do not record task runs.
+    #[arg(long)]
+    pub no_record: bool,
 }
 
 impl clap::ValueEnum for Kind {
@@ -73,6 +82,17 @@ pub enum BenchCmd {
         /// Write here instead of stdout.
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+    /// Write parameterised variants of the tasks that declare `vars:` (for
+    /// training data only, never for the head-to-head numbers).
+    Variants {
+        #[arg(long, default_value = "bench/tasks.yaml")]
+        tasks: PathBuf,
+        #[arg(long, default_value = "bench/variants.yaml")]
+        out: PathBuf,
+        /// Variants per task (at most the number of value combinations - 1).
+        #[arg(long, default_value = "3")]
+        n: usize,
     },
 }
 
@@ -126,8 +146,27 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         }),
     };
 
+    let backend_name = match b {
+        // Name what `auto` resolved to.
+        BackendArg::Auto => format!("{:?}", s.backend).to_lowercase(),
+        _ => b.name().to_string(),
+    };
+    let model = backend::model_label(b, &s);
+    let date = jiff::Zoned::now().date().to_string();
+    let recording = (!args.no_record).then(|| {
+        let mut r = record::Recording::new(&args.runs, &date, &backend_name, &model);
+        if !b.recorded() && !s.careful_model.is_empty() && s.careful_model != s.fast_model {
+            r.careful_model = Some(s.careful_model.clone());
+        }
+        r
+    });
+    if let Some(r) = &recording {
+        eprintln!("recording runs under {}", r.batch_dir.display());
+    }
+    let rec = recording.as_ref();
+
     let runs = match b {
-        BackendArg::Mock => runner::run_mock(&list, skills, config).await,
+        BackendArg::Mock => runner::run_mock(&list, skills, config, rec).await,
         BackendArg::Replay => {
             let live = runner::Live {
                 client: None,
@@ -138,6 +177,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 bench_dir: &bench_dir,
                 force: args.force,
                 native: None,
+                record: rec,
             };
             runner::run_live(&list, &live).await?
         }
@@ -152,6 +192,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 bench_dir: &bench_dir,
                 force: args.force,
                 native: Some(cfg),
+                record: rec,
             };
             runner::run_live(&list, &live).await?
         }
@@ -167,18 +208,15 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 bench_dir: &bench_dir,
                 force: args.force,
                 native: None,
+                record: rec,
             };
             runner::run_live(&list, &live).await?
         }
     };
 
     let meta = Meta {
-        backend: match b {
-            // Name what `auto` resolved to.
-            BackendArg::Auto => format!("{:?}", s.backend).to_lowercase(),
-            _ => b.name().to_string(),
-        },
-        model: backend::model_label(b, &s),
+        backend: backend_name,
+        model,
         note: note(b),
         command: machine::command_line(),
         machine: Some(Machine::probe()),
@@ -189,11 +227,18 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         prices,
         recorded: b.recorded(),
         replay: b == BackendArg::Replay,
-        date: jiff::Zoned::now().date().to_string(),
+        date,
     };
     let summary = stats::summarise(meta, runs);
     report::print(&summary);
-    let (json, md) = report::write(&summary, &args.out)?;
+    // Variants are training data, never head-to-head numbers: keep their
+    // results out of the folder `kai bench report` reads.
+    let out = if list.iter().any(|t| t.variant_of.is_some()) {
+        args.out.join("variants")
+    } else {
+        args.out.clone()
+    };
+    let (json, md) = report::write(&summary, &out)?;
     eprintln!("wrote {} and {}", json.display(), md.display());
     Ok(ExitCode::SUCCESS)
 }

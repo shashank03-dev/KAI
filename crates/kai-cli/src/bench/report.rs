@@ -3,7 +3,7 @@
 //! head-to-head Markdown table. The report only reads files that exist; it
 //! never fills in a number that was not measured.
 
-use super::stats::Summary;
+use super::stats::{Summary, failures_text};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -134,10 +134,18 @@ fn metric_rows(s: &Summary) -> Vec<(&'static str, String)> {
             ),
         ),
         ("Cost (US$)", cost(s.cost_usd)),
+        ("Failures", failures_text(&s.failures)),
         ("Total time (s)", format!("{:.1}", s.total_seconds)),
         ("A/B flags", ab_text(s)),
         ("Machine", machine_text(s)),
     ]
+}
+
+fn failure_cell(f: Option<&kai_core::Failure>) -> String {
+    match f {
+        None => "—".into(),
+        Some(f) => esc(&format!("{}: {}", f.category, f.detail)),
+    }
 }
 
 fn esc(s: &str) -> String {
@@ -157,7 +165,7 @@ pub fn single_markdown(s: &Summary) -> String {
     }
     let _ = writeln!(
         md,
-        "\n| Task | Kind | Result | Judged by | Steps | Seconds | Step p50 ms | Model calls | Tokens in/out |\n|---|---|---|---|---|---|---|---|---|"
+        "\n| Task | Kind | Result | Judged by | Steps | Seconds | Step p50 ms | Model calls | Tokens in/out | Failure |\n|---|---|---|---|---|---|---|---|---|---|"
     );
     for t in &s.tasks {
         let result = match (t.judged_by.as_str(), t.pass) {
@@ -170,7 +178,7 @@ pub fn single_markdown(s: &Summary) -> String {
         };
         let _ = writeln!(
             md,
-            "| {} | {:?} | {} | {} | {} | {:.2} | {} | {} | {} / {} |",
+            "| {} | {:?} | {} | {} | {} | {:.2} | {} | {} | {} / {} | {} |",
             t.id,
             t.kind,
             esc(&result),
@@ -180,9 +188,11 @@ pub fn single_markdown(s: &Summary) -> String {
             t.step_p50_ms,
             t.model_calls,
             opt_u64(t.prompt_tokens),
-            opt_u64(t.completion_tokens)
+            opt_u64(t.completion_tokens),
+            failure_cell(t.failure.as_ref())
         );
     }
+    let _ = writeln!(md, "\nFailure categories: {}", failures_text(&s.failures));
     if !s.missing.is_empty() {
         let _ = writeln!(md, "\nNot measured on this run:\n");
         for m in &s.missing {
@@ -347,6 +357,12 @@ pub fn print(s: &Summary) {
         s.total_seconds,
         label(s)
     );
+    eprintln!("failures: {}", failures_text(&s.failures));
+    for t in &s.tasks {
+        if let Some(f) = &t.failure {
+            eprintln!("  {:<22} {}: {}", t.id, f.category, f.detail);
+        }
+    }
     for m in &s.missing {
         eprintln!("not measured: {m}");
     }

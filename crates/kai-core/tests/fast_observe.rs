@@ -152,6 +152,7 @@ async fn plan_cache_replays_the_deterministic_prefix() {
     let cache = PlanCache::load(&dir).unwrap();
     let opts = RunOptions {
         plan_cache: Some(&cache),
+        ..Default::default()
     };
     let script = [
         r#"{"thought":"x","action":"open_url","text":"https://example.com","risk":"none"}"#,
@@ -183,6 +184,7 @@ async fn plan_cache_replays_the_deterministic_prefix() {
             "please open example.com and save",
             RunOptions {
                 plan_cache: Some(&cache2),
+                ..Default::default()
             },
         )
         .await;

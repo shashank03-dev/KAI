@@ -45,6 +45,7 @@ fn trace(steps: &[(u64, u64, u64)], outcome: Outcome) -> Trace {
             verified: true,
             path: None,
             output: None,
+            call: Default::default(),
         });
     }
     t.finish(outcome);
@@ -102,6 +103,7 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
             calls: vec![call(Some(1000), Some(50)), call(Some(1200), Some(40))],
             skipped: None,
             check: Some(true),
+            setup_failed: false,
         },
         Run {
             task: t[1].clone(),
@@ -110,6 +112,7 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
             calls: vec![call(None, None)],
             skipped: None,
             check: Some(false),
+            setup_failed: false,
         },
         Run {
             task: t[2].clone(),
@@ -118,6 +121,7 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
             calls: vec![],
             skipped: Some("needs browser".into()),
             check: None,
+            setup_failed: false,
         },
     ];
     let prices = Prices {
@@ -126,6 +130,16 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
     };
     let s = stats::summarise(meta(false, Some(prices)), runs);
     assert_eq!((s.passed, s.total, s.skipped), (1, 2, 1));
+    // Said done, check failed: labelled, counted, and shown in the report.
+    assert!(s.tasks[0].failure.is_none());
+    let f = s.tasks[1].failure.as_ref().unwrap();
+    assert_eq!(f.category, kai_core::Category::FalseDone);
+    assert_eq!(s.failures.get("false_done"), Some(&1));
+    let md = super::report::single_markdown(&s);
+    assert!(md.contains("| Failure |") && md.contains("Failure categories: false_done 1"));
+    let json = serde_json::to_value(&s).unwrap();
+    assert_eq!(json["tasks"][1]["failure"]["category"], "false_done");
+    assert!(json["tasks"][0].get("failure").is_none());
     assert!((s.success_rate - 0.5).abs() < 1e-9);
     // b passed its own outcome but failed its check: the check wins.
     assert_eq!(s.tasks[1].judged_by, "check");
@@ -161,6 +175,7 @@ fn recorded_runs_say_tokens_are_not_measured() {
         calls: vec![call(Some(100), Some(20))],
         skipped: None,
         check: None,
+        setup_failed: false,
     }];
     let s = stats::summarise(meta(true, None), runs);
     assert_eq!(s.tasks[0].judged_by, "outcome");
@@ -180,6 +195,7 @@ fn summary(backend: &str, model: &str, date: &str, pass: bool) -> Summary {
         calls: vec![call(Some(10), Some(2))],
         skipped: None,
         check: Some(pass),
+        setup_failed: false,
     }];
     let mut m = meta(false, None);
     m.backend = backend.into();

@@ -57,6 +57,36 @@ pub struct StepRecord {
     /// or `none` (done/ask_user/skipped). Absent in old traces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// The model call behind this step, filled only when the run is recorded
+    /// as training data (see `docs/DATASET.md`). Empty for steps with no model
+    /// call (batched, cached, skill). Flattened: the fields sit on the step.
+    #[serde(flatten, default)]
+    pub call: CallRecord,
+}
+
+/// What exactly went to and came back from the model on one step. Every field
+/// is optional and omitted when empty, so old traces read unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CallRecord {
+    /// Hex FNV-1a of the system prompt (its text is in the run's `system.txt`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_system_hash: Option<String>,
+    /// The exact user turn sent this step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_user: Option<String>,
+    /// The exact raw reply text, before parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_raw: Option<String>,
+    /// Model id that answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u32>,
+    /// `frames/step-NNN-crop.jpg` when a zoom crop was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<String>,
 }
 
 impl StepRecord {
@@ -73,6 +103,7 @@ impl StepRecord {
             verified: true,
             output: None,
             path: None,
+            call: CallRecord::default(),
         }
     }
 }
@@ -97,6 +128,11 @@ pub struct Trace {
     pub steps: Vec<StepRecord>,
     pub outcome: Option<Outcome>,
     pub total_ms: u64,
+    /// Model-call and observation errors that produced no step, e.g.
+    /// `malformed reply: ...` or `model error: ...`. Feeds the failure
+    /// taxonomy ([`crate::failure`]). Absent in old traces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
 }
 
 impl Trace {
@@ -107,6 +143,7 @@ impl Trace {
             steps: Vec::new(),
             outcome: None,
             total_ms: 0,
+            errors: Vec::new(),
         }
     }
 
@@ -190,6 +227,7 @@ mod tests {
                 verified: true,
                 output: None,
                 path: None,
+                call: Default::default(),
             });
         }
         let (p50, p95) = tr.step_percentiles();

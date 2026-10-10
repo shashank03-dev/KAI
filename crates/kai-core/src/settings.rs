@@ -100,6 +100,10 @@ pub struct Settings {
     pub droplet_hourly_usd: f32,
     pub theme: String,
     pub onboarded: bool,
+    /// Record each run as training data under [`Settings::runs_dir`]
+    /// (prompts, raw replies, the screenshots sent; `docs/DATASET.md`).
+    /// Off by default; local only, never uploaded.
+    pub record_traces: bool,
 }
 
 impl Default for Settings {
@@ -119,6 +123,7 @@ impl Default for Settings {
             droplet_hourly_usd: 3.39,
             theme: "system".to_string(),
             onboarded: false,
+            record_traces: false,
         }
     }
 }
@@ -157,6 +162,11 @@ impl Settings {
     /// Where traces live (local only).
     pub fn traces_dir() -> PathBuf {
         Self::dir().join("traces")
+    }
+
+    /// Recorded runs (training data) when `record_traces` is on.
+    pub fn runs_dir() -> PathBuf {
+        Self::dir().join("runs")
     }
 
     /// The user's own skills.
