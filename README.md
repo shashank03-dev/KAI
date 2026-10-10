@@ -65,6 +65,10 @@ Full explanation with a diagram: [docs/HARNESS.md](docs/HARNESS.md).
   Gemma 4's 280-token budget (1070x602 for 16:9), a built-in bitmap font for
   the marks.
 - **Parallel sub-agents** for independent terminal work.
+- **Fewer steps.** Up to 3 certain follow-up actions per model call (type,
+  then Enter), accessibility actions instead of mouse moves, tree-only steps
+  without a screenshot when text is enough, and a plan cache that replays the
+  known-good opening of a repeated task.
 
 **Measured** (this repo's Linux CI container, 4 vCPU, no GPU, virtual display):
 
@@ -73,12 +77,41 @@ Full explanation with a diagram: [docs/HARNESS.md](docs/HARNESS.md).
 | Kai's own overhead per step (capture, tree, encode, act; model excluded) — `kai bench --backend replay`, 5 real tasks, 5/5 passed | 65 ms | 93 ms |
 | Observe (capture ‖ tree, then encode), 81-element GTK window | ~200 ms | — |
 
-**Not measured yet:** end-to-end seconds per step and success rate with Gemma 4
-on the Droplet or on Gemini — no GPU or API key was available where this was
-built. Run `kai bench --backend vllm` and `--backend gemini` on your machine;
-results land in `bench/results/` and on the Benchmarks page. **No comparison
-with OpenAI's computer use was run** (no key supplied), so this README makes no
-claim about it.
+### Head-to-head (measured 2026-10-10)
+
+Same Kai harness, same 14 everyday tasks from `bench/tasks.yaml` (web search,
+forms, download, files, archive, folder, text editor, closing an app,
+calculator, calendar, image resize, screenshot), same Linux container (Xvfb
+1920x1080, 4 vCPU), same Kai build, one run each. A task passes only if its
+automatic `check` command passes after the run.
+
+| | Gemma 4 26B-A4B | GPT-5 mini | GPT-4.1 mini |
+| --- | --- | --- | --- |
+| Served by | Gemini API (free tier) | Vercel AI Gateway (free tier) | Vercel AI Gateway (free tier) |
+| Tasks passed | **14 / 14** | 12 / 14 | 8 / 14 |
+| Steps, all 14 tasks | **75** | 212 | 155 |
+| Model calls | **104** | 163 | 113 |
+| Tokens in / out | **185k / 9k** | 348k / 25k | 252k / 11k |
+| Model time per call, p50 / p95 | 2.85 / 6.5 s ¹ | 2.17 / 4.6 s | **1.77** / 3.4 s |
+
+¹ Over Gemma's full 30-task run. Gemma 4 26B on all 30 tasks: **23 / 30**
+(failures: `local-price-lookup`, `mousepad-line-numbers`, `spreadsheet-budget`,
+`csv-total`, `email-draft`, `dark-mode`, `pc-checkup`; the line-numbers failure
+was a Kai bug — starting a GUI app as a shell command blocked for 180 s — fixed
+after this run).
+
+Read with care: one run per model, so a 1–2 task gap on 14 tasks is not
+statistically solid; free tiers added rate-limit waits, so wall-clock task time
+is not compared (model time per call excludes those waits). Raw results:
+`bench/results/2026-10-10-*.json`; reproduce with `kai bench --backend gemini
+--model gemma-4-26b-a4b-it` and `kai bench --backend gateway --model
+openai/gpt-5-mini`.
+
+**Not measured:** Gemma on our own DigitalOcean Droplet (no GPU here); GPT-6
+Astra and Gemma 4 31B on the Gateway (free tier: 403); OpenAI's native
+computer-use loop (needs a direct OpenAI key — implemented, tested only against
+a mock); Jev (free tier: 403). How we plan to make Gemma beat frontier models:
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why you can trust it
 
