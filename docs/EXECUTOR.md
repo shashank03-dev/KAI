@@ -243,8 +243,25 @@ no GPU; `jev serve`, OpenVINO 2026.4, int8).**
   legend (no task text); an "already done" answer never skips a subgoal by
   default (`Gates::skip_done` = 1.01; it is recorded for tuning).
 
-**Not measured yet:** the success-rate and step effects on `bench/tasks.yaml`
-(the A/B is running), calibration over many element lists, and gate tuning.
+**A/B on 14 bench tasks (one run each, `bench/results/2026-10-10-executor-ab.md`):**
+
+| | Gemma 4 26B alone | Gemma 4 26B + jevos |
+| --- | --- | --- |
+| Tasks passed | 13 / 14 | 11 / 14 |
+| Steps | 111 | 100 |
+| Gemma calls | 153 | 123 |
+| Gemma plans given | — | 3 |
+| jevos decisions / acted / handed back | — | 5 / 2 / 3 |
+| jevos latency p50 / max | — | 208 / 388 ms |
+
+Reading: the executor almost never got to act — Gemma gave a plan only 3
+times in 14 tasks, and jevos carried out 2 steps in total. So the differences
+between the columns are run-to-run noise (two of the executor run's failures
+were Gemini rate limits; one was Gemma claiming done too early), not an
+executor effect. **Verdict for now: no measurable benefit; keep it off by
+default.** It becomes worth re-testing when Gemma is trained (or prompted) to
+emit plans reliably, and when Gemma runs on the Droplet where each call is
+cheaper to compare against.
 
 The next step is to run `./jev serve` on the bench machine and compare
 `kai bench --executor` with a plain run (n ≥ 3 each), then tune the gates from
