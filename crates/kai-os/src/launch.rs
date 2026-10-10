@@ -192,7 +192,27 @@ pub mod linux {
             .find_map(|t| entries.iter().find(|e| t(e)).cloned())
     }
 
-    pub fn find_desktop_entry(query: &str) -> Option<DesktopEntry> {
+    /// The program a desktop entry starts (`Exec`'s first word, no path).
+    fn program(e: &DesktopEntry) -> &str {
+        let first = e.exec.split_whitespace().next().unwrap_or("");
+        first.rsplit('/').next().unwrap_or(first)
+    }
+
+    /// Whether `cmd` just starts an installed GUI app (its first word is the
+    /// program of a `.desktop` entry, with no pipes, redirects or `&&`). Such
+    /// a command never exits on its own, so run as a shell step it would block
+    /// until the timeout.
+    pub fn is_gui_command(cmd: &str) -> bool {
+        let cmd = cmd.trim();
+        if cmd.is_empty() || cmd.contains(['|', ';', '&', '>', '<', '`', '$', '(', ')']) {
+            return false;
+        }
+        let first = cmd.split_whitespace().next().unwrap_or("");
+        let first = first.rsplit('/').next().unwrap_or(first);
+        all_entries().iter().any(|e| program(e) == first)
+    }
+
+    fn all_entries() -> Vec<DesktopEntry> {
         let mut entries = Vec::new();
         for d in dirs() {
             let Ok(rd) = std::fs::read_dir(&d) else {
@@ -203,7 +223,7 @@ pub mod linux {
                 if p.extension().and_then(|e| e.to_str()) != Some("desktop") {
                     continue;
                 }
-                let id = p.file_name()?.to_string_lossy().to_string();
+                let id = f.file_name().to_string_lossy().to_string();
                 if let Ok(text) = std::fs::read_to_string(&p)
                     && let Some(e) = parse(&id, &text)
                 {
@@ -211,6 +231,11 @@ pub mod linux {
                 }
             }
         }
+        entries
+    }
+
+    pub fn find_desktop_entry(query: &str) -> Option<DesktopEntry> {
+        let entries = all_entries();
         best_match(query, &entries)
     }
 
@@ -219,6 +244,25 @@ pub mod linux {
         use super::*;
 
         const FIREFOX: &str = "[Desktop Entry]\nName=Firefox Web Browser\nExec=firefox %u\nType=Application\n[Desktop Action new]\nName=New Window\nExec=firefox --new-window\n";
+
+        #[test]
+        fn plain_commands_are_never_gui_launches() {
+            for c in [
+                "ls -la",
+                "echo hi | mousepad",
+                "mousepad && ls",
+                "",
+                "cat > f",
+            ] {
+                assert!(!is_gui_command(c), "{c}");
+            }
+            let e = parse(
+                "org.xfce.mousepad.desktop",
+                "[Desktop Entry]\nName=Mousepad\nExec=/usr/bin/mousepad %F\n",
+            )
+            .unwrap();
+            assert_eq!(program(&e), "mousepad");
+        }
 
         #[test]
         fn parses_main_section_and_strips_field_codes() {

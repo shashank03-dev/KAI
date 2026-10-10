@@ -93,6 +93,21 @@ impl Actuator for DesktopActuator {
     }
 
     async fn shell(&self, cmd: &str) -> anyhow::Result<String> {
+        // `mousepad file.txt` as a shell step would block until the timeout
+        // (a GUI app never exits by itself): start it detached instead.
+        #[cfg(target_os = "linux")]
+        if crate::launch::linux::is_gui_command(cmd) {
+            std::process::Command::new("setsid")
+                .args(["-f", "sh", "-c", cmd])
+                .current_dir(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+            return Ok(format!(
+                "started `{cmd}` as an app in the background (its window should open)\n[exit 0]"
+            ));
+        }
         self.shell.run(cmd).await
     }
 }

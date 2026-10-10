@@ -161,6 +161,9 @@ impl Decision {
             Action::Key if self.keys.is_empty() => {
                 return Err(SchemaError::MissingKeys(Action::Key));
             }
+            Action::OpenApp if self.text.as_deref().unwrap_or("").trim().is_empty() => {
+                return Err(SchemaError::MissingText(Action::OpenApp));
+            }
             Action::OpenUrl if self.text.as_deref().unwrap_or("").is_empty() => {
                 return Err(SchemaError::MissingUrl);
             }
