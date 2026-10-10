@@ -112,6 +112,15 @@ is not compared (model time per call excludes those waits). Raw results:
 --model gemma-4-26b-a4b-it` and `kai bench --backend gateway --model
 openai/gpt-5-mini`.
 
+**Fast executor (experimental, off by default).** Gemma can hand a short plan
+to a local decision model, [jevos-v4](https://github.com/feder-cr/jev) (1B, CPU),
+which picks the element for each step and acts only when confident
+([docs/EXECUTOR.md](docs/EXECUTOR.md)). Measured here: ~140–210 ms per jevos
+request; on the same 14 tasks (one run each) Gemma alone passed 13/14 and Gemma
++ jevos 11/14, but jevos acted only twice — Gemma rarely gave a plan — so this
+shows no measurable benefit yet, and the gap is run-to-run noise (rate limits,
+one early "done"). Turn it on with `kai bench --executor` to try it.
+
 **Not measured:** Gemma on our own DigitalOcean Droplet (no GPU here); GPT-6
 Astra and Gemma 4 31B on the Gateway (free tier: 403); OpenAI's native
 computer-use loop (needs a direct OpenAI key — implemented, tested only against
