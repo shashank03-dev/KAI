@@ -34,8 +34,10 @@ impl Shell {
             .spawn()?;
         let mut out = child.stdout.take().expect("piped");
         let mut err = child.stderr.take().expect("piped");
-        let read_out = tokio::spawn(async move { read_capped(&mut out).await });
-        let read_err = tokio::spawn(async move { read_capped(&mut err).await });
+        let out_buf = Captured::default();
+        let err_buf = Captured::default();
+        let read_out = tokio::spawn(read_capped(out, out_buf.clone()));
+        let read_err = tokio::spawn(read_capped(err, err_buf.clone()));
 
         let started = Instant::now();
         // Return the moment the command exits; check the kill switch and the
@@ -52,9 +54,24 @@ impl Shell {
             }
         };
 
-        let (stdout, out_more) = read_out.await?;
-        let (stderr, err_more) = read_err.await?;
+        // An app the command started in the background (e.g. `gio open`) can
+        // inherit the pipes and keep them open forever: after the command
+        // exits, give the readers a moment, then use what was read.
+        let grace = tokio::time::sleep(OUTPUT_GRACE);
+        tokio::pin!(grace);
+        let mut detached = false;
+        for reader in [read_out, read_err] {
+            tokio::select! {
+                _ = reader => {}
+                _ = &mut grace => detached = true,
+            }
+        }
+        let (stdout, out_more) = out_buf.take();
+        let (stderr, err_more) = err_buf.take();
         let mut text = stdout;
+        if detached {
+            text.push_str("\n(a program it started is still running in the background)");
+        }
         if out_more {
             text.push_str("\n…(output truncated)");
         }
@@ -139,24 +156,51 @@ fn home() -> std::path::PathBuf {
 }
 
 /// Read a stream fully but keep only the first `MAX_OUTPUT` bytes.
-async fn read_capped<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> (String, bool) {
-    let mut kept = Vec::new();
-    let mut more = false;
+/// How long readers may run after the command itself has exited.
+const OUTPUT_GRACE: Duration = Duration::from_millis(500);
+
+/// Output read so far, shared with the reader task, so a reader that never
+/// sees EOF still leaves its text behind.
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<(Vec<u8>, bool)>>);
+
+impl Captured {
+    fn take(&self) -> (String, bool) {
+        let g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        (String::from_utf8_lossy(&g.0).into_owned(), g.1)
+    }
+}
+
+async fn read_capped<R: tokio::io::AsyncRead + Unpin>(mut r: R, into: Captured) {
     let mut buf = [0u8; 8192];
     while let Ok(n) = r.read(&mut buf).await {
         if n == 0 {
             break;
         }
-        let room = MAX_OUTPUT.saturating_sub(kept.len());
-        kept.extend_from_slice(&buf[..n.min(room)]);
-        more |= n > room;
+        let mut g = into.0.lock().unwrap_or_else(|e| e.into_inner());
+        let room = MAX_OUTPUT.saturating_sub(g.0.len());
+        g.0.extend_from_slice(&buf[..n.min(room)]);
+        g.1 |= n > room;
     }
-    (String::from_utf8_lossy(&kept).into_owned(), more)
 }
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_background_child_holding_the_pipe_does_not_hang() {
+        let sh = Shell::new(KillSwitch::new());
+        let t = std::time::Instant::now();
+        let out = sh.run("echo started; (sleep 30 &)").await.unwrap();
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            t.elapsed()
+        );
+        assert!(out.starts_with("started"));
+        assert!(out.ends_with("[exit 0]"));
+    }
 
     #[tokio::test]
     async fn captures_stdout_stderr_and_exit() {
