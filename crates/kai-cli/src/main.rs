@@ -6,6 +6,7 @@ mod backend;
 mod bench;
 mod console;
 mod data;
+mod memory;
 mod models;
 
 use backend::{BackendArg, BackendOpts};
@@ -41,6 +42,14 @@ enum Cmd {
         /// hold private data; recording stays on this machine.
         #[arg(long, value_name = "DIR")]
         record: Option<PathBuf>,
+        /// Neither use nor add to what Kai learned on this computer.
+        #[arg(long)]
+        no_memory: bool,
+    },
+    /// What Kai learned from earlier runs on this computer (docs/MEMORY.md).
+    Memory {
+        #[command(subcommand)]
+        cmd: memory::MemoryCmd,
     },
     /// Training data: export recorded runs, or summarise them.
     Data {
@@ -177,7 +186,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             team,
             yes,
             record,
-        } => run_task(&backend, &task, team, yes, record.as_deref()).await,
+            no_memory,
+        } => run_task(&backend, &task, team, yes, record.as_deref(), !no_memory).await,
+        Cmd::Memory { cmd } => memory::run(cmd),
         Cmd::Data { cmd } => data::run(cmd),
         Cmd::Bench {
             cmd: Some(bench::BenchCmd::Report { dir, out }),
@@ -296,6 +307,7 @@ async fn run_task(
     team: bool,
     yes: bool,
     record: Option<&Path>,
+    use_memory: bool,
 ) -> anyhow::Result<ExitCode> {
     let (b, mut s, keys) = live_settings(o)?;
     let _local = local_server(b, &mut s).await?;
@@ -401,6 +413,10 @@ async fn run_task(
             o.ab.plan_cache()
                 .then(|| kai_core::PlanCache::load(Settings::dir().join("plans")).ok())
                 .flatten();
+        // Experience memory: lessons from earlier runs, and learning from this one.
+        let memory = use_memory
+            .then(|| kai_core::MemoryStore::load(Settings::memory_dir()))
+            .and_then(|m| m.map_err(|e| log::warn!("memory off: {e}")).ok());
         let trace = engine
             .run_with(
                 task,
@@ -410,6 +426,8 @@ async fn run_task(
                     executor: jevos
                         .as_ref()
                         .map(|j| j as &dyn kai_core::executor::Decider),
+                    memory: memory.as_ref(),
+                    learn_later: false,
                 },
             )
             .await;

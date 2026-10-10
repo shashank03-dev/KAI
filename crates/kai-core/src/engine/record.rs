@@ -2,11 +2,14 @@
 //! and got back, attached to the step it produced.
 
 use super::{Engine, Run};
-use crate::client::{ClientError, ModelReply};
+use crate::client::{ClientError, Images, ModelClient, ModelReply, ModelRequest};
 use crate::ports::Observation;
 use crate::reply::StepReply;
 use crate::trace::CallRecord;
 use std::time::Duration;
+
+/// Reply budget for the one repair retry (a cut-off script needs room).
+const REPAIR_MAX_TOKENS: u32 = 1536;
 
 /// A decoded reply plus what the trace needs from the call(s) behind it.
 pub(super) struct Decided {
@@ -85,5 +88,68 @@ impl Engine<'_> {
                 crop,
             },
         ))
+    }
+}
+
+impl Engine<'_> {
+    /// Returns the reply plus the model wall time and time-to-first-token.
+    pub(super) async fn decide(
+        &self,
+        client: &dyn ModelClient,
+        system: &str,
+        user_text: &str,
+        images: &Images,
+        schema: &serde_json::Value,
+    ) -> anyhow::Result<Decided> {
+        let req = ModelRequest {
+            system,
+            user_text,
+            images,
+            schema,
+            max_tokens: self.config.max_tokens,
+            temperature: 0.0,
+        };
+        let reply = client.decide(&req).await?;
+
+        match StepReply::parse_checked(&reply.raw) {
+            Ok(d) => Ok(Decided::new(d, &reply)),
+            Err(first) => {
+                // One repair retry (needed on the Gemini JSON-mode backend; a
+                // no-op improvement on vLLM structured outputs).
+                log::warn!(
+                    "repairing malformed reply: {first}; reply began: {:?}",
+                    reply.raw.chars().take(900).collect::<String>()
+                );
+                // A long command or text (e.g. a script) can overrun the
+                // short reply budget and arrive cut off: the retry gets room.
+                let hint = match &first {
+                    crate::schema::SchemaError::MissingText(crate::schema::Action::Shell) => {
+                        " Put the exact terminal command in `text`, e.g. \
+                         {\"thought\":\"run it\",\"action\":\"shell\",\"text\":\"ls -la\"}."
+                    }
+                    crate::schema::SchemaError::MissingText(_) => {
+                        " Put the text to type or the app name in `text`."
+                    }
+                    _ => " If it held a long command or text, it was cut off: write it in full.",
+                };
+                let repair_text = format!(
+                    "{user_text}\n\nYour previous reply was not valid: {first}.{hint} \
+                     Reply with ONLY the JSON object."
+                );
+                let req2 = ModelRequest {
+                    user_text: &repair_text,
+                    max_tokens: self
+                        .config
+                        .max_tokens
+                        .saturating_mul(8)
+                        .max(REPAIR_MAX_TOKENS),
+                    ..req
+                };
+                let reply2 = client.decide(&req2).await?;
+                let mut d = Decided::new(StepReply::parse_checked(&reply2.raw)?, &reply2);
+                d.add_usage(&reply);
+                Ok(d)
+            }
+        }
     }
 }

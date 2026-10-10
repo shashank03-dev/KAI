@@ -18,13 +18,15 @@
 mod act;
 mod batch;
 mod execute;
+mod memory;
 mod observe;
 mod record;
 
 pub use crate::ports::*;
 
-use crate::client::{Images, ModelClient, ModelRequest};
+use crate::client::ModelClient;
 use crate::executor::Decider;
+use crate::memory::MemoryStore;
 use crate::plan_cache::PlanCache;
 use crate::prompt::{self, HistoryItem, TurnInput};
 use crate::recorder::TraceRecorder;
@@ -65,10 +67,14 @@ pub struct RunOptions<'a> {
     pub recorder: Option<&'a TraceRecorder>,
     /// The executor's decision model (jevos); used when `Config::executor`.
     pub executor: Option<&'a dyn Decider>,
+    /// Experience memory: lessons from earlier runs are shown to the model
+    /// as hints, and this run is learned from (`Config::learn`) at the end.
+    /// See `docs/MEMORY.md`.
+    pub memory: Option<&'a MemoryStore>,
+    /// The caller judges the run after it ends (a bench check) and calls
+    /// [`MemoryStore::after_run`] itself; the engine only recalls.
+    pub learn_later: bool,
 }
-
-/// Reply budget for the one repair retry (a cut-off script needs room).
-const REPAIR_MAX_TOKENS: u32 = 1536;
 
 /// Trace backend label for actions run from a model reply's `then` list.
 pub const BATCHED: &str = "batched (no model call)";
@@ -127,6 +133,9 @@ struct Run<'t> {
     /// Escalations in a row, and model steps left before plans run again.
     exec_streak: u32,
     exec_cooldown: u32,
+    /// Experience memory, the apps/sites seen so far and the lesson block.
+    memory: Option<&'t MemoryStore>,
+    mem: memory::Recalled,
 }
 
 impl Engine<'_> {
@@ -158,10 +167,17 @@ impl Engine<'_> {
             decider: opts.executor.filter(|_| self.config.executor),
             exec_streak: 0,
             exec_cooldown: 0,
+            memory: opts.memory,
+            mem: Default::default(),
         };
         self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
         r.trace.finish(outcome);
+        if let Some(store) = opts.memory
+            && !opts.learn_later
+        {
+            self.learn_from(store, &r.trace).await;
+        }
         if let Some(rec) = opts.recorder
             && let Err(e) = rec.finish(&r.trace)
         {
@@ -252,7 +268,9 @@ impl Engine<'_> {
         // ---- Decide ----
         self.sink.emit(&EngineEvent::Thinking { step });
         let notes = std::mem::take(&mut r.notes);
+        let lessons = self.lessons_for(r, &obs.grounding);
         let user_text = prompt::build_turn(&TurnInput {
+            lessons: lessons.as_deref(),
             task: r.task,
             grounding: &obs.grounding,
             history: &r.history,
@@ -427,6 +445,7 @@ impl Engine<'_> {
                 message: m.clone(),
             });
             r.notes.push(format!("User says (mid-run): {m}"));
+            r.trace.steered.push(m);
         }
         if any {
             // The user may refer to what they see: look again properly.
@@ -444,67 +463,6 @@ impl Engine<'_> {
                 command: d.text.clone().unwrap_or_default(),
                 output: out.to_string(),
             });
-        }
-    }
-
-    /// Returns the reply plus the model wall time and time-to-first-token.
-    async fn decide(
-        &self,
-        client: &dyn ModelClient,
-        system: &str,
-        user_text: &str,
-        images: &Images,
-        schema: &serde_json::Value,
-    ) -> anyhow::Result<record::Decided> {
-        let req = ModelRequest {
-            system,
-            user_text,
-            images,
-            schema,
-            max_tokens: self.config.max_tokens,
-            temperature: 0.0,
-        };
-        let reply = client.decide(&req).await?;
-
-        match StepReply::parse_checked(&reply.raw) {
-            Ok(d) => Ok(record::Decided::new(d, &reply)),
-            Err(first) => {
-                // One repair retry (needed on the Gemini JSON-mode backend; a
-                // no-op improvement on vLLM structured outputs).
-                log::warn!(
-                    "repairing malformed reply: {first}; reply began: {:?}",
-                    reply.raw.chars().take(900).collect::<String>()
-                );
-                // A long command or text (e.g. a script) can overrun the
-                // short reply budget and arrive cut off: the retry gets room.
-                let hint = match &first {
-                    crate::schema::SchemaError::MissingText(crate::schema::Action::Shell) => {
-                        " Put the exact terminal command in `text`, e.g. \
-                         {\"thought\":\"run it\",\"action\":\"shell\",\"text\":\"ls -la\"}."
-                    }
-                    crate::schema::SchemaError::MissingText(_) => {
-                        " Put the text to type or the app name in `text`."
-                    }
-                    _ => " If it held a long command or text, it was cut off: write it in full.",
-                };
-                let repair_text = format!(
-                    "{user_text}\n\nYour previous reply was not valid: {first}.{hint} \
-                     Reply with ONLY the JSON object."
-                );
-                let req2 = ModelRequest {
-                    user_text: &repair_text,
-                    max_tokens: self
-                        .config
-                        .max_tokens
-                        .saturating_mul(8)
-                        .max(REPAIR_MAX_TOKENS),
-                    ..req
-                };
-                let reply2 = client.decide(&req2).await?;
-                let mut d = record::Decided::new(StepReply::parse_checked(&reply2.raw)?, &reply2);
-                d.add_usage(&reply);
-                Ok(d)
-            }
         }
     }
 }

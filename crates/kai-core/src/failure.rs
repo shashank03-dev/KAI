@@ -237,7 +237,7 @@ fn repeated_action(trace: &Trace) -> Option<String> {
 }
 
 /// The name of mark `t` in an element list line `#t role "name" (...)`.
-fn mark_name(elements: &str, t: u32) -> Option<String> {
+pub(crate) fn mark_name(elements: &str, t: u32) -> Option<String> {
     let prefix = format!("#{t} ");
     let line = elements.lines().find(|l| l.starts_with(&prefix))?;
     let start = line.find('"')? + 1;

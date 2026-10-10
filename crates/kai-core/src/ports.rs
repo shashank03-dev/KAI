@@ -185,6 +185,13 @@ pub struct Config {
     pub executor: bool,
     /// The executor's confidence gates and limits.
     pub executor_gates: crate::executor::Gates,
+    /// Experience memory: learn lessons from this run and credit the ones
+    /// shown (needs `RunOptions::memory`; `docs/MEMORY.md`). Recall of
+    /// stored lessons happens whenever a store is passed.
+    pub learn: bool,
+    /// After a failed or recovered run, ask the model once for up to two
+    /// lessons. Off by default: it costs one extra call per such run.
+    pub reflect: bool,
 }
 
 impl Default for Config {
@@ -201,6 +208,8 @@ impl Default for Config {
             a11y_actions: true,
             executor: false,
             executor_gates: crate::executor::Gates::default(),
+            learn: true,
+            reflect: false,
         }
     }
 }

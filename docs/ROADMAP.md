@@ -1,5 +1,7 @@
 # Roadmap: making Gemma use the computer better and faster than a frontier model
 
+> **Note (2026-10-10):** Model training is parked by the owner (2026-10-10); Kai improves through local experience memory ([docs/MEMORY.md](MEMORY.md)) instead. train/ is kept for later.
+
 Written 2026-10-10. This builds on [RESEARCH.md](RESEARCH.md) (2026-10-09),
 which covered speed inside the harness: frames, batching, tree-only steps,
 accessibility-first actions, vLLM flags, Jev and the Gateway. This document

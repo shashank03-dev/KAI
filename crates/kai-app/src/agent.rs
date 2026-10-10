@@ -217,6 +217,8 @@ async fn drive(
         max_time,
         approval: settings.approval,
         executor: settings.use_executor,
+        learn: settings.learn,
+        reflect: settings.reflect,
         ..Config::default()
     };
     let dir = run_dir();
@@ -315,6 +317,12 @@ async fn drive(
         let executor = settings.use_executor.then(|| settings.executor_client());
         let cache =
             kai_core::PlanCache::load(kai_core::settings::Settings::dir().join("plans")).ok();
+        // Experience memory (docs/MEMORY.md): lessons from earlier runs on
+        // this computer as hints; this run is learned from when
+        // Settings › Privacy › "Learn from mistakes" is on.
+        let memory = kai_core::MemoryStore::load(Settings::memory_dir())
+            .map_err(|e| log::warn!("agent: memory off: {e}"))
+            .ok();
         let trace = engine
             .run_with(
                 &task,
@@ -324,6 +332,8 @@ async fn drive(
                     executor: executor
                         .as_ref()
                         .map(|c| c as &dyn kai_core::executor::Decider),
+                    memory: memory.as_ref(),
+                    learn_later: false,
                 },
             )
             .await;

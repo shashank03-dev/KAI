@@ -82,6 +82,12 @@ pub struct TurnInput<'a> {
     pub notes: &'a [String],
     /// False on tree-only steps (no screenshot attached).
     pub has_screenshot: bool,
+    /// Lessons from earlier runs on this computer (experience memory), as
+    /// rendered by [`crate::memory::recall::render`]. Placed at the top of
+    /// the turn, right after the stable system prompt and skill body: it only
+    /// changes when the apps or sites in play change, so it rides in the
+    /// cached prefix. Hints for the model only.
+    pub lessons: Option<&'a str>,
 }
 
 /// Build the changing user turn: skill body (if one is active), the compact
@@ -102,6 +108,7 @@ pub fn user_turn(
         no_progress,
         notes: &[],
         has_screenshot: true,
+        lessons: None,
     })
 }
 
@@ -116,6 +123,11 @@ pub fn build_turn(t: &TurnInput) -> String {
         // `{skill_dir}` lets a skill point at its own helper scripts.
         let dir = std::fs::canonicalize(&sk.dir).unwrap_or_else(|_| sk.dir.clone());
         s.push_str(&sk.body.replace("{skill_dir}", &dir.display().to_string()));
+        s.push_str("\n\n");
+    }
+
+    if let Some(l) = t.lessons.filter(|l| !l.trim().is_empty()) {
+        s.push_str(l.trim_end());
         s.push_str("\n\n");
     }
 

@@ -11,6 +11,7 @@
 mod executor_tests;
 pub mod machine;
 pub mod record;
+pub mod repeat;
 pub mod report;
 pub mod runner;
 pub mod stats;
@@ -60,6 +61,15 @@ pub struct BenchArgs {
     /// Do not record task runs.
     #[arg(long)]
     pub no_record: bool,
+    /// Use experience memory (A/B): a fresh lesson store for this bench run
+    /// that earlier tasks teach later ones. Off by default for fair numbers;
+    /// the user's own lessons are never used.
+    #[arg(long)]
+    pub memory: bool,
+    /// Run each task this many times back to back (with `--memory`, later
+    /// runs can use the first run's lessons); prints first vs repeat.
+    #[arg(long, default_value = "1")]
+    pub repeat: u32,
 }
 
 impl clap::ValueEnum for Kind {
@@ -176,8 +186,13 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         .as_ref()
         .map(|j| j as &dyn kai_core::executor::Decider);
 
+    let store = args.memory.then(kai_core::MemoryStore::in_memory);
+    let mem = runner::MemoryOpts {
+        store: store.as_ref(),
+        repeat: args.repeat.clamp(1, 5),
+    };
     let runs = match b {
-        BackendArg::Mock => runner::run_mock(&list, skills, config, rec, executor).await,
+        BackendArg::Mock => runner::run_mock_with(&list, skills, config, rec, executor, mem).await,
         BackendArg::Replay => {
             let live = runner::Live {
                 client: None,
@@ -190,6 +205,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 native: None,
                 record: rec,
                 executor,
+                memory: mem,
             };
             runner::run_live(&list, &live).await?
         }
@@ -206,6 +222,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 native: Some(cfg),
                 record: rec,
                 executor,
+                memory: mem,
             };
             runner::run_live(&list, &live).await?
         }
@@ -223,15 +240,24 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 native: None,
                 record: rec,
                 executor,
+                memory: mem,
             };
             runner::run_live(&list, &live).await?
         }
     };
 
+    let repeat_md = (mem.repeat > 1 || args.memory)
+        .then(|| repeat::table(&runs, store.as_ref().map_or(0, |s| s.len())));
+    // The head-to-head numbers are first runs only.
+    let runs: Vec<runner::Run> = runs.into_iter().filter(|r| r.pass == 0).collect();
+    let mut bench_note = note(b);
+    if args.memory {
+        bench_note.push_str(" Experience memory ON (--memory): a fresh lesson store shared by the tasks of this bench run.");
+    }
     let meta = Meta {
         backend: backend_name,
         model,
-        note: note(b),
+        note: bench_note,
         command: machine::command_line(),
         machine: Some(Machine::probe()),
         ab: Some(AbRecord {
@@ -254,5 +280,11 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
     };
     let (json, md) = report::write(&summary, &out)?;
     eprintln!("wrote {} and {}", json.display(), md.display());
+    if let Some(t) = repeat_md {
+        println!("\n{t}");
+        let p = md.with_extension("memory.md");
+        std::fs::write(&p, t)?;
+        eprintln!("wrote {}", p.display());
+    }
     Ok(ExitCode::SUCCESS)
 }

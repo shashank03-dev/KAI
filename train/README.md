@@ -1,5 +1,7 @@
 # Training Gemma 4 to be a better Kai
 
+> **Note (2026-10-10):** Model training is parked by the owner (2026-10-10); Kai improves through local experience memory ([docs/MEMORY.md](../docs/MEMORY.md)) instead. train/ is kept for later.
+
 This folder makes Gemma 4 better at Kai's computer use over time, with Kai's
 own benchmark as the judge. Everything runs on one DigitalOcean H100 Droplet
 (`deploy/digitalocean/train-up.sh`). **Nothing here has been run on a GPU

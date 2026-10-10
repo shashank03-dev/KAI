@@ -229,6 +229,9 @@ impl KaiApp {
             );
         }
         self.pages.reload_history();
+        if self.pages.settings_section == "memory" {
+            self.pages.reload_memory();
+        }
         cx.notify();
     }
 

@@ -139,6 +139,8 @@ pub fn config(s: &Settings, ab: &Ab) -> anyhow::Result<(Config, bool)> {
         max_steps,
         max_time,
         approval: s.approval,
+        learn: s.learn,
+        reflect: s.reflect,
         ..Config::default()
     };
     let applied = apply_ab(&mut c, ab)?;

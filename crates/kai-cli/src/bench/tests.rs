@@ -105,6 +105,7 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
             skipped: None,
             check: Some(true),
             setup_failed: false,
+            pass: 0,
         },
         Run {
             task: t[1].clone(),
@@ -114,6 +115,7 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
             skipped: None,
             check: Some(false),
             setup_failed: false,
+            pass: 0,
         },
         Run {
             task: t[2].clone(),
@@ -123,6 +125,7 @@ fn summary_breaks_down_time_tokens_cost_and_skips() {
             skipped: Some("needs browser".into()),
             check: None,
             setup_failed: false,
+            pass: 0,
         },
     ];
     let prices = Prices {
@@ -177,6 +180,7 @@ fn recorded_runs_say_tokens_are_not_measured() {
         skipped: None,
         check: None,
         setup_failed: false,
+        pass: 0,
     }];
     let s = stats::summarise(meta(true, None), runs);
     assert_eq!(s.tasks[0].judged_by, "outcome");
@@ -197,6 +201,7 @@ fn summary(backend: &str, model: &str, date: &str, pass: bool) -> Summary {
         skipped: None,
         check: Some(pass),
         setup_failed: false,
+        pass: 0,
     }];
     let mut m = meta(false, None);
     m.backend = backend.into();

@@ -156,6 +156,13 @@ at anything that needs approval, then hands over to the model.
 **Steering.** Messages typed into a running task are folded into the next
 step's prompt as "User says (mid-run): …" and force a full frame.
 
+**Experience memory.** After every run Kai draws short lessons from the trace
+(recoveries, dead ends, failing commands, your mid-run messages, false
+"done"), keeps them in `<config>/memory/lessons.jsonl`, and shows the top 5
+(≤ 120 words) that fit the task and the apps/sites in play at the top of the
+user turn — hints only, never read by approvals or risk. No training; any
+backend. See [MEMORY.md](MEMORY.md).
+
 ## Speed — what makes it fast
 
 | Technique | Where |

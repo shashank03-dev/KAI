@@ -83,6 +83,11 @@ impl PlanCache {
         self.len() == 0
     }
 
+    /// Every stored plan (for memory's skill suggestions).
+    pub fn plans(&self) -> Vec<CachedPlan> {
+        self.plans.lock().map(|p| p.clone()).unwrap_or_default()
+    }
+
     /// The plan for `task`, if one matches closely enough.
     pub fn lookup(&self, task: &str) -> Option<CachedPlan> {
         let key = normalise(task);

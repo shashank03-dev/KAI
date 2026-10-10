@@ -81,6 +81,23 @@ pub struct Run {
     pub check: Option<bool>,
     /// The task's setup command failed (the task ran anyway).
     pub setup_failed: bool,
+    /// 0 for the first run of the task, 1 for the second (`--repeat`).
+    pub pass: u32,
+}
+
+/// Experience memory for a bench run (`--memory`, `--repeat`): a fresh
+/// in-memory store per bench, never the user's own lessons.
+#[derive(Clone, Copy, Default)]
+pub struct MemoryOpts<'a> {
+    pub store: Option<&'a kai_core::MemoryStore>,
+    /// Runs per task, back to back (at least 1).
+    pub repeat: u32,
+}
+
+impl MemoryOpts<'_> {
+    fn passes(&self) -> u32 {
+        self.repeat.max(1)
+    }
 }
 
 /// A scripted screen for the mock backend: a browser-like page whose hash
@@ -181,6 +198,8 @@ pub async fn sh(cmd: &str, bench_dir: &Path) -> bool {
     }
 }
 
+/// The mock backend with no memory (tests).
+#[cfg(test)]
 pub async fn run_mock(
     tasks: &[Task],
     skills: &[Skill],
@@ -188,8 +207,25 @@ pub async fn run_mock(
     rec: Option<&Recording>,
     executor: Option<&dyn Decider>,
 ) -> Vec<Run> {
+    let none = MemoryOpts::default();
+    run_mock_with(tasks, skills, config, rec, executor, none).await
+}
+
+/// [`run_mock`] with experience memory and repeats.
+pub async fn run_mock_with(
+    tasks: &[Task],
+    skills: &[Skill],
+    config: Config,
+    rec: Option<&Recording>,
+    executor: Option<&dyn Decider>,
+    mem: MemoryOpts<'_>,
+) -> Vec<Run> {
     let mut out = Vec::new();
-    for t in tasks {
+    for t in tasks
+        .iter()
+        .flat_map(|t| (0..mem.passes()).map(move |p| (t, p)))
+    {
+        let (t, pass) = t;
         let log = Arc::new(Mutex::new(Vec::new()));
         let recorded = MockClient::new(t.mock.clone());
         let client = Metered::new(&recorded, log.clone());
@@ -212,10 +248,12 @@ pub async fn run_mock(
             config,
         };
         let started = Instant::now();
-        let recorder = rec.and_then(|r| r.start(t));
+        // Only the first pass is recorded (one folder per task id).
+        let recorder = rec.filter(|_| pass == 0).and_then(|r| r.start(t));
         let opts = kai_core::RunOptions {
             recorder: recorder.as_ref(),
             executor,
+            memory: mem.store,
             ..Default::default()
         };
         let trace = engine.run_with(&t.prompt, opts).await;
@@ -231,6 +269,7 @@ pub async fn run_mock(
             skipped: None,
             check: None,
             setup_failed: false,
+            pass,
         });
     }
     out
@@ -253,6 +292,8 @@ pub struct Live<'a> {
     pub record: Option<&'a Recording>,
     /// The executor's decision model, when `--executor` is on.
     pub executor: Option<&'a dyn Decider>,
+    /// Experience memory and repeats.
+    pub memory: MemoryOpts<'a>,
 }
 
 pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run>> {
@@ -266,7 +307,8 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
     eprintln!("this machine has: {}", available.have.join(", "));
     let replay = live.client.is_none();
     let mut out = Vec::new();
-    for t in tasks {
+    let passes = live.memory.passes();
+    for (t, pass) in tasks.iter().flat_map(|t| (0..passes).map(move |p| (t, p))) {
         let missing = available.missing(t);
         let skip = if replay && t.replay == ReplayMode::Skip {
             Some("not replayable (see `replay: skip` in tasks.yaml)".to_string())
@@ -285,6 +327,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
                 skipped: Some(reason),
                 check: None,
                 setup_failed: false,
+                pass,
             });
             continue;
         }
@@ -315,10 +358,13 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             skills: live.skills,
             config: live.config,
         };
-        let recorder = live.record.and_then(|r| r.start(t));
+        let recorder = live.record.filter(|_| pass == 0).and_then(|r| r.start(t));
         let opts = kai_core::RunOptions {
             recorder: recorder.as_ref(),
             executor: live.executor,
+            memory: live.memory.store,
+            // Learn after the check, which knows whether `done` was true.
+            learn_later: true,
             ..Default::default()
         };
         let started = Instant::now();
@@ -338,6 +384,11 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         if let Some(r) = &recorder {
             record::finish(r, &trace, check, setup_failed);
         }
+        if let Some(m) = live.memory.store
+            && let Err(e) = m.after_run(&trace, check, Vec::new(), live.config.learn)
+        {
+            log::warn!("memory: {e}");
+        }
         out.push(Run {
             task: t.clone(),
             trace: Some(trace),
@@ -346,6 +397,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             skipped: None,
             check,
             setup_failed,
+            pass,
         });
     }
     Ok(out)

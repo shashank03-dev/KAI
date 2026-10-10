@@ -134,6 +134,22 @@ fn privacy(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
             div(),
             cx,
         ))
+        .row(
+            Switch::new("learn", app.settings.learn)
+                .label("Learn from mistakes on this computer (short lessons, kept only here; see Settings › Memory)")
+                .on_change({
+                    let e = cx.entity();
+                    move |v, _, cx| e.update(cx, |a, cx| { a.settings.learn = v; a.save_settings(cx); })
+                }),
+        )
+        .row(
+            Switch::new("reflect", app.settings.reflect)
+                .label("Reflect after failures (one extra model call)")
+                .on_change({
+                    let e = cx.entity();
+                    move |v, _, cx| e.update(cx, |a, cx| { a.settings.reflect = v; a.save_settings(cx); })
+                }),
+        )
 }
 
 fn about(cx: &mut Context<KaiApp>) -> SettingsSection {
@@ -148,6 +164,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         "safety" => safety(app, cx).into_any_element(),
         "appearance" => appearance(app, cx).into_any_element(),
         "privacy" => privacy(app, cx).into_any_element(),
+        "memory" => crate::pages::memory::section(app, cx).into_any_element(),
         "shortcuts" => SettingsSection::new("Shortcuts")
             .row(KeyboardShortcutsList::new(
                 crate::pages::shortcut_list(),
@@ -187,12 +204,16 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     ("safety", "Safety", IconName::Shield),
                     ("appearance", "Appearance", IconName::Sun),
                     ("privacy", "Privacy", IconName::Lock),
+                    ("memory", "Memory", IconName::BookOpen),
                     ("shortcuts", "Shortcuts", IconName::Keyboard),
                     ("about", "About", IconName::Info),
                 ],
                 section,
                 move |key, _, cx| {
                     picker.update(cx, |a, cx| {
+                        if key == "memory" {
+                            a.pages.reload_memory();
+                        }
                         a.pages.settings_section = key.to_string();
                         cx.notify();
                     })

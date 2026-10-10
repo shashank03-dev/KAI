@@ -179,6 +179,17 @@ fn has_phrase(hay: &str, phrase: &str) -> bool {
     })
 }
 
+/// The text form of [`targets_secure`]: is mark `mark` a password/secure
+/// field in an element list as recorded in a trace (`#3 password "PIN"
+/// (secure)`)? Used where only the recorded text is left (experience memory).
+pub fn mark_is_secure_in_text(elements: &str, mark: u32) -> bool {
+    let prefix = format!("#{mark} ");
+    elements.lines().any(|l| {
+        l.starts_with(&prefix)
+            && (l[prefix.len()..].starts_with("password ") || l.trim_end().ends_with("(secure)"))
+    })
+}
+
 fn targets_secure(grounding: &Grounding, mark: u32) -> bool {
     grounding
         .element(mark)

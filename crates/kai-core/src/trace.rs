@@ -189,6 +189,13 @@ pub struct Trace {
     /// Executor counters, when the run asked for the executor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor: Option<ExecutorStats>,
+    /// Messages the user sent mid-run, in order (experience memory turns
+    /// them into preferences; `docs/MEMORY.md`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steered: Vec<String>,
+    /// Ids of the memory lessons shown to the model this run, for credit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lessons: Vec<String>,
 }
 
 impl Trace {
@@ -201,6 +208,8 @@ impl Trace {
             total_ms: 0,
             errors: Vec::new(),
             executor: None,
+            steered: Vec::new(),
+            lessons: Vec::new(),
         }
     }
 

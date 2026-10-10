@@ -6,6 +6,7 @@ pub mod capture_models;
 pub mod done;
 pub mod history;
 pub mod home;
+pub mod memory;
 pub mod model_settings;
 pub mod models;
 pub mod models_card;
@@ -54,6 +55,11 @@ pub struct PageState {
     pub testing: String,
     pub test_results: Vec<(String, Result<String, String>)>,
     pub confirm_delete: bool,
+    /// Settings › Memory: the "Add a lesson" field, the lessons, and skill
+    /// suggestions from proven lessons.
+    pub lesson_draft: Entity<TextInput>,
+    pub lessons: Vec<kai_core::Lesson>,
+    pub memory_suggestions: Vec<kai_core::memory::promote::Suggestion>,
 }
 
 impl PageState {
@@ -97,7 +103,15 @@ impl PageState {
             testing: String::new(),
             test_results: Vec::new(),
             confirm_delete: false,
+            lesson_draft: field("e.g. Save notes to ~/Notes", window, cx),
+            lessons: Vec::new(),
+            memory_suggestions: Vec::new(),
         }
+    }
+
+    /// Re-read the lessons and suggestions from disk.
+    pub fn reload_memory(&mut self) {
+        (self.lessons, self.memory_suggestions) = memory::load();
     }
 
     pub fn reload_history(&mut self) {
