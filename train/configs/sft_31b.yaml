@@ -1,0 +1,18 @@
+# QLoRA SFT of Gemma 4 31B (dense). bf16 weights alone are ~62 GB, too tight
+# for training on 80 GB, so the language model loads in 4-bit NF4
+# (~18-20 GB) and bf16 LoRA trains on top. Slower per token than 26B-A4B
+# (31B active vs 3.8B active parameters).
+model: google/gemma-4-31B-it
+output_dir: train/out/sft-31b
+max_len: 4096
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+load_in_4bit: true
+epochs: 2
+lr: 1.0e-4
+warmup_steps: 20
+per_device_batch: 1
+grad_accum: 16
+eval_steps: 100
+save_steps: 200

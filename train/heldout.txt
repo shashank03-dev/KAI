@@ -1,0 +1,10 @@
+# Held-out bench task ids (bench/tasks.yaml). Rows of these tasks are never
+# used for SFT or GRPO; train/eval.py measures progress on exactly this list.
+# One per kind and difficulty, chosen before any training run. Change it only
+# between experiments, never in the middle of one (results stop comparing).
+web-form-submit
+csv-total
+search-in-files
+mousepad-line-numbers
+resize-image
+count-errors

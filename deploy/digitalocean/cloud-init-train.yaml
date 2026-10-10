@@ -1,0 +1,102 @@
+#cloud-config
+# Training Droplet for train/ (SFT, eval, online GRPO). Rendered by
+# train-up.sh, which substitutes __HF_TOKEN__, __VLLM_API_KEY__, __MODEL_ID__,
+# __REPO_URL__ and __REPO_REF__ into a copy under .secrets/ (never committed).
+#
+# Unlike cloud-init.yaml (serving), nothing here listens publicly: vLLM is on
+# 127.0.0.1:8000 only, with runtime LoRA loading and sleep mode turned on for
+# GRPO (dev endpoints that must never be exposed). Reach it over SSH.
+
+package_update: true
+packages:
+  - docker.io
+  - git
+  - curl
+  - build-essential
+  - pkg-config
+  - libssl-dev
+  - python3-venv
+  - python3-pip
+  - libxkbcommon-dev
+  - libxkbcommon-x11-dev
+  - libwayland-dev
+  - libvulkan-dev
+  - libx11-xcb-dev
+  - libfontconfig-dev
+  - libdbus-1-dev
+  - libxdo-dev
+
+write_files:
+  - path: /etc/kai/vllm.env
+    permissions: "0600"
+    content: |
+      HF_TOKEN=__HF_TOKEN__
+      VLLM_API_KEY=__VLLM_API_KEY__
+      MODEL_ID=__MODEL_ID__
+
+  - path: /root/.kai-train.env
+    permissions: "0600"
+    content: |
+      # source ~/.kai-train.env   (Kai + train/ talk to the local vLLM)
+      export KAI_ENDPOINT=http://127.0.0.1:8000/v1
+      export VLLM_API_KEY=__VLLM_API_KEY__
+      export HF_TOKEN=__HF_TOKEN__
+
+  - path: /etc/systemd/system/vllm-train.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=vLLM for Kai training (localhost only, LoRA hot-swap, sleep mode)
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      EnvironmentFile=/etc/kai/vllm.env
+      TimeoutStartSec=0
+      Restart=always
+      RestartSec=5
+      ExecStartPre=-/usr/bin/docker rm -f kai-vllm-train
+      ExecStartPre=/usr/bin/docker pull vllm/vllm-openai:v0.25.0
+      ExecStart=/usr/bin/docker run --rm --name kai-vllm-train \
+        --gpus all --ipc=host --shm-size 16g \
+        -p 127.0.0.1:8000:8000 \
+        -e HF_TOKEN=${HF_TOKEN} \
+        -e VLLM_ALLOW_RUNTIME_LORA_UPDATING=True \
+        -e VLLM_SERVER_DEV_MODE=1 \
+        -v /root/.cache/huggingface:/root/.cache/huggingface \
+        -v /root/KAI/train/out:/adapters:ro \
+        vllm/vllm-openai:v0.25.0 \
+        --model ${MODEL_ID} \
+        --host 0.0.0.0 --port 8000 \
+        --api-key ${VLLM_API_KEY} \
+        --max-model-len 16384 \
+        --gpu-memory-utilization 0.80 \
+        --limit-mm-per-prompt.image 2 \
+        --enable-prefix-caching \
+        --enable-lora --max-loras 2 --max-lora-rank 64 \
+        --enable-sleep-mode
+      ExecStop=/usr/bin/docker stop kai-vllm-train
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - mkdir -p /root/.cache/huggingface
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update
+  - apt-get install -y nvidia-container-toolkit
+  - nvidia-ctk runtime configure --runtime=docker
+  - systemctl restart docker
+  # Kai's source, desktop, CLI and the training venv.
+  - git clone --branch __REPO_REF__ __REPO_URL__ /root/KAI
+  - mkdir -p /root/KAI/train/out
+  - bash /root/KAI/scripts/desktop/install.sh
+  - curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+  - bash -lc 'cd /root/KAI && . /root/.cargo/env && cargo build --release -p kai-cli && ln -sf /root/KAI/target/release/kai /usr/local/bin/kai'
+  - python3 -m venv /root/KAI/train/.venv-gpu
+  - /root/KAI/train/.venv-gpu/bin/pip install --upgrade pip
+  - /root/KAI/train/.venv-gpu/bin/pip install -r /root/KAI/train/requirements-gpu.txt
+  - systemctl daemon-reload
+  - systemctl enable --now vllm-train.service
+  - touch /root/KAI/train/.ready
