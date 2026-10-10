@@ -85,20 +85,25 @@ calculator, calendar, image resize, screenshot), same Linux container (Xvfb
 1920x1080, 4 vCPU), same Kai build, one run each. A task passes only if its
 automatic `check` command passes after the run.
 
-| | Gemma 4 26B-A4B | GPT-5 mini | GPT-4.1 mini |
-| --- | --- | --- | --- |
-| Served by | Gemini API (free tier) | Vercel AI Gateway (free tier) | Vercel AI Gateway (free tier) |
-| Tasks passed | **14 / 14** | 12 / 14 | 8 / 14 |
-| Steps, all 14 tasks | **75** | 212 | 155 |
-| Model calls | **104** | 163 | 113 |
-| Tokens in / out | **185k / 9k** | 348k / 25k | 252k / 11k |
-| Model time per call, p50 / p95 | 2.85 / 6.5 s ¹ | 2.17 / 4.6 s | **1.77** / 3.4 s |
+| | Gemma 4 26B-A4B | Gemma 4 31B | GPT-5 mini | GPT-4.1 mini |
+| --- | --- | --- | --- | --- |
+| Served by | Gemini API (free tier) | Gemini API (free tier) | Vercel AI Gateway (free tier) | Vercel AI Gateway (free tier) |
+| Tasks passed | **14 / 14** | 11 / 14 | 12 / 14 | 8 / 14 |
+| Steps, all 14 tasks | 75 | **60** | 212 | 155 |
+| Model calls | 104 | **68** | 163 | 113 |
+| Tokens in / out | 185k / 9k | **113k / 7k** | 348k / 25k | 252k / 11k |
+| Model time per call, p50 / p95 | 2.85 / 6.5 s ¹ | 27.2 / 43.2 s ² | 2.17 / 4.6 s | **1.77** / 3.4 s |
 
 ¹ Over Gemma's full 30-task run. Gemma 4 26B on all 30 tasks: **23 / 30**
 (failures: `local-price-lookup`, `mousepad-line-numbers`, `spreadsheet-budget`,
 `csv-total`, `email-draft`, `dark-mode`, `pc-checkup`; the line-numbers failure
 was a Kai bug — starting a GUI app as a shell command blocked for 180 s — fixed
 after this run).
+
+² Gemma 4 31B on the Gemini API free tier is slow and flaky (many 500/429
+replies, retried on the next key; the waits are not counted, but single calls
+still took ~27 s). Its 31B failures: `web-form-submit`, `close-app`,
+`calendar-event`. A 31B speed number from our own Droplet is not measured.
 
 Read with care: one run per model, so a 1–2 task gap on 14 tasks is not
 statistically solid; free tiers added rate-limit waits, so wall-clock task time
