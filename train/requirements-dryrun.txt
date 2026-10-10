@@ -1,0 +1,6 @@
+# Enough for every --dry-run and train/tests/ (no torch, no GPU):
+#   python3 -m venv train/.venv && train/.venv/bin/pip install -r train/requirements-dryrun.txt
+pillow>=11
+pyyaml>=6
+jsonschema>=4.23
+jinja2>=3.1

@@ -1,0 +1,16 @@
+# LoRA SFT of Gemma 4 E4B (small edge model). Fits easily on one H100 (or a
+# 24 GB card); use it to iterate on the data before paying for 26B-A4B.
+model: google/gemma-4-E4B-it
+output_dir: train/out/sft-e4b
+max_len: 4096
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+load_in_4bit: false
+epochs: 3
+lr: 2.0e-4
+warmup_steps: 20
+per_device_batch: 1
+grad_accum: 16
+eval_steps: 100
+save_steps: 200

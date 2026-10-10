@@ -1,0 +1,21 @@
+# Training stack for train/sft_gemma.py and train/grpo_gemma.py (CUDA 12.x, Python 3.12).
+# Versions checked on PyPI on 2026-10-10 and chosen >= 2 weeks old:
+#   transformers 5.17.0 (2026-09-09; has Gemma4ForConditionalGeneration)
+#   peft 0.21.1 (2026-09-29), accelerate 1.15.0 (2026-09-09)
+#   torch 2.13.0 (2026-07-08) + torchvision 0.28.0, bitsandbytes 0.50.2 (2026-08-27)
+# vLLM is NOT installed here: it runs in its own container
+# (vllm/vllm-openai:v0.25.0, same as serving), because vLLM pins its own torch
+# and transformers ranges (vllm 0.30.0 requires torch==2.13.0, transformers>=5.10.4).
+# TRL is not needed: SFT uses transformers.Trainer, GRPO is implemented in
+# train/grpo_gemma.py (see its docstring for why TRL 1.14's GRPOTrainer does not fit).
+torch==2.13.0
+torchvision==0.28.0
+transformers==5.17.0
+peft==0.21.1
+accelerate==1.15.0
+bitsandbytes==0.50.2
+safetensors>=0.6.2
+pillow>=11
+pyyaml>=6
+jsonschema>=4.23
+jinja2>=3.1
