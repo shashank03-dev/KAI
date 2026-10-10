@@ -186,3 +186,21 @@ a real model's behaviour; real-model A/B numbers come from
 
 Code: `crates/kai-core/src/memory/` (OS-free), wiring in
 `crates/kai-core/src/engine/memory.rs`, CLI in `crates/kai-cli/src/memory.rs`.
+
+## First live test (2026-10-10) — no improvement yet
+
+Gemma 4 26B (Gemini API free tier), 7 tasks it had failed before, each run
+twice with memory on (`kai bench --memory --repeat 2`; results in
+`bench/results/2026-10-10-gemini-gemma-4-26b-a4b-it.memory.md`):
+
+| Pass | Passed | Mean steps | Mean model calls | Lessons shown |
+|---|---|---|---|---|
+| 1st try | 5 / 7 | 12.4 | 20.7 | 6 |
+| 2nd try (with lessons) | 4 / 7 | 14.1 | 25.1 | 9 |
+
+Not a fair read: the Gemini daily free quota ran out during the run (34
+"exceeded your current quota" replies; two tasks failed on that alone), and
+one run per pass on 7 tasks is noise. But it shows no benefit, so the lesson
+rules need tightening before memory can be called a win: lessons from other
+tasks were shown in the first pass already (scope too loose), and the bench
+does not yet print which lessons were recalled — needed to judge them.
