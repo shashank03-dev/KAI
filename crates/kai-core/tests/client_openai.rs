@@ -189,3 +189,16 @@ async fn vllm_streams_too() {
     let c = VllmClient::new(format!("{base}/v1"), "k").with_streaming(false);
     assert_eq!(decide(&c).await.unwrap().prompt_tokens, Some(1200));
 }
+
+#[tokio::test]
+async fn local_server_needs_no_key_and_reports_local() {
+    let (srv, base) = Server::start(vec![Reply::Json(200, completion(DONE))]).await;
+    let c = OpenAiClient::local(format!("{base}/v1"), "gemma-4-e4b-it").with_streaming(false);
+    let r = decide(&c).await.unwrap();
+    assert_eq!(r.backend, Backend::Local);
+    let head = srv.heads()[0].to_ascii_lowercase();
+    assert!(!head.contains("authorization"), "{head}");
+    let (_, body) = &srv.bodies()[0];
+    assert_eq!(body["model"], "gemma-4-e4b-it");
+    assert_eq!(body["messages"][1]["content"][1]["type"], "image_url");
+}

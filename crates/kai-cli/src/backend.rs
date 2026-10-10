@@ -25,6 +25,8 @@ pub enum BackendArg {
     OpenAi,
     /// OpenAI's own computer-use loop instead of Kai's harness.
     OpenaiNative,
+    /// An open model on this computer (`kai models`); `--model <catalog id>`.
+    Local,
     /// Recorded replies on a scripted screen; touches nothing (bench only).
     Mock,
     /// Recorded replies, executed for real on this desktop (bench only).
@@ -40,6 +42,7 @@ impl BackendArg {
             BackendArg::Gateway => "gateway",
             BackendArg::OpenAi => "openai",
             BackendArg::OpenaiNative => "openai-native",
+            BackendArg::Local => "local",
             BackendArg::Mock => "mock",
             BackendArg::Replay => "replay",
         }
@@ -73,8 +76,16 @@ pub fn settings_for(b: BackendArg, model: Option<&str>) -> anyhow::Result<Settin
         BackendArg::Gemini => BackendChoice::Gemini,
         BackendArg::Gateway => BackendChoice::Gateway,
         BackendArg::OpenAi | BackendArg::OpenaiNative => BackendChoice::OpenAi,
+        BackendArg::Local => BackendChoice::Local,
         BackendArg::Mock | BackendArg::Replay => BackendChoice::Mock,
     };
+    if b == BackendArg::Local || (b == BackendArg::Auto && s.backend == BackendChoice::Local) {
+        // A catalog id, not a model name: the server answers to its alias.
+        if let Some(m) = model {
+            s.local_model = m.trim().to_string();
+        }
+        return Ok(s);
+    }
     let model = match (b, model) {
         (_, Some(m)) => Some(m.trim().to_string()),
         (BackendArg::Gateway, None) => Some(GATEWAY_DEFAULT_MODEL.to_string()),
@@ -95,6 +106,8 @@ pub fn settings_for(b: BackendArg, model: Option<&str>) -> anyhow::Result<Settin
 pub fn model_label(b: BackendArg, s: &Settings) -> String {
     if b.recorded() {
         "recorded".into()
+    } else if s.backend == BackendChoice::Local {
+        s.local_model.clone()
     } else {
         s.fast_model.clone()
     }

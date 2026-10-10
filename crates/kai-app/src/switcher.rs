@@ -28,6 +28,7 @@ pub fn backend_key(b: BackendChoice) -> &'static str {
         BackendChoice::Gemini => "gemini",
         BackendChoice::Gateway => "gateway",
         BackendChoice::OpenAi => "openai",
+        BackendChoice::Local => "local",
         BackendChoice::Mock => "mock",
     }
 }

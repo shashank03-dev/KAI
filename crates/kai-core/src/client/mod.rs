@@ -67,6 +67,8 @@ pub enum Backend {
     OpenAi,
     /// OpenAI's own computer-use loop (native, not Kai's harness).
     OpenAiNative,
+    /// A model running on this computer (`llama-server`, OpenAI-compatible).
+    Local,
     Mock,
 }
 
@@ -77,6 +79,7 @@ impl Backend {
             Backend::Gemini => "Gemini API (Gemma 4)",
             Backend::OpenAi => "OpenAI-compatible (Gateway/OpenAI)",
             Backend::OpenAiNative => "OpenAI computer use (native loop)",
+            Backend::Local => "This computer (local model)",
             Backend::Mock => "Mock",
         }
     }

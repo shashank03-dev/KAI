@@ -12,6 +12,7 @@ pub mod element;
 pub mod engine;
 pub mod executor;
 pub mod failure;
+pub mod models;
 pub mod orchestrator;
 pub mod plan;
 pub mod plan_cache;

@@ -10,6 +10,7 @@ pub mod frame;
 pub mod input;
 pub mod kill;
 pub mod launch;
+pub mod local;
 pub mod marks;
 pub mod perceive;
 pub mod permissions;

@@ -6,6 +6,7 @@ mod backend;
 mod bench;
 mod console;
 mod data;
+mod models;
 
 use backend::{BackendArg, BackendOpts};
 use clap::{Parser, Subcommand};
@@ -69,6 +70,11 @@ enum Cmd {
     },
     /// Check screen, accessibility and input permissions, and which backends have keys.
     Doctor,
+    /// Open models on this computer: list, install, start, stop, remove.
+    Models {
+        #[command(subcommand)]
+        cmd: models::ModelsCmd,
+    },
     /// Store an API key in the OS keychain: `kai key gateway` (reads stdin).
     Key {
         #[arg(value_parser = ["gemini", "vllm", "gateway", "openai"])]
@@ -153,12 +159,17 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
             println!("\nexecutor (local decision model, `--executor`):");
             println!("  {}", backend::executor_report(&Settings::load()).await);
+            println!("\nlocal models (`kai models`):");
+            for line in models::doctor_report().await {
+                println!("  {line}");
+            }
             Ok(if kai_os::permissions::all_granted(&checks) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
             })
         }
+        Cmd::Models { cmd } => models::run(cmd).await,
         Cmd::Smoke { backend, n } => smoke(&backend, n).await,
         Cmd::Run {
             task,
@@ -237,8 +248,23 @@ fn live_settings(
     Ok((b, s, keys))
 }
 
+/// `--backend local`: the model's server, started for this run if needed.
+async fn local_server(
+    b: BackendArg,
+    s: &mut Settings,
+) -> anyhow::Result<Option<kai_os::local::LocalServer>> {
+    if b == BackendArg::Local
+        || (b == BackendArg::Auto && s.backend == kai_core::settings::BackendChoice::Local)
+    {
+        models::ensure_local(s).await
+    } else {
+        Ok(None)
+    }
+}
+
 async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
-    let (_, s, keys) = live_settings(o)?;
+    let (b, mut s, keys) = live_settings(o)?;
+    let _local = local_server(b, &mut s).await?;
     let (client, _) = s.clients(&keys)?;
     let screen = kai_os::DesktopPerceptor::new();
     let obs = kai_core::Perceptor::observe(&screen).await?;
@@ -271,7 +297,8 @@ async fn run_task(
     yes: bool,
     record: Option<&Path>,
 ) -> anyhow::Result<ExitCode> {
-    let (b, s, keys) = live_settings(o)?;
+    let (b, mut s, keys) = live_settings(o)?;
+    let _local = local_server(b, &mut s).await?;
     let recorder = match record {
         Some(root) if team => {
             eprintln!("--record is not supported with --team; not recording");

@@ -76,6 +76,8 @@ pub enum BackendChoice {
     Gateway,
     /// OpenAI directly (comparison runs).
     OpenAi,
+    /// A model on this computer (`llama-server`, see `crate::models`).
+    Local,
     Mock,
 }
 
@@ -111,6 +113,10 @@ pub struct Settings {
     /// Let a fast local decision model (jevos) carry out Gemma's plan
     /// (docs/EXECUTOR.md). Off until measured.
     pub use_executor: bool,
+    /// Catalog id of the model on this computer (`BackendChoice::Local`).
+    pub local_model: String,
+    /// Port of the local `llama-server` (127.0.0.1 only).
+    pub local_port: u16,
 }
 
 impl Default for Settings {
@@ -133,6 +139,8 @@ impl Default for Settings {
             record_traces: false,
             executor_endpoint: crate::client::jev::LOCAL_BASE.to_string(),
             use_executor: false,
+            local_model: String::new(),
+            local_port: crate::models::DEFAULT_PORT,
         }
     }
 }
@@ -288,6 +296,7 @@ impl Settings {
                 BackendChoice::Gemini => Box::new(gemini()?),
                 BackendChoice::Gateway => Box::new(gateway()?),
                 BackendChoice::OpenAi => Box::new(openai()?),
+                BackendChoice::Local => Box::new(crate::models::local_client(self)?),
                 BackendChoice::Mock => Box::new(MockClient::always(
                     r#"{"thought":"mock backend","action":"done","risk":"none"}"#,
                 )),
@@ -323,22 +332,23 @@ impl Settings {
             })
         };
         let fast = make(&self.fast_model)?;
-        let careful = if self.careful_model != self.fast_model {
-            make(&self.careful_model).ok().map(|c| {
-                // On the Gateway/OpenAI the careful model may be off-limits for
-                // this account (free tier: 403 for Gemma 4 31B). Back it with
-                // the fast model so a careful step never fails the run.
-                if matches!(self.backend, BackendChoice::Gateway | BackendChoice::OpenAi)
-                    && let Ok(f) = make(&self.fast_model)
-                {
-                    Box::new(FailoverClient::new(c, Some(f))) as Box<dyn ModelClient>
-                } else {
-                    c
-                }
-            })
-        } else {
-            None
-        };
+        let careful =
+            if self.careful_model != self.fast_model && self.backend != BackendChoice::Local {
+                make(&self.careful_model).ok().map(|c| {
+                    // On the Gateway/OpenAI the careful model may be off-limits for
+                    // this account (free tier: 403 for Gemma 4 31B). Back it with
+                    // the fast model so a careful step never fails the run.
+                    if matches!(self.backend, BackendChoice::Gateway | BackendChoice::OpenAi)
+                        && let Ok(f) = make(&self.fast_model)
+                    {
+                        Box::new(FailoverClient::new(c, Some(f))) as Box<dyn ModelClient>
+                    } else {
+                        c
+                    }
+                })
+            } else {
+                None
+            };
         Ok((fast, careful))
     }
 }

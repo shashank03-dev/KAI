@@ -43,6 +43,7 @@ pub fn backend_label(b: kai_core::settings::BackendChoice) -> &'static str {
         Gemini => "Gemini API",
         Gateway => "AI Gateway",
         OpenAi => "OpenAI",
+        Local => "This computer",
         Mock => "Mock",
     }
 }

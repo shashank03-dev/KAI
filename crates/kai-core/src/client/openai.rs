@@ -67,6 +67,8 @@ pub struct OpenAiClient {
     schema_in_prompt: Option<bool>,
     schema_mode: AtomicU8,
     effort: AtomicU8,
+    /// A server on this computer: no key needed, reported as [`Backend::Local`].
+    local: bool,
 }
 
 impl OpenAiClient {
@@ -78,6 +80,18 @@ impl OpenAiClient {
     /// OpenAI directly; model ids like `gpt-5-mini`.
     pub fn openai(api_key: impl Into<String>) -> Self {
         Self::new(OPENAI_BASE, api_key).with_model("gpt-5-mini")
+    }
+
+    /// A local OpenAI-compatible server (`llama-server`), e.g.
+    /// `http://127.0.0.1:8098/v1`. No key; a long timeout, since a CPU can
+    /// take a minute to read a screenshot.
+    pub fn local(base: impl Into<String>, model: impl Into<String>) -> Self {
+        let mut c = Self::new("", "")
+            .with_base(base)
+            .with_model(model)
+            .with_timeout(Duration::from_secs(300));
+        c.local = true;
+        c
     }
 
     fn new(base: &str, api_key: impl Into<String>) -> Self {
@@ -92,6 +106,7 @@ impl OpenAiClient {
             schema_in_prompt: None,
             schema_mode: AtomicU8::new(SCHEMA_STRICT),
             effort: AtomicU8::new(EFFORT_MINIMAL),
+            local: false,
         }
     }
 
@@ -212,10 +227,11 @@ impl OpenAiClient {
     }
 
     async fn send(&self, body: &serde_json::Value) -> Result<reqwest::Response, ClientError> {
-        self.http
-            .post(format!("{}/chat/completions", self.base))
-            .bearer_auth(&self.api_key)
-            .json(body)
+        let mut req = self.http.post(format!("{}/chat/completions", self.base));
+        if !self.api_key.is_empty() {
+            req = req.bearer_auth(&self.api_key);
+        }
+        req.json(body)
             .timeout(self.timeout)
             .send()
             .await
@@ -283,11 +299,15 @@ fn mentions_reasoning(body: &str) -> bool {
 #[async_trait]
 impl ModelClient for OpenAiClient {
     fn backend(&self) -> Backend {
-        Backend::OpenAi
+        if self.local {
+            Backend::Local
+        } else {
+            Backend::OpenAi
+        }
     }
 
     async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
-        if self.api_key.is_empty() {
+        if self.api_key.is_empty() && !self.local {
             return Err(ClientError::MissingKey(
                 "AI_GATEWAY_API_KEY or OPENAI_API_KEY",
             ));
@@ -346,7 +366,7 @@ impl ModelClient for OpenAiClient {
                 completion_tokens: out.completion_tokens,
                 first_token: out.first_token,
                 total: started.elapsed(),
-                backend: Backend::OpenAi,
+                backend: self.backend(),
                 cost_usd: out.cost_usd,
             });
         }
