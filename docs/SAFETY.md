@@ -39,7 +39,8 @@ before the risky step: sending, buying, deleting, submitting, changing
 system settings (on the default approval level), and **always** for these,
 whatever the level, autopilot included:
 
-- typing into a password or secure field;
+- typing into a password or secure field, including typing with no
+  target while a password field has keyboard focus (see below);
 - payment steps;
 - **typing sensitive data**: a card number (Luhn-checked), an IBAN (mod-97
   checked), a national ID number (`123-45-6789`), an API key or token
@@ -61,6 +62,25 @@ field that shows the typed value again on a later screen is blanked to
 that needed approval never becomes a procedure, and lessons are learned from
 the redacted trace.
 
+## Typing where focus is
+
+A model reply must name the field it types into (the schema rejects a
+`type` with no target). Three paths type into whatever has focus instead: a
+skill's fixed `type` step, a cached plan step, and the OpenAI-native loop.
+Each reads the accessibility tree first, where the OS reports focus (AT-SPI
+`Focused`, UI Automation `HasKeyboardFocus`), and:
+
+- a focused password or secure field means the step is not run blind: a
+  skill or cached step hands over to the model (whose `type` must then name
+  the field and is approved like any password step), the native loop stops
+  and asks you;
+- no focused element reported but a password field on screen counts as the
+  password field (Kai cannot rule it out);
+- a CAPTCHA, code request or suspicious text on that screen also hands over.
+
+A replayed procedure step (`docs/PROCEDURES.md`) reads the screen before
+every step, untargeted ones too, so the same checks run there.
+
 ## Tests
 
 | Guarantee | Test |
@@ -68,6 +88,9 @@ the redacted trace.
 | An injection on screen pauses before any action; headless runs stop | `safety_e2e::an_injection_on_screen_pauses_before_anything_runs` |
 | The user decides; continuing tells the model screen text is data; Stop stops | `safety_e2e::the_user_decides_and_the_model_is_told_screen_text_is_data` |
 | A card number needs approval even on autopilot; trace and later turns never hold it; the explanation names action, risk and use | `safety_e2e::a_card_number_is_confirmed_even_on_autopilot_and_never_saved` |
+| A skill step never types blind into a focused password field (and still types into an ordinary one) | `safety_focus_e2e::a_skill_step_never_types_blind_into_the_focused_password_field` |
+| A replay reads the screen before an untargeted step; an injection there stops it before anything runs | `safety_focus_e2e::a_replay_reads_the_screen_before_an_untargeted_first_step` |
+| Untargeted typing follows focus; unknown focus with a password field on screen asks | `risk::tests::untargeted_typing_*` |
 | What counts as sensitive, and what does not (emails, dates, URLs, order numbers) | `untrusted::tests` |
 | Ordinary screens ("Password", "Verify your email address", "System settings") are not flagged | `untrusted::tests::ordinary_screens_are_not_flagged` |
 
@@ -78,7 +101,10 @@ the redacted trace.
   instruction to send, buy, delete or type a secret still has to pass your
   approval.
 - A screen with no accessibility tree (a grid) has no text to scan, so only
-  the prompt rule applies there.
+  the prompt rule applies there. It has no focus either: an untargeted
+  skill `type` on a grid screen is not checked for a password field.
+- Focus is read just before the step; an app that moves focus between that
+  read and the keystrokes is not caught.
 - Phrases match whole words ("to any airline" is not "to any AI"), but a
   legitimate page can still use one ("do not close this window" during a
   payment). Kai then asks once; continuing is one click.

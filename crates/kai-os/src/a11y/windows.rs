@@ -38,6 +38,7 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
         UIProperty::IsEnabled,
         UIProperty::IsOffscreen,
         UIProperty::IsPassword,
+        UIProperty::HasKeyboardFocus,
     ] {
         cache.add_property(p)?;
     }
@@ -96,6 +97,7 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
                 enabled: el.is_cached_enabled().unwrap_or(true),
                 visible: !el.is_cached_offscreen().unwrap_or(false),
                 secure,
+                focused: el.has_cached_keyboard_focus().unwrap_or(false),
                 value: None,
                 handle: Some(UiaRef(el.clone())),
             });

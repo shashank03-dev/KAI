@@ -16,6 +16,7 @@
 use crate::client::{Backend, ClientError, http_client, send_error};
 use crate::element::{Element, Grounding, Rect, Role};
 use crate::ports::{Actuator, EngineEvent, EventSink, Interrupt, Observation, Perceptor};
+use crate::risk;
 use crate::schema::Decision;
 use crate::trace::{Outcome, StepRecord, Timings, Trace};
 use base64::Engine as _;
@@ -146,7 +147,14 @@ impl CuaRunner<'_> {
                 .screen
                 .unwrap_or(Rect::new(0.0, 0.0, w as f32, h as f32));
             let mapped = if checks.is_empty() {
-                map_action(&call["action"], (w, h), screen)
+                match map_action(&call["action"], (w, h), screen) {
+                    // Native typing lands wherever focus is; a focused
+                    // password field (by Kai's own tree read) is the user's.
+                    Mapped::Act(d, _) if risk::is_payment_or_password(&d, &obs.grounding) => {
+                        Mapped::Ask("Typing into a password or secure field needs you.".into())
+                    }
+                    m => m,
+                }
             } else {
                 let why: Vec<&str> = checks
                     .iter()
@@ -329,6 +337,7 @@ pub fn map_action(a: &serde_json::Value, img: (u32, u32), screen: Rect) -> Mappe
             bounds: Rect::new(gx - 0.5, gy - 0.5, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }])
     };

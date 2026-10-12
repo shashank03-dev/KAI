@@ -114,6 +114,7 @@ fn el(mark: u32, role: Role, name: &str) -> Element {
         bounds: Rect::new(10.0 * mark as f32, 0.0, 10.0, 10.0),
         enabled: true,
         secure: false,
+        focused: false,
         value: None,
     }
 }

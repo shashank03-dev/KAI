@@ -108,11 +108,9 @@ pub fn classify(decision: &Decision, grounding: &Grounding) -> Risk {
         return Risk::High;
     }
 
-    // Typing into a secure field by any route is high.
-    if decision.action == Action::Type
-        && let Some(target) = decision.target
-        && targets_secure(grounding, target)
-    {
+    // Typing into a secure field by any route is high, including an
+    // untargeted `type` that lands in a focused password field.
+    if types_into_secure(decision, grounding) {
         return Risk::High;
     }
 
@@ -144,6 +142,9 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
     if let Some(t) = decision.target
         && targets_secure(grounding, t)
     {
+        return true;
+    }
+    if types_into_secure(decision, grounding) {
         return true;
     }
     // Typing sensitive data (a card number, IBAN, ID number, key) sends it:
@@ -194,9 +195,7 @@ pub fn explain(d: &Decision, g: &Grounding) -> Option<String> {
         .unwrap_or_else(|| "the field that has focus".into());
     let what = match sensitive_typed(d) {
         Some(kind) => format!("your {kind}"),
-        None if d.action == Action::Type && d.target.is_some_and(|t| targets_secure(g, t)) => {
-            "text into a password or secure field".into()
-        }
+        None if types_into_secure(d, g) => "text into a password or secure field".into(),
         None => return None,
     };
     Some(format!(
@@ -224,6 +223,28 @@ pub fn mark_is_secure_in_text(elements: &str, mark: u32) -> bool {
         l.starts_with(&prefix)
             && (l[prefix.len()..].starts_with("password ") || l.trim_end().ends_with("(secure)"))
     })
+}
+
+/// Would this `type` land in a password or secure field? With a target,
+/// that field decides. Without one, the text goes wherever focus is: the
+/// focused element decides, and when the tree names no focused element but
+/// shows a secure field, Kai cannot rule it out and treats it as secure. A
+/// grid has no tree, so there is nothing to read.
+fn types_into_secure(d: &Decision, g: &Grounding) -> bool {
+    if d.action != Action::Type {
+        return false;
+    }
+    if let Some(t) = d.target {
+        return targets_secure(g, t);
+    }
+    let Grounding::Marks(els) = g else {
+        return false;
+    };
+    let secure = |e: &&crate::element::Element| e.secure || e.role == Role::PasswordField;
+    match els.iter().find(|e| e.focused) {
+        Some(f) => secure(&f),
+        None => els.iter().any(|e| secure(&e)),
+    }
 }
 
 fn targets_secure(grounding: &Grounding, mark: u32) -> bool {
@@ -260,6 +281,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         };
         let g = grounding_with(field);
@@ -295,6 +317,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: true,
+            focused: false,
             value: None,
         }
     }
@@ -325,6 +348,59 @@ mod tests {
         assert_eq!(classify(&d, &g), Risk::High);
     }
 
+    fn field(mark: u32, secure: bool, focused: bool) -> Element {
+        Element {
+            mark,
+            role: if secure {
+                Role::PasswordField
+            } else {
+                Role::TextField
+            },
+            name: if secure { "Password" } else { "Username" }.into(),
+            bounds: Rect::new(0.0, mark as f32 * 10.0, 5.0, 5.0),
+            enabled: true,
+            secure,
+            focused,
+            value: None,
+        }
+    }
+
+    #[test]
+    fn untargeted_typing_into_a_focused_password_field_always_asks() {
+        let d = decision(Action::Type, None, Risk::None);
+        let g = Grounding::Marks(vec![field(1, false, false), field(2, true, true)]);
+        assert_eq!(classify(&d, &g), Risk::High);
+        let pw = is_payment_or_password(&d, &g);
+        assert!(pw);
+        assert!(needs_approval(ApprovalLevel::Autopilot, Risk::None, pw));
+        assert!(
+            explain(&d, &g)
+                .unwrap()
+                .contains("password or secure field")
+        );
+    }
+
+    #[test]
+    fn untargeted_typing_follows_focus_and_fails_closed_when_focus_is_unknown() {
+        let d = decision(Action::Type, None, Risk::None);
+        // Focus on the username field: an ordinary step.
+        let g = Grounding::Marks(vec![field(1, false, true), field(2, true, false)]);
+        assert!(!is_payment_or_password(&d, &g));
+        assert_eq!(classify(&d, &g), Risk::None);
+        // No focused element, but a password field on screen: ask.
+        let g = Grounding::Marks(vec![field(1, false, false), field(2, true, false)]);
+        assert!(is_payment_or_password(&d, &g));
+        // No secure field anywhere: nothing to protect.
+        let g = Grounding::Marks(vec![field(1, false, false)]);
+        assert!(!is_payment_or_password(&d, &g));
+        // Clicking is not typing.
+        let g = Grounding::Marks(vec![field(2, true, true)]);
+        assert!(!is_payment_or_password(
+            &decision(Action::Key, None, Risk::None),
+            &g
+        ));
+    }
+
     #[test]
     fn effect_keyword_escalates() {
         let g = Grounding::Marks(vec![Element {
@@ -334,6 +410,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }]);
         let d = decision(Action::Click, Some(1), Risk::None);
@@ -349,6 +426,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }]);
         let d = decision(Action::Click, Some(1), Risk::Low);

@@ -113,15 +113,38 @@ impl Engine<'_> {
             if self.interrupt.stopped() {
                 return Some(Outcome::Stopped);
             }
+            // Untargeted typing lands wherever focus is: read the screen
+            // first, so a focused password field, a CAPTCHA or suspicious
+            // text hands over to the model instead of being typed into.
+            let mut g = none.clone();
+            if d.action == Action::Type {
+                match self.perceptor.observe_tree_only().await {
+                    Ok(mut o) => {
+                        r.redact(&mut o.grounding);
+                        g = o.grounding;
+                    }
+                    Err(e) => {
+                        log::warn!("{label} step: reading the screen failed: {e}; handing over");
+                        break;
+                    }
+                }
+                if risk::is_payment_or_password(d, &g)
+                    || crate::human::guard(d, &g).is_some()
+                    || self.unhandled_check(r, &g).is_some()
+                {
+                    log::info!("{label} step types into a secure field or a check; handing over");
+                    break;
+                }
+            }
             if label == CACHED {
                 let level = self.config.approval;
-                let pw = risk::is_payment_or_password(d, &none);
-                if risk::needs_approval(level, risk::classify(d, &none), pw) {
+                let pw = risk::is_payment_or_password(d, &g);
+                if risk::needs_approval(level, risk::classify(d, &g), pw) {
                     break;
                 }
             }
             let t = Instant::now();
-            let (output, path) = match self.act(d, &none).await {
+            let (output, path) = match self.act(d, &g).await {
                 Ok(x) => x,
                 Err(e) => {
                     log::warn!("{label} step {d:?} failed: {e}; handing over to the model");

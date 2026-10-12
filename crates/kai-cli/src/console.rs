@@ -222,6 +222,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }]);
         let code = kai_core::human::detect(&code_screen).unwrap();

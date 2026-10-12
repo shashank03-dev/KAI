@@ -235,6 +235,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: value.map(Into::into),
         }
     }

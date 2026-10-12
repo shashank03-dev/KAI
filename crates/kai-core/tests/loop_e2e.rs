@@ -31,6 +31,7 @@ impl Perceptor for FakeScreen {
                     bounds: Rect::new(10.0, 10.0, 80.0, 30.0),
                     enabled: true,
                     secure: false,
+                    focused: false,
                     value: None,
                 },
                 Element {
@@ -40,6 +41,7 @@ impl Perceptor for FakeScreen {
                     bounds: Rect::new(10.0, 60.0, 200.0, 30.0),
                     enabled: true,
                     secure: true,
+                    focused: false,
                     value: None,
                 },
             ]),

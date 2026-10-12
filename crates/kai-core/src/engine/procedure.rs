@@ -130,22 +130,24 @@ impl Engine<'_> {
     }
 
     /// The step's decision with its target found again, and the grounding
-    /// it was found on. Untargeted steps need no tree read.
+    /// it was found on. Every step reads the screen first, untargeted ones
+    /// too: a CAPTCHA, suspicious text or a focused password field there
+    /// must stop the replay just as it would a model step.
     async fn resolve(
         &self,
         r: &Run<'_>,
         st: &ProcStep,
     ) -> Result<(crate::schema::Decision, Grounding), String> {
         let mut d = st.decision.clone();
-        let Some(sig) = &st.target else {
-            return Ok((d, Grounding::Marks(Vec::new())));
-        };
         let mut obs = self
             .perceptor
             .observe_tree_only()
             .await
             .map_err(|e| format!("reading the screen failed: {e}"))?;
         r.redact(&mut obs.grounding);
+        let Some(sig) = &st.target else {
+            return Ok((d, obs.grounding));
+        };
         let Grounding::Marks(els) = &obs.grounding else {
             return Err("no accessibility tree on this screen".into());
         };

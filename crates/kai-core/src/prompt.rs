@@ -342,6 +342,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }]);
         let t = user_turn("click save", &g, &[], None, false);
@@ -435,6 +436,7 @@ mod tests {
                     bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
                     enabled: i != 7,
                     secure: false,
+                    focused: false,
                     value: None,
                 })
                 .collect(),

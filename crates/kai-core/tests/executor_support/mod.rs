@@ -50,6 +50,7 @@ impl Form {
                     bounds: Rect::new(10.0, 40.0 * i as f32, 200.0, 30.0),
                     enabled: true,
                     secure: *role == Role::PasswordField,
+                    focused: false,
                     value: values.get(&mark).cloned(),
                 }
             })

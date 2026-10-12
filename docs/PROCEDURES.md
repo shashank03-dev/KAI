@@ -61,9 +61,9 @@ secure element).
    step goes through the same approval check and human-check guard as a model
    step. Missing, ambiguous, approval needed, a CAPTCHA, code or suspicious
    text on screen, a failed action, or a message from you: the replay stops
-   there. Untargeted steps (open an app or URL, keys, a shell command) need
-   no tree read, so the screen check only happens on targeted steps; the
-   approval check runs on every step.
+   there. Untargeted steps (open an app or URL, keys, typing into the focused
+   field, a shell command) read the tree too, so the screen check and the
+   approval check (a focused password field included) run before every step.
 4. **Hand over.** The model gets a full frame and a note: either "all N
    steps ran, check the screen and reply done", or "k of N ran, it stopped
    because …, the remaining steps were …", as a guide, not as orders. `done`

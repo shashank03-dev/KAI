@@ -135,6 +135,7 @@ mod tests {
             bounds: Rect::new(x, y, 40.0, 20.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }
     }

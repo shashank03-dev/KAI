@@ -10,6 +10,7 @@ fn el(mark: u32, role: Role, name: &str) -> Element {
         bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
         enabled: true,
         secure: false,
+        focused: false,
         value: None,
     }
 }
