@@ -1,15 +1,22 @@
-//! Idle: the greeting, the composer, and starters drawn from installed skills.
+//! Idle: Kai's mark, a greeting, the composer as the one raised glass layer,
+//! the keys that matter, and starters drawn from installed skills as cards.
 
+use crate::anim;
 use crate::app::{Conn, KaiApp, Page};
 use crate::i18n::t;
+use crate::ui::{self, Glass, R_LG, R_SM};
 use ely_gpui_component::{
-    chat::{PromptInput, SuggestionChips, WelcomeScreen},
+    chat::PromptInput,
     feedback::Banner,
     forms::Switch,
-    primitives::{IconName, Severity},
-    theme::{ActiveTheme, TextSize},
+    layout::ScrollArea,
+    primitives::{Icon, IconName, Severity},
+    theme::{ActiveTheme, IconSize},
 };
-use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{
+    AnyElement, App, BoxShadow, Context, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, StatefulInteractiveElement, Styled, Window, div, px,
+};
 
 /// One starter per skill, worded as a task.
 const STARTERS: &[(&str, &str, IconName)] = &[
@@ -45,19 +52,101 @@ const STARTERS: &[(&str, &str, IconName)] = &[
     ),
 ];
 
+/// "just now", "12m ago", "3h ago", "2d ago".
+fn ago(at: jiff::Timestamp) -> String {
+    let s = jiff::Timestamp::now().as_second() - at.as_second();
+    match s {
+        ..=59 => "just now".into(),
+        60..=3599 => format!("{}m ago", s / 60),
+        3600..=86_399 => format!("{}h ago", s / 3600),
+        _ => format!("{}d ago", s / 86_400),
+    }
+}
+
+fn greeting(hour: u8) -> &'static str {
+    match hour {
+        5..=11 => "Good morning",
+        12..=17 => "Good afternoon",
+        18..=22 => "Good evening",
+        _ => "Working late",
+    }
+}
+
+/// "ctrl-alt-escape" as key caps.
+fn keys(combo: &str, cx: &App) -> Vec<AnyElement> {
+    combo
+        .split('-')
+        .map(|k| {
+            let mut cap = k.to_string();
+            if let Some(first) = cap.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            ui::kbd(cap, cx).into_any_element()
+        })
+        .collect()
+}
+
+/// One hint: key caps and what they do.
+fn hint(caps: Vec<AnyElement>, what: &str, g: &Glass) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .children(caps)
+        .child(
+            div()
+                .pl_1()
+                .text_size(px(12.))
+                .text_color(g.faint)
+                .child(what.to_string()),
+        )
+        .into_any_element()
+}
+
+/// The connection as one line over the greeting: a dot and the model.
+fn status_line(app: &KaiApp, g: &Glass, cx: &App) -> AnyElement {
+    let colors = &cx.theme().colors;
+    let (color, live, word) = match &app.conn {
+        Conn::Unknown => (g.faint, false, "connecting"),
+        Conn::Online(_) => (colors.success, true, "ready"),
+        Conn::Fallback(_) => (colors.warning, true, "on fallback"),
+        Conn::Offline(_) => (colors.danger, false, "offline"),
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .py(px(5.))
+        .rounded_full()
+        .bg(g.card)
+        .border_1()
+        .border_color(g.line)
+        // A steady glow, not the breathing dot: the connection is "ready"
+        // whenever Kai sits idle, and a looping animation there would keep
+        // the window redrawing forever (anim.rs: nothing loops while idle).
+        // The busy line below breathes while a run is going.
+        .child(ui::dot(color, live, g))
+        .child(ui::eyebrow(
+            format!("{word} · {}", crate::runs::model_label(&app.settings)),
+            cx,
+        ))
+        .into_any_element()
+}
+
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
     let hour = jiff::Zoned::now().hour() as u8;
-    let theme = cx.theme();
+    let g = Glass::of(cx);
 
-    let starters: Vec<(String, IconName)> = STARTERS
+    let starters: Vec<(&str, &str, IconName)> = STARTERS
         .iter()
         .filter(|(skill, ..)| app.skills.iter().any(|s| s.front.name == *skill))
-        .map(|(_, text, icon)| (text.to_string(), *icon))
+        .copied()
         .collect();
-    let chosen = starters.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>();
 
-    let (send, pick, team_pick) = (cx.entity(), cx.entity(), cx.entity());
+    let send = cx.entity();
     let model = crate::switcher::switcher("composer-model", app, cx);
+    let team_pick = cx.entity();
     let team = Switch::new("team", app.team)
         .label(t(cx, "home.team", &[]))
         .on_change(move |on, _, cx| {
@@ -79,52 +168,254 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         }
         _ => None,
     };
-    let busy = app.active.map(|_| {
-        "Kai is working on another task. New tasks wait in the queue and start when the screen is free."
-    });
     let no_hands = (!cx.global::<crate::AgentHandle>().0.can_act())
         .then(|| Banner::new("no-hands", Severity::Danger, "Kai can't control the mouse and keyboard on this desktop. On Linux, log in with an Xorg session."));
+    let busy = app.active.map(|_| {
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(anim::live_dot(g.ember, "busy-dot", &g))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(g.dim)
+                    .child("Kai is busy with another task. New tasks wait in the queue."),
+            )
+    });
+
+    // The composer is the one raised layer on the page, with a faint ember
+    // halo so the eye lands there first.
+    let composer = div()
+        .w_full()
+        .rounded(px(R_LG + 2.))
+        .shadow(vec![
+            g.lift(),
+            BoxShadow::new(px(0.), px(0.), g.ember_soft).blur_radius(px(36.)),
+        ])
+        .child(
+            PromptInput::new("composer", &app.draft, move |window, cx| {
+                send.update(cx, |a, cx| a.start_run(None, window, cx))
+            })
+            .tool(model)
+            .tool(team),
+        );
+
+    let mut hints = vec![
+        hint(vec![ui::kbd("↵", cx).into_any_element()], "run", &g),
+        hint(keys("ctrl-k", cx), "commands", &g),
+    ];
+    if let Some(stop) = crate::StopHotkey::label(cx) {
+        hints.push(hint(keys(&stop, cx), "stops Kai anywhere", &g));
+    }
+
+    let cards = starters
+        .into_iter()
+        .enumerate()
+        .map(|(ix, (skill, task, icon))| {
+            let pick = cx.entity();
+            let (hover, strong) = (g.card_hover, g.line_strong);
+            let card = div()
+                .id(("starter", ix))
+                .p(px(14.))
+                .flex()
+                .items_center()
+                .gap_3()
+                .cursor_pointer()
+                .bg(g.card)
+                .border_1()
+                .border_color(g.line)
+                .rounded(px(ui::R_MD))
+                .shadow(vec![g.sheen_shadow()])
+                .hover(move |s| s.bg(hover).border_color(strong))
+                .on_click(move |_, window, cx| {
+                    pick.update(cx, |a, cx| a.start_run(Some(task.to_string()), window, cx))
+                })
+                .child(
+                    div()
+                        .size(px(34.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(R_SM))
+                        .bg(g.raised)
+                        .border_1()
+                        .border_color(g.line)
+                        .child(Icon::new(icon).size(IconSize::Sm).color(g.dim)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.))
+                        .child(
+                            div()
+                                .text_size(px(13.5))
+                                .text_color(g.text)
+                                .line_clamp(2)
+                                .child(task),
+                        )
+                        .child(ui::mono(skill, g.faint, cx).text_size(px(11.))),
+                )
+                .child(div().text_color(g.faint).child("→"));
+            anim::enter(card, ("starter-in", ix), 6 + ix)
+        });
+
+    // Raycast-style recents: the last few distinct tasks, one click back into
+    // the composer to edit and run again.
+    let mut seen = std::collections::HashSet::new();
+    let recents: Vec<AnyElement> = app
+        .pages
+        .history
+        .iter()
+        .filter(|e| seen.insert(e.task.clone()))
+        .take(3)
+        .enumerate()
+        .map(|(ix, e)| {
+            let filler = cx.entity();
+            let task = e.task.clone();
+            let hover = g.card_hover;
+            div()
+                .id(("recent", ix))
+                .px(px(12.))
+                .py(px(9.))
+                .flex()
+                .items_center()
+                .gap_3()
+                .cursor_pointer()
+                .rounded(px(R_SM + 2.))
+                .hover(move |s| s.bg(hover))
+                .on_click(move |_, _, cx| {
+                    let task = task.clone();
+                    filler.update(cx, |a, cx| {
+                        a.draft.update(cx, |d, cx| d.set_text(task, cx));
+                        cx.notify();
+                    })
+                })
+                .child(
+                    Icon::new(IconName::History)
+                        .size(IconSize::Sm)
+                        .color(g.faint),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(13.))
+                        .text_color(g.dim)
+                        .truncate()
+                        .child(e.task.clone()),
+                )
+                .child(ui::mono(ago(e.at), g.faint, cx).text_size(px(11.)))
+                .into_any_element()
+        })
+        .collect();
+    let recent = (!recents.is_empty()).then(|| {
+        anim::enter(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(ui::eyebrow("Recent · click to edit and run", cx))
+                .child(ui::card(&g).p(px(4.)).flex().flex_col().children(recents)),
+            "home-recent",
+            12,
+        )
+    });
+
+    let column = div()
+        .w_full()
+        .max_w(px(760.))
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(px(22.))
+        .child(anim::enter(div().child(ui::orb(60., &g)), "home-orb", 0))
+        .child(anim::enter(
+            div().child(status_line(app, &g, cx)),
+            "home-status",
+            1,
+        ))
+        .child(anim::enter(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_size(px(40.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(g.text)
+                        .child(format!("{}.", greeting(hour))),
+                )
+                .child(
+                    div()
+                        .text_size(px(15.))
+                        .text_color(g.dim)
+                        .child(t(cx, "home.ask", &[])),
+                ),
+            "home-greeting",
+            2,
+        ))
+        .child(div().h(px(4.)))
+        .child(anim::enter(composer, "home-composer", 3))
+        .child(anim::enter(
+            div()
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(div().flex().flex_wrap().gap_4().children(hints))
+                .children(busy),
+            "home-hints",
+            4,
+        ))
+        .child(div().h(px(18.)))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(ui::eyebrow("Start from a skill", cx))
+                .child(
+                    div()
+                        .w_full()
+                        .grid()
+                        .grid_cols(2)
+                        .gap(px(10.))
+                        .children(cards),
+                ),
+        )
+        .children(recent);
 
     div()
         .size_full()
+        .relative()
         .flex()
         .flex_col()
+        .child(ui::aurora(360., &g))
         .children(offline)
         .children(no_hands)
         .child(
             div().flex_1().min_h_0().child(
-                WelcomeScreen::new("welcome", hour)
-                    .child(
-                        div()
-                            .w_full()
-                            .text_center()
-                            .text_size(theme.text_size(TextSize::Sm))
-                            .text_color(theme.colors.fg_muted)
-                            .child(t(cx, "home.ask", &[])),
-                    )
-                    .children(busy.map(|b| {
-                        div()
-                            .w_full()
-                            .text_center()
-                            .text_size(theme.text_size(TextSize::Xs))
-                            .text_color(theme.colors.fg_muted)
-                            .child(b)
-                    }))
-                    .child(
-                        PromptInput::new("composer", &app.draft, move |window, cx| {
-                            send.update(cx, |a, cx| a.start_run(None, window, cx))
-                        })
-                        .tool(model)
-                        .tool(team),
-                    )
-                    .child(SuggestionChips::new(
-                        "starters",
-                        starters,
-                        move |ix, window, cx| {
-                            let task = chosen[ix].clone();
-                            pick.update(cx, |a, cx| a.start_run(Some(task), window, cx))
-                        },
-                    )),
+                ScrollArea::new("home").vertical().child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .px(px(32.))
+                        .pt(px(64.))
+                        .pb(px(56.))
+                        .child(column),
+                ),
             ),
         )
 }

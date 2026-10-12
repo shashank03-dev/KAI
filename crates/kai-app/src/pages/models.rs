@@ -6,11 +6,13 @@ use crate::app::{KaiApp, Page as AppPage};
 use crate::local::LocalState;
 use crate::local_api::{Fit, HardwareSummary};
 use crate::pages::models_card;
+use crate::ui;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::Callout,
-    layout::{Card, CardHeader, Page, ScrollArea},
+    layout::{Card, CardHeader, ScrollArea},
     motion::Spinner,
+    overlays::ConfirmDialog,
     primitives::{Icon, IconName, Severity},
     theme::{ActiveTheme, ControlSize, TextSize},
 };
@@ -39,6 +41,7 @@ fn fact(icon: IconName, label: &str, value: String, cx: &Context<KaiApp>) -> imp
             div()
                 .flex()
                 .flex_col()
+                .flex_1()
                 .min_w_0()
                 .child(
                     div()
@@ -157,9 +160,13 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     let in_use =
         (app.settings.backend == BackendChoice::Local).then(|| app.settings.local_model.clone());
     let none_fit = l.hardware.is_some() && l.ranked.iter().all(|r| r.fit == Fit::TooBig);
-    let cards = l.ranked.iter().map(|r| {
+    let cards = l.ranked.iter().enumerate().map(|(ix, r)| {
         let used = in_use.as_deref() == Some(r.entry.id.as_str());
-        models_card::card(r, l, used, cx)
+        crate::anim::enter(
+            div().child(models_card::card(r, l, used, cx)),
+            ("model-in", ix),
+            ix,
+        )
     });
     let theme = cx.theme();
     let note = div()
@@ -169,9 +176,43 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             "Kai downloads only when you press a button. The runtime is llama.cpp; models and runtime are kept in {}. The server listens on 127.0.0.1 only.",
             l.manager.root.display()
         ));
-    ScrollArea::new("models").vertical().child(
-        Page::new("Models")
-            .subtitle("Run an open model on this computer: free, private, no key. Your screen never leaves this machine.")
+    let confirm = app.pages.confirm_remove_model.clone().map(|id| {
+        let (closer, doer) = (cx.entity(), cx.entity());
+        let size = l
+            .ranked
+            .iter()
+            .find(|r| r.entry.id == id)
+            .map(|r| format!(" and frees about {:.1} GB", r.entry.download_gb))
+            .unwrap_or_default();
+        ConfirmDialog::new(
+            "confirm-remove-model",
+            format!("Remove {}?", l.label(&id)),
+            format!("This deletes the downloaded model from this computer{size}. You can download it again later."),
+            move |_, cx| {
+                closer.update(cx, |a, cx| {
+                    a.pages.confirm_remove_model = None;
+                    cx.notify();
+                })
+            },
+        )
+        .confirm("Remove")
+        .destructive()
+        .on_confirm(move |_, cx| {
+            doer.update(cx, |a, cx| {
+                a.pages.confirm_remove_model = None;
+                a.local_remove(&id, cx);
+            })
+        })
+    });
+    let page = ScrollArea::new("models").vertical().child(ui::body(
+        1040.,
+        ui::page(
+            "On this computer",
+            "Models",
+            "Run an open model on this computer: free, private, no key. Your screen never leaves this machine.",
+            None,
+            cx,
+        )
             .child(hardware(l, cx))
             .children(ready(l, cx))
             .children(none_fit.then(|| {
@@ -181,7 +222,8 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             }))
             .child(div().flex().flex_col().gap_3().children(cards))
             .child(note),
-    )
+    ));
+    div().size_full().child(page).children(confirm)
 }
 
 #[cfg(test)]

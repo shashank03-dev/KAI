@@ -21,6 +21,13 @@ impl KaiApp {
             Conn::Fallback(s) => (Connectivity::Reconnecting, format!("Gemini fallback · {s}")),
             Conn::Offline(_) => (Connectivity::Offline, "No model reachable".to_string()),
         };
+        // The reason stays one hover away instead of a bare "No model reachable".
+        let tip = match &self.conn {
+            Conn::Offline(reason) => {
+                format!("{}. Click to test again.", reason.trim_end_matches('.'))
+            }
+            _ => "Model connection. Click to test again.".to_string(),
+        };
         let run = self.active_state().unwrap_or_else(|| self.run.clone());
         let latency = run
             .read(cx)
@@ -39,7 +46,7 @@ impl KaiApp {
             .left(
                 StatusBarItem::new("conn-label")
                     .label(label)
-                    .tooltip("Model connection. Click to test again.")
+                    .tooltip(tip)
                     .on_click(move |_, window, cx| {
                         this.update(cx, |app, cx| app.check_connection(window, cx))
                     }),
@@ -77,47 +84,77 @@ impl KaiApp {
             }
             c
         };
+        // Run controls only while a run has the screen, and only the one that applies.
+        let paused = self.active_state().map(|s| s.read(cx).paused);
+        let mut kai = vec![cmd("new", "New task", IconName::Plus, Some("ctrl-n"))];
+        if let Some(paused) = paused {
+            kai.push(cmd(
+                "stop",
+                "Stop Kai",
+                IconName::CircleStop,
+                Some("ctrl-."),
+            ));
+            kai.push(if paused {
+                cmd(
+                    "resume",
+                    "Resume the running task",
+                    IconName::Play,
+                    Some("ctrl-p"),
+                )
+            } else {
+                cmd(
+                    "pause",
+                    "Pause the running task",
+                    IconName::Pause,
+                    Some("ctrl-p"),
+                )
+            });
+        }
+        kai.extend([
+            cmd(
+                "theme",
+                "Toggle light / dark",
+                IconName::Moon,
+                Some("ctrl-shift-l"),
+            ),
+            cmd(
+                "shortcuts",
+                "Keyboard shortcuts",
+                IconName::Keyboard,
+                Some("ctrl-/"),
+            ),
+        ]);
         CommandPalette::new("palette", move |_, cx| {
             closer.update(cx, |app, cx| {
                 app.palette = false;
                 cx.notify();
             })
         })
-        .group(
-            "Kai",
-            [
-                cmd("new", "New task", IconName::Plus, Some("ctrl-n")),
-                cmd("stop", "Stop Kai", IconName::CircleStop, Some("ctrl-.")),
-                cmd("pause", "Pause the running task", IconName::Pause, None),
-                cmd("resume", "Resume the running task", IconName::Play, None),
-                cmd(
-                    "theme",
-                    "Toggle light / dark",
-                    IconName::Moon,
-                    Some("ctrl-shift-l"),
-                ),
-                cmd(
-                    "shortcuts",
-                    "Keyboard shortcuts",
-                    IconName::Keyboard,
-                    Some("ctrl-/"),
-                ),
-            ],
-        )
+        .group("Kai", kai)
         .group(
             "Go to",
             [
-                cmd("go:run", "Run", IconName::Play, None),
+                cmd("go:run", "Run", IconName::Play, Some("ctrl-1")),
                 cmd(
                     "go:models",
                     "Models (run on this computer)",
                     IconName::Cpu,
-                    None,
+                    Some("ctrl-2"),
                 ),
-                cmd("go:skills", "Skills", IconName::Puzzle, None),
-                cmd("go:history", "History", IconName::History, None),
-                cmd("go:bench", "Benchmarks", IconName::ChartColumn, None),
-                cmd("go:settings", "Settings", IconName::Settings, None),
+                cmd("go:skills", "Skills", IconName::Puzzle, Some("ctrl-3")),
+                cmd("go:history", "History", IconName::History, Some("ctrl-4")),
+                cmd(
+                    "go:bench",
+                    "Benchmarks",
+                    IconName::ChartColumn,
+                    Some("ctrl-5"),
+                ),
+                cmd(
+                    "go:settings",
+                    "Settings",
+                    IconName::Settings,
+                    Some("ctrl-,"),
+                ),
             ],
         )
         .group(
@@ -187,7 +224,7 @@ impl KaiApp {
                         app.check_connection(window, cx);
                     }
                     "stop" => app.stop(cx),
-                    "theme" => Self::toggle_theme(cx),
+                    "theme" => app.toggle_theme(cx),
                     "shortcuts" => app.shortcuts = true,
                     v if v.starts_with("go:") => {
                         if let Some(p) = Page::from_key(&v[3..]) {

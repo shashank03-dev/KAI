@@ -236,7 +236,11 @@ impl KaiApp {
             (None, Some(kai_core::Outcome::Success)) => {
                 Toast::new("Done").severity(Severity::Success)
             }
-            (None, Some(o)) => Toast::new(format!("Run ended: {o:?}")).severity(Severity::Warning),
+            (None, Some(o)) => Toast::new(format!(
+                "Run ended: {}",
+                crate::state::outcome_text(o).to_lowercase()
+            ))
+            .severity(Severity::Warning),
             (None, None) => Toast::new("Run ended").severity(Severity::Info),
         };
         self.toast(toast, cx);

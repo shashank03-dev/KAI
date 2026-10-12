@@ -218,7 +218,7 @@ impl Onboarding {
                 (IconName::Eye, "Sees your screen", "Reads buttons and fields by name."),
                 (IconName::MousePointer2, "Clicks and types", "One action per step, while you watch."),
                 (IconName::Shield, "Asks before risky things", "Sending, buying, deleting, passwords."),
-                (IconName::Sparkles, "Runs on open Gemma 4", "Your DigitalOcean server, or the Gemini API."),
+                (IconName::Sparkles, "Runs on open Gemma 4", "On this computer, your own server, or an API."),
             ], |_, _, _| {}))
             .child(Callout::new(Severity::Info).title("Your screen stays yours").child("Kai sends screenshots only to the model endpoint you set. Traces stay on this computer."))
     }
@@ -295,7 +295,7 @@ impl Onboarding {
                         RadioCard::new(
                             "b-vllm",
                             b == BackendChoice::Vllm,
-                            "Our DigitalOcean server",
+                            "Your DigitalOcean server",
                         )
                         .description("Gemma 4 on your own GPU Droplet via vLLM.")
                         .icon(IconName::Server)

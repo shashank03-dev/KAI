@@ -1,18 +1,18 @@
 //! Skills: search, cards, enable/disable, import, details, and Save as skill.
 
 use crate::app::KaiApp;
+use crate::ui::{self, Glass};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     data_display::{Badge, Tone},
-    documents::{MarkdownEditor, MarkdownMode, MarkdownRenderer},
+    documents::MarkdownRenderer,
     feedback::{EmptyState, InlineMessage, Toast},
     forms::{DropZone, SearchInput, Switch},
-    layout::{Page, ScrollArea, Sheet},
-    lists::FileTree,
+    layout::{ScrollArea, Sheet},
     primitives::{IconName, Place, Severity},
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Styled, Window, div, px};
 use kai_core::Skill;
 use kai_core::settings::Settings;
 use std::path::Path;
@@ -26,6 +26,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .map(|s| detail_sheet(&s, cx));
     let draft = app.pages.drafting.then(|| draft_sheet(app, window, cx));
     let theme = cx.theme();
+    let g = Glass::of(cx);
     let q = app.pages.skill_search.read(cx).text().to_ascii_lowercase();
     let shown: Vec<Skill> = app
         .skills
@@ -39,21 +40,21 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .collect();
     let has_own = app.skills.iter().any(|s| !s.builtin);
 
-    let cards = shown.iter().map(|s| {
+    let cards = shown.iter().enumerate().map(|(ix, s)| {
         let name = s.front.name.clone();
         let on = !app.pages.disabled.contains(&name);
         let (toggle, open) = (cx.entity(), cx.entity());
         let (n1, n2) = (name.clone(), name.clone());
-        div()
+        let (hover, strong) = (g.card_hover, g.line_strong);
+        let card = ui::card(&g)
             .id(gpui::SharedString::from(format!("skill-{name}")))
-            .p_4()
+            .p(px(18.))
             .flex()
             .flex_col()
-            .gap_2()
-            .rounded_lg()
-            .border_1()
-            .border_color(theme.colors.border)
-            .bg(theme.colors.surface)
+            .justify_between()
+            .gap(px(10.))
+            .opacity(if on { 1. } else { 0.6 })
+            .hover(move |s| s.bg(hover).border_color(strong))
             .child(
                 div()
                     .flex()
@@ -64,7 +65,10 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_size(theme.text_size(TextSize::Md))
+                            .font_family(theme.mono_family.clone())
+                            .text_size(px(13.))
+                            .text_color(g.text)
+                            .truncate()
                             .child(name.clone()),
                     )
                     .child(
@@ -94,7 +98,10 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                                     } else {
                                         a.pages.disabled.insert(n1.clone());
                                     }
-                                    cx.notify();
+                                    // Kept across restarts.
+                                    a.settings.disabled_skills =
+                                        a.pages.disabled.iter().cloned().collect();
+                                    a.save_settings(cx);
                                 })
                             }),
                     )
@@ -108,7 +115,8 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                                 })
                             }),
                     ),
-            )
+            );
+        crate::anim::enter(card, ("skill-in", ix), ix)
     });
 
     let importer = cx.entity();
@@ -116,13 +124,39 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .hint("Drop a skill folder (with SKILL.md) to add it")
         .on_drop(move |paths, _, cx| importer.update(cx, |a, cx| import_skills(a, paths, cx)));
 
-    Page::new("Skills")
-        .subtitle("Agent Skill Open Standard skills Kai can use. Only names and descriptions go to the model until one is picked.")
-        .child(div().flex().flex_col().gap_4()
+    let n = app.skills.len();
+    let on = n - app
+        .skills
+        .iter()
+        .filter(|s| app.pages.disabled.contains(&s.front.name))
+        .count();
+    let content = ui::page(
+        &format!("Library · {on} of {n} on"),
+        "Skills",
+        "Agent Skill Open Standard skills Kai can use. Only names and descriptions go to the model until one is picked.",
+        None,
+        cx,
+    )
+    .child(
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
             .child(SearchInput::new("skill-search", &app.pages.skill_search))
-            .child(div().grid().grid_cols(2).gap_3().children(cards))
-            .children((!has_own).then(|| EmptyState::new("no-own", IconName::Puzzle, "No skills of your own yet").body("Finish a run and press Save as skill, or drop a skill folder below.")))
-            .child(import))
+            .child(div().grid().grid_cols(2).gap(px(12.)).children(cards))
+            .children((!has_own).then(|| {
+                EmptyState::new("no-own", IconName::Puzzle, "No skills of your own yet")
+                    .body("Finish a run and press Save as skill, or drop a skill folder below.")
+            }))
+            .child(import),
+    );
+    div()
+        .size_full()
+        .child(
+            ScrollArea::new("skills-page")
+                .vertical()
+                .child(ui::body(1040., content)),
+        )
         .children(detail)
         .children(draft)
 }
@@ -146,6 +180,30 @@ fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
         Err(e) => InlineMessage::new(Severity::Danger, e.to_string()),
     };
     let md = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
+    // The frontmatter is already shown above (name, description); left in,
+    // Markdown reads its closing `---` as a heading underline.
+    let md = body_of(&md).to_string();
+    let theme = cx.theme();
+    let file_list = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_size(theme.text_size(TextSize::Sm))
+                .text_color(theme.colors.fg_muted)
+                .child(format!("Files ({})", files.len())),
+        )
+        .children(files.into_iter().map(|f| {
+            div()
+                .text_size(theme.text_size(TextSize::Sm))
+                .font_family(theme.mono_family.clone())
+                .child(f)
+        }));
+    let description = div()
+        .text_size(theme.text_size(TextSize::Sm))
+        .text_color(theme.colors.fg_muted)
+        .child(s.front.description.clone());
     Sheet::new(
         "skill-sheet",
         Place::Right,
@@ -163,6 +221,7 @@ fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
                 .flex()
                 .flex_col()
                 .gap_3()
+                .child(description)
                 .child(valid)
                 .children((!s.steps.is_empty()).then(|| {
                     InlineMessage::new(
@@ -173,11 +232,30 @@ fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
                         ),
                     )
                 }))
-                .child(div().h_40().child(FileTree::new("skill-files", files)))
+                .child(file_list)
                 .child(MarkdownRenderer::new("skill-md", md)),
         ),
     )
     .into_any_element()
+}
+
+/// SKILL.md without its `---` frontmatter block.
+pub fn body_of(md: &str) -> &str {
+    let Some(rest) = md.strip_prefix("---") else {
+        return md;
+    };
+    // The closing fence is a line of its own.
+    match rest.find("\n---") {
+        Some(end) => {
+            let after = &rest[end + 4..];
+            after
+                .find('\n')
+                .map(|nl| &after[nl + 1..])
+                .unwrap_or("")
+                .trim_start_matches(['\r', '\n'])
+        }
+        None => md,
+    }
 }
 
 /// Draft a SKILL.md from the finished run and open the editor.
@@ -275,6 +353,20 @@ fn draft_sheet(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> gp
     };
     let (closer, saver) = (cx.entity(), cx.entity());
     let ok = check.is_ok();
+    // The sheet is narrow: a split editor squeezed both panes into a few
+    // words per line and its preview overflowed onto the Save button (seen
+    // in the CI screenshots). So: the plain source, then a preview of the
+    // body below it, all in one scroll area with Save at the end. The
+    // preview leaves out the frontmatter, which Markdown would render as one
+    // giant heading (its closing `---` reads as an underline).
+    let preview = body_of(&text).to_string();
+    let theme = cx.theme();
+    let label = |s: &'static str| {
+        div()
+            .text_size(theme.text_size(TextSize::Sm))
+            .text_color(theme.colors.fg_muted)
+            .child(s)
+    };
     Sheet::new(
         "draft-sheet",
         Place::Right,
@@ -287,22 +379,23 @@ fn draft_sheet(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> gp
         },
     )
     .child(
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(msg)
-            .child(div().h_96().child(MarkdownEditor::new(
-                "draft-editor",
-                &app.pages.skill_draft,
-                MarkdownMode::Split,
-            )))
-            .child(
-                Button::new("draft-save", "Save skill")
-                    .variant(ButtonVariant::Primary)
-                    .disabled(!ok)
-                    .on_click(move |_, _, cx| saver.update(cx, save_draft)),
-            ),
+        ScrollArea::new("draft-scroll").vertical().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(msg)
+                .child(label("SKILL.md"))
+                .child(div().w_full().child(app.pages.skill_draft.clone()))
+                .child(label("Preview"))
+                .child(MarkdownRenderer::new("draft-preview", preview))
+                .child(
+                    Button::new("draft-save", "Save skill")
+                        .variant(ButtonVariant::Primary)
+                        .disabled(!ok)
+                        .on_click(move |_, _, cx| saver.update(cx, save_draft)),
+                ),
+        ),
     )
     .into_any_element()
 }
@@ -419,6 +512,14 @@ mod tests {
         let s = kai_core::skill::load_from_str(&md, Path::new(&name)).unwrap();
         assert_eq!(s.steps.len(), 1);
         assert_eq!(s.front.name, "open-bmsce-ac-in-and-find");
+    }
+
+    #[test]
+    fn frontmatter_is_left_out_of_the_body() {
+        let md = "---\nname: x\ndescription: y\n---\n# Title\n\nBody\n";
+        assert_eq!(body_of(md), "# Title\n\nBody\n");
+        assert_eq!(body_of("# No frontmatter"), "# No frontmatter");
+        assert_eq!(body_of("---\nunclosed"), "---\nunclosed");
     }
 
     #[test]

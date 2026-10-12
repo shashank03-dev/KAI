@@ -2,18 +2,19 @@
 //! its time went and the frames Kai saw, exportable as a zip for bug reports.
 
 use crate::app::KaiApp;
+use crate::ui;
 use ely_gpui_component::{
     agent::BrowserPreview,
     buttons::{Button, ButtonVariant},
     chat::{Conversation, ConversationList},
     debug::{Span, TimelineProfiler},
-    feedback::{EmptyState, Toast},
+    feedback::Toast,
     forms::SearchInput,
-    layout::{Page, ScrollArea},
+    layout::ScrollArea,
     primitives::{IconName, Severity},
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{Context, IntoElement, ParentElement, Styled, Window, div, px};
 use kai_core::Trace;
 use kai_core::settings::Settings;
 use std::io::Write;
@@ -187,8 +188,11 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         .text_size(theme.text_size(TextSize::Sm))
                         .text_color(theme.colors.fg_muted)
                         .child(format!(
-                            "{:?} · {} steps · step p50 {p50} ms · p95 {p95} ms",
-                            trace.outcome.unwrap_or(kai_core::Outcome::Failed),
+                            "{} · {} steps · step p50 {p50} ms · p95 {p95} ms",
+                            trace
+                                .outcome
+                                .map(crate::state::outcome_text)
+                                .unwrap_or("Ended without a result"),
                             trace.steps.len()
                         )),
                 )
@@ -236,9 +240,17 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     });
 
     let body = if app.pages.history.is_empty() {
-        EmptyState::new("no-history", IconName::History, "No runs yet")
-            .body("Every run is saved here, on this computer only.")
-            .into_any_element()
+        let starter = cx.entity();
+        ui::empty(
+            "No runs yet",
+            "Every run is saved here with its timeline and the frames Kai saw, on this computer only.",
+            Button::new("history-first-task", "Give Kai a task")
+                .variant(ButtonVariant::Primary)
+                .icon(IconName::Play)
+                .on_click(move |_, _, cx| starter.update(cx, |a, cx| a.select(None, cx))),
+            cx,
+        )
+        .into_any_element()
     } else {
         div()
             .flex()
@@ -258,15 +270,38 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     .child(div().flex_1().min_h_0().child(list)),
             )
             .child(
-                ScrollArea::new("trace-detail")
-                    .vertical()
-                    .child(div().flex_1().min_w_0().children(detail)),
+                div().flex_1().min_w_0().h_full().child(
+                    ScrollArea::new("trace-detail")
+                        .vertical()
+                        .child(div().w_full().child(detail.unwrap_or_else(|| {
+                            div()
+                                .pt_8()
+                                .w_full()
+                                .text_center()
+                                .text_color(theme.colors.fg_muted)
+                                .child("Pick a run on the left to see where its time went and the frames Kai saw.")
+                        }))),
+                ),
             )
             .into_any_element()
     };
-    Page::new("History")
-        .subtitle("Past runs, kept only on this computer.")
-        .child(body)
+    let n = app.pages.history.len();
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .gap(px(24.))
+        .px(px(40.))
+        .pt(px(36.))
+        .pb(px(24.))
+        .child(ui::page(
+            &format!("On this computer · {n} runs"),
+            "History",
+            "Past runs, kept only on this computer.",
+            None,
+            cx,
+        ))
+        .child(div().flex_1().min_h_0().child(body))
 }
 
 #[cfg(test)]

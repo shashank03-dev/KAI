@@ -62,6 +62,56 @@ Everywhere: Command palette (Ctrl+K) · Quick launcher (Ctrl+Shift+Space, global
 While running: Mini window (always on top, corner) ⇄ full Run view
 ```
 
+## Kai Glass (v2, 2026-10-12)
+
+A revamp of the look, not the information architecture. Research that shaped
+it: Apple's Liquid Glass guidance and the 2026 readability pass (glass for
+chrome and overlays, never for content; keep text contrast high over it;
+respect a solid fallback), and dark product UIs in the Raycast/Linear family
+(near-black surfaces, hairline borders around 6–10 % white, one sparing hue).
+
+- **Monochrome, one light.** Graphite canvas `#09090B` (porcelain `#F4F4F5`
+  in light). The primary colour is *ink* (white on dark, black on light), so
+  the main action is the brightest thing on screen without a hue. Kai's
+  saffron becomes **ember** (`#F5A524` / `#C2410C`) and marks only what is
+  alive: the brand orb, a running run's dot and progress line, the
+  composer's halo, the mini window's edge. Green/amber/red keep their meaning.
+- **Glass as layers, not blur everywhere.** `ui.rs` tokens: `pane` (task list,
+  run header), `card`, `raised`, each a low-alpha fill with a hairline border
+  and a 1 px top *sheen* (an inset highlight). Shadows only lift the composer.
+- **Real window glass, opt-in where it can fail.** `Settings::glass`: Mica on
+  Windows 11 (on by default), compositor blur on Linux (off by default: without
+  a blurring compositor the desktop would show through unblurred). The canvas
+  goes to 78 % alpha only when glass is on.
+- **Code-flavoured type.** Inter for reading; JetBrains Mono, upper case, 11 px
+  for eyebrows, counters, step meta, skill names and key caps.
+- **Home.** Orb → status pill (dot + model) → 40 px greeting → the composer as
+  the one raised layer with an ember halo → key hints (↵ run, Ctrl K, the stop
+  shortcut) → "Start from a skill" as a 2×3 grid of glass cards. A static
+  ember light leak (`ui::aurora`) along the top; nothing animates while idle.
+- **Pages.** Models, Skills, History and Benchmarks share `ui::page` (eyebrow,
+  30 px title, subtitle, optional action) in a 1040 px column.
+- **Runs.** Task list rows with live ember dots and mono meta; the run header
+  carries a 2 px progress line (amber when paused or waiting); results open
+  with a lit orb and mono stat tiles.
+
+### Kai Glass — UX and motion, borrowed from the best desktop apps
+
+| From | What it taught | In Kai |
+| --- | --- | --- |
+| Raycast | Shortcuts shown beside the action, never buried; recents; empty states with one action | Hint rows on Home, the run view and results; "Recent" under the composer (click to edit and run); History's empty state offers "Give Kai a task" |
+| Linear | Keyboard-first, every view a chord away; neutral palette, one restrained accent | Ctrl+1–5 pages, Ctrl+, settings; ink primary, ember only for what is alive |
+| Superhuman | Speed is the product; keep hands on the keyboard | Alt+↑/↓ walks tasks, Ctrl+P pause/resume, Ctrl+R run again |
+| Warp | Output as blocks with actions; blocks enter in ~150 ms with a small rise | Steps and terminal commands are glass blocks that fade and rise in once; each terminal block has Copy |
+| Agent UX research (Sidekick, CUA studies) | Ambient status for background work; progress that means something | Breathing live dots while a run goes, a spring-driven progress line, the mini window's ember edge |
+
+**Motion tokens** (`anim.rs`): entrances 200 ms quint ease-out with a 6 px
+rise, siblings staggered 35 ms (capped at 10), views fade in over 180 ms, the
+progress line rides a spring (stiffness 170, damping 26), results pop in on an
+underdamped spring. Nothing loops while idle: the only repeating animation is
+the live dot's 1.6 s breath during a run. gpui renders every animation in its
+end state when the OS asks to reduce motion.
+
 ## Screens, components and states
 
 Each screen lists its Ely components and every state. All screens exist in

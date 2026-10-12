@@ -22,6 +22,18 @@ fn store() -> Option<MemoryStore> {
         .ok()
 }
 
+/// Forget every lesson (after the user confirmed).
+pub fn clear_all(a: &mut KaiApp, cx: &mut Context<KaiApp>) {
+    let r = store().map(|s| s.clear());
+    a.pages.reload_memory();
+    let t = match r {
+        Some(Ok(())) => Toast::new("Memory cleared").severity(Severity::Success),
+        _ => Toast::new("Couldn't clear memory").severity(Severity::Danger),
+    };
+    a.toast(t, cx);
+    cx.notify();
+}
+
 /// Lessons, most confident first, and skill suggestions.
 pub fn load() -> (Vec<Lesson>, Vec<Suggestion>) {
     let Some(s) = store() else {
@@ -195,13 +207,7 @@ pub fn section(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
             .variant(ButtonVariant::Danger)
             .on_click(move |_, _, cx| {
                 clearer.update(cx, |a, cx| {
-                    let r = store().map(|s| s.clear());
-                    a.pages.reload_memory();
-                    let t = match r {
-                        Some(Ok(())) => Toast::new("Memory cleared").severity(Severity::Success),
-                        _ => Toast::new("Couldn't clear memory").severity(Severity::Danger),
-                    };
-                    a.toast(t, cx);
+                    a.pages.confirm_clear_memory = true;
                     cx.notify();
                 })
             }),

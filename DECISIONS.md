@@ -429,3 +429,63 @@ Design: [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md). Research behind it:
   mirror the approval dialog's patterns and are checked by CI. `cua.rs` (the
   experimental OpenAI native loop) is not wired to human checks.
 
+## App UI/UX audit (2026-10-12)
+
+Audit of every screen against `screenshots/` and the page code; fixes:
+
+- Raw enum names reached the UI (`StepLimit` in the task list, "Run ended:
+  StepLimit", `Gui`/`Shell` in the team plan, History's outcome line). All go
+  through `state::outcome_text` now; a stopped run is amber, not red.
+- Skill details: the YAML frontmatter rendered as one giant setext heading
+  (Markdown reads the closing `---` as an underline), and `FileTree` showed only
+  an empty search box. The sheet now shows the description, a plain file list
+  and the SKILL.md body without frontmatter.
+- Approval dialog said "This step is high risk" even under "Every action";
+  it now says "Allow this step? Clicking “Send”", gives Kai's reason, and
+  mentions high risk only when the step is marked so.
+- Theme: the title-bar toggle, Ctrl+Shift+L and the palette didn't save the
+  choice (Settings › Appearance and the next start disagreed with the screen);
+  Appearance › System didn't follow the OS. Both fixed.
+- Skill on/off switches were lost on restart: kept in
+  `Settings::disabled_skills`.
+- Settings content ran into the window's right edge: a 46 rem column with
+  right/bottom padding.
+- Model & server: Save gave no feedback (toast now, unless a key failed); a
+  test of "This computer" had nowhere to show its result.
+- Confirm before destructive actions: Memory › Clear all and removing a
+  downloaded model (with the space it frees).
+- History shows a hint instead of a blank pane when no run is picked; the
+  queued view says "starts next" / "n tasks ahead" / "queue paused"; the
+  status bar's offline tooltip gives the reason; the palette offers only the
+  run controls that apply; Safety shows the registered stop shortcut as keys
+  (or that none is registered); onboarding copy ("Your DigitalOcean server",
+  local models mentioned).
+
+Not verified by a build here: this container can't fetch the pinned Ely GPUI
+Components commit (GitHub 401, codeload 403), so `kai-app` was not compiled or
+re-captured. gpui calls were checked against the `gpui-pre 0.3.8` source and
+Ely calls follow existing usages in the crate; kai-core builds, passes its
+tests and clippy. Screenshots in `screenshots/` predate these fixes.
+
+## Kai Glass review (2026-10-12)
+
+Review of this branch against its own CI screenshots and code:
+
+- **Save as skill was unusable.** The sheet put a split Markdown editor in a
+  fixed-height box that never clipped: on the narrow sheet both panes shrank
+  to a few words per line, the preview rendered the frontmatter as one giant
+  heading, and the text ran over the Save button. Now: the source field, a
+  preview of the body without frontmatter (as Skill details does), and Save,
+  in one scroll area.
+- **The home screen animated forever while idle.** The connection pill used
+  the breathing `live_dot` whenever the model was "ready" (i.e. whenever
+  Kai sits idle), so gpui redrew the window every frame; `anim.rs` itself
+  promises nothing loops while idle. The pill now has a steady glow; the busy
+  line still breathes during a run.
+- **Approval JSON ran off the dialog.** Lines longer than 48 characters are
+  shortened with "…"; the full reason is in the dialog text above it.
+- **Screenshots workflow could commit to the default branch.** It skipped only
+  `main`, which this repo doesn't use; pushes to the default branch are now
+  skipped (a manual run there still works).
+- `describe`'s doc comment had slid onto `outcome_text`; moved back.
+

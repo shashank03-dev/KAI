@@ -4,13 +4,14 @@
 //! missing number shows as "not measured", never as zero.
 
 use crate::app::KaiApp;
+use crate::ui;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     charts::{BarChart, Series},
     data_display::{Statistic, Tone},
     feedback::{Callout, EmptyState, Toast},
     forms::Choice,
-    layout::{Page, ScrollArea},
+    layout::ScrollArea,
     motion::ProgressBar,
     navigation::Tabs,
     primitives::{IconName, Severity},
@@ -320,7 +321,21 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .on_click(move |_, _, cx| runner.update(cx, run_bench));
     let results = &app.pages.bench;
     if results.is_empty() {
-        return Page::new("Benchmarks").action(run).child(EmptyState::new("no-bench", IconName::ChartColumn, "No benchmark results yet").body("Run `kai bench --backend vllm` (or gemini, gateway) on this machine; results land in bench/results.")).into_any_element();
+        let content = ui::page(
+            "Measured, not estimated",
+            "Benchmarks",
+            "No result files yet.",
+            Some(run.into_any_element()),
+            cx,
+        )
+        .child(
+            EmptyState::new("no-bench", IconName::ChartColumn, "No benchmark results yet")
+                .body("Run `kai bench --backend vllm` (or gemini, gateway) on this machine; results land in bench/results."),
+        );
+        return ScrollArea::new("bench")
+            .vertical()
+            .child(ui::body(1040., content))
+            .into_any_element();
     }
 
     let picked = results
@@ -380,14 +395,21 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .child(tasks(picked)),
     );
 
-    Page::new("Benchmarks")
-        .subtitle(format!(
+    let content = ui::page(
+        "Measured, not estimated",
+        "Benchmarks",
+        format!(
             "{} result files · newest per backend and model",
             results.len()
-        ))
-        .action(run)
-        .child(
-            ScrollArea::new("bench").vertical().child(
+        ),
+        Some(run.into_any_element()),
+        cx,
+    );
+    ScrollArea::new("bench")
+        .vertical()
+        .child(ui::body(
+            1040.,
+            content.child(
                 div()
                     .flex()
                     .flex_col()
@@ -407,7 +429,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     .children(chart(results))
                     .child(tabs),
             ),
-        )
+        ))
         .into_any_element()
 }
 

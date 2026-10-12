@@ -36,6 +36,9 @@ fn best(l: &LocalState) -> String {
 
 /// Back to the plain ranked list, and off the local backend.
 pub fn reset(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
+    // Overlays from the previous shot (81 opens the shortcuts sheet).
+    app.palette = false;
+    app.shortcuts = false;
     if app.settings.backend == BackendChoice::Local {
         app.settings.backend = BackendChoice::Both;
         app.settings.local_model.clear();

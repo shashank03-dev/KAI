@@ -16,8 +16,10 @@ use ely_gpui_component::{
 use gpui::{AnyElement, Context, Entity, IntoElement, ParentElement, Styled, div};
 use kai_core::settings::{BackendChoice, MODELS};
 
-/// Store any keys typed into the fields, and the endpoint.
-pub fn save_keys(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
+/// Store any keys typed into the fields, and the endpoint. False when a key
+/// couldn't be stored (a toast already says why).
+pub fn save_keys(app: &mut KaiApp, cx: &mut Context<KaiApp>) -> bool {
+    let mut ok = true;
     app.settings.vllm_endpoint = app.pages.endpoint.read(cx).text().trim().to_string();
     for (field, name) in [
         (app.pages.vllm_key.clone(), kai_os::secrets::VLLM),
@@ -29,16 +31,20 @@ pub fn save_keys(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
         if !v.is_empty() {
             match kai_os::secrets::set(name, &v) {
                 Ok(()) => field.update(cx, |f, cx| f.set_text("", cx)),
-                Err(e) => app.toast(
-                    Toast::new("Key not saved")
-                        .body(e.to_string())
-                        .severity(Severity::Danger),
-                    cx,
-                ),
+                Err(e) => {
+                    ok = false;
+                    app.toast(
+                        Toast::new("Key not saved")
+                            .body(e.to_string())
+                            .severity(Severity::Danger),
+                        cx,
+                    )
+                }
             }
         }
     }
     app.save_settings(cx);
+    ok
 }
 
 /// Send one real image request through `backend` (the chosen one when None).
@@ -240,7 +246,19 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
                 .child(
                     Button::new("save-model", "Save")
                         .variant(ButtonVariant::Secondary)
-                        .on_click(move |_, _, cx| saver.update(cx, save_keys)),
+                        .on_click(move |_, _, cx| {
+                            saver.update(cx, |a, cx| {
+                                if !save_keys(a, cx) {
+                                    return;
+                                }
+                                a.toast(
+                                    Toast::new("Saved")
+                                        .body("Keys are in the OS keychain; the server address is in Kai's settings.")
+                                        .severity(Severity::Success),
+                                    cx,
+                                );
+                            })
+                        }),
                 )
                 .child(
                     Button::new("test-model", "Save and test the chosen backend")
@@ -249,8 +267,9 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
                         .on_click(move |_, _, cx| tester.update(cx, |a, cx| test(a, None, cx))),
                 ),
         )
+        // Backends without a key row of their own show the result here.
         .row(div().children(
-            (app.settings.backend == BackendChoice::Both)
+            matches!(app.settings.backend, BackendChoice::Both | BackendChoice::Local)
                 .then(|| result(app, tested))
                 .flatten(),
         ))

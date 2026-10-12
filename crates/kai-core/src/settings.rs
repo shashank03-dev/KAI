@@ -123,6 +123,12 @@ pub struct Settings {
     /// After a failed run, ask the model once for up to two lessons (one
     /// extra model call per such run).
     pub reflect: bool,
+    /// Skills the user switched off on the Skills page, by name.
+    pub disabled_skills: Vec<String>,
+    /// See-through window material (Mica on Windows 11, blur where the Linux
+    /// compositor offers it). On by default on Windows only: without a
+    /// compositor blur, Linux would show the raw desktop behind the text.
+    pub glass: bool,
 }
 
 impl Default for Settings {
@@ -149,6 +155,8 @@ impl Default for Settings {
             local_port: crate::models::DEFAULT_PORT,
             learn: true,
             reflect: false,
+            disabled_skills: Vec::new(),
+            glass: cfg!(windows),
         }
     }
 }

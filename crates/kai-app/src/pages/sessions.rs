@@ -3,15 +3,18 @@
 
 use crate::app::KaiApp;
 use crate::state::{Phase, RunState};
+use crate::ui::{self, Glass, R_SM};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::InlineMessage,
     layout::ScrollArea,
-    lists::ListItem,
     primitives::{Icon, IconName, Severity},
-    theme::{ActiveTheme, IconSize, TextSize},
+    theme::{ActiveTheme, ControlSize, IconSize, TextSize},
 };
-use gpui::{AnyElement, Context, Hsla, IntoElement, ParentElement, Styled, Window, div, px};
+use gpui::{
+    AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, Window, div, px,
+};
 
 /// The row's icon, colour and second line.
 fn status(r: &RunState, place: usize, cx: &Context<KaiApp>) -> (IconName, Hsla, String) {
@@ -45,7 +48,16 @@ fn status(r: &RunState, place: usize, cx: &Context<KaiApp>) -> (IconName, Hsla, 
                 c.success,
                 format!("Done · {} steps", r.steps.len()),
             ),
-            Some(o) => (IconName::CircleStop, c.danger, format!("{o:?}")),
+            Some(o @ (kai_core::Outcome::Stopped | kai_core::Outcome::AskedUser)) => (
+                IconName::CircleStop,
+                c.warning,
+                crate::state::outcome_text(o).to_string(),
+            ),
+            Some(o) => (
+                IconName::CircleX,
+                c.danger,
+                crate::state::outcome_text(o).to_string(),
+            ),
             None => (IconName::CircleStop, c.fg_muted, "Ended".into()),
         },
     }
@@ -64,7 +76,7 @@ fn ahead(app: &KaiApp, id: u64, cx: &Context<KaiApp>) -> usize {
 }
 
 pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement {
-    let theme = cx.theme();
+    let g = Glass::of(cx);
     let fresh = cx.entity();
     let rows: Vec<AnyElement> = app
         .runs
@@ -72,19 +84,77 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
         .map(|e| {
             let r = e.state.read(cx);
             let (icon, color, line) = status(r, ahead(app, e.id, cx), cx);
+            let live = r.is_live() && !r.held;
             let picker = cx.entity();
             let id = e.id;
-            let title = if r.team {
-                format!("{} (team)", r.task)
+            let selected = app.selected == Some(id);
+            let (hover, ember) = (g.card_hover, g.ember);
+            let row = div()
+                .id(("session", id as usize))
+                .relative()
+                .px(px(10.))
+                .py(px(9.))
+                .flex()
+                .items_start()
+                .gap(px(10.))
+                .cursor_pointer()
+                .rounded(px(R_SM + 2.))
+                .border_1()
+                .on_click(move |_, _, cx| picker.update(cx, |a, cx| a.select(Some(id), cx)));
+            let row = if selected {
+                row.bg(g.raised)
+                    .border_color(g.line_strong)
+                    .shadow(vec![g.sheen_shadow()])
             } else {
-                r.task.clone()
+                row.border_color(gpui::transparent_black())
+                    .hover(move |s| s.bg(hover))
             };
-            ListItem::new(("session", id as usize), title)
-                .description(line)
-                .leading(Icon::new(icon).size(IconSize::Sm).color(color))
-                .selected(app.selected == Some(id))
-                .on_click(move |_, _, cx| picker.update(cx, |a, cx| a.select(Some(id), cx)))
-                .into_any_element()
+            let row = row
+                .child(div().pt(px(2.)).flex_none().child(if live {
+                    div()
+                        .pt(px(4.))
+                        .child(crate::anim::live_dot(
+                            color,
+                            ("session-dot", id as usize),
+                            &g,
+                        ))
+                        .into_any_element()
+                } else {
+                    Icon::new(icon)
+                        .size(IconSize::Sm)
+                        .color(color)
+                        .into_any_element()
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .text_color(if selected { g.text } else { g.dim })
+                                .truncate()
+                                .child(r.task.clone()),
+                        )
+                        .child(
+                            ui::mono(
+                                if r.team {
+                                    format!("{line} · team")
+                                } else {
+                                    line
+                                },
+                                if live { ember } else { g.faint },
+                                cx,
+                            )
+                            .text_size(px(11.))
+                            .truncate(),
+                        ),
+                );
+            // New tasks slide in; existing rows keep their finished state.
+            crate::anim::enter(row, ("session-in", id as usize), 0).into_any_element()
         })
         .collect();
     let any_done = app
@@ -118,32 +188,31 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
             .on_click(move |_, _, cx| clearer.update(cx, |a, cx| a.clear_finished(cx)))
     });
     div()
-        .w(px(248.))
+        .w(px(256.))
+        .flex_none()
         .h_full()
         .flex()
         .flex_col()
         .border_r_1()
-        .border_color(theme.colors.border)
-        .bg(theme.colors.surface)
+        .border_color(g.line)
+        .bg(g.pane)
         .child(
             div()
-                .p_3()
+                .px(px(14.))
+                .pt(px(14.))
+                .pb(px(10.))
                 .flex()
                 .items_center()
                 .justify_between()
+                .child(ui::eyebrow(format!("Tasks · {}", app.runs.len()), cx))
                 .child(
-                    div()
-                        .text_size(theme.text_size(TextSize::Sm))
-                        .text_color(theme.colors.fg_muted)
-                        .child(format!("Tasks ({})", app.runs.len())),
-                )
-                .child(
-                    Button::new("new-task", "New task")
+                    Button::new("new-task", "New")
                         .variant(if app.selected.is_none() {
                             ButtonVariant::Secondary
                         } else {
                             ButtonVariant::Primary
                         })
+                        .size(ControlSize::Sm)
                         .icon(IconName::Plus)
                         .on_click(move |_, _, cx| fresh.update(cx, |a, cx| a.select(None, cx))),
                 ),
@@ -151,12 +220,17 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
         .children(held.map(|h| div().px_3().pb_3().child(h)))
         .child(
             div().flex_1().min_h_0().child(
-                ScrollArea::new("sessions")
-                    .vertical()
-                    .child(div().px_2().flex().flex_col().gap_1().children(rows)),
+                ScrollArea::new("sessions").vertical().child(
+                    div()
+                        .px(px(8.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .children(rows),
+                ),
             ),
         )
-        .children(clear.map(|c| div().p_2().child(c)))
+        .children(clear.map(|c| div().p_2().border_t_1().border_color(g.line).child(c)))
         .into_any_element()
 }
 
@@ -177,7 +251,13 @@ pub fn queued(app: &KaiApp, cx: &Context<KaiApp>) -> AnyElement {
         .child(InlineMessage::new(
             Severity::Info,
             format!(
-                "Queued. Kai runs one task at a time because tasks share your mouse and keyboard; {ahead} ahead of this one."
+                "Queued. Kai runs one task at a time because tasks share your mouse and keyboard. {}",
+                match (ahead, app.queue_held) {
+                    (_, true) => "The queue is paused after a stop; resume it in the task list.".to_string(),
+                    (0, _) => "This one starts next.".to_string(),
+                    (1, _) => "1 task is ahead of it.".to_string(),
+                    (n, _) => format!("{n} tasks are ahead of it."),
+                }
             ),
         ))
         .child(

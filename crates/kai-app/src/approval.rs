@@ -22,7 +22,13 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     let what = describe(&p.decision, p.element.as_deref());
     let chosen = Rc::new(Cell::new(ApprovalChoice::Stop));
     let (on_close, skip, approve) = (chosen.clone(), chosen.clone(), chosen);
-    let json = serde_json::to_string_pretty(&p.decision).unwrap_or_default();
+    // The dialog is narrow and the code block doesn't wrap: a long line (the
+    // thought, typed text) ran off its edge. The full reason is in the
+    // detail above, so long lines are shortened here.
+    let json = fit_lines(
+        &serde_json::to_string_pretty(&p.decision).unwrap_or_default(),
+        JSON_LINE_CHARS,
+    );
 
     let frame = run.frames.last().map(|f| {
         let mut v = ComputerUseViewer::new("approval-frame", f.to_string_lossy().to_string())
@@ -36,13 +42,29 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
         v
     });
 
-    Dialog::new("approval", format!("Kai wants to: {what}"), move |_, cx| {
-        let choice = on_close.get();
-        app.update(cx, |a, cx| a.answer(choice, cx));
-    })
+    // Asked for because of the approval level, the model's risk or a
+    // payment/password rule: say only what is known.
+    let why = if p.decision.risk == kai_core::schema::Risk::High {
+        "Kai marked this step high risk. "
+    } else {
+        ""
+    };
+    let reason = p.decision.thought.trim().trim_end_matches('.');
+    let reason = if reason.is_empty() {
+        String::new()
+    } else {
+        format!("Kai's reason: {reason}. ")
+    };
+    Dialog::new(
+        "approval",
+        format!("Allow this step? {what}"),
+        move |_, cx| {
+            let choice = on_close.get();
+            app.update(cx, |a, cx| a.answer(choice, cx));
+        },
+    )
     .detail(format!(
-        "This step is high risk ({}). Nothing happens until you choose. Escape stops the run.",
-        p.decision.thought
+        "{reason}{why}Nothing happens until you choose. Escape stops the run."
     ))
     .children(frame)
     .child(
@@ -71,4 +93,40 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
                 close(window, cx)
             })
     })
+}
+
+/// Longest JSON line the approval dialog shows in full.
+const JSON_LINE_CHARS: usize = 48;
+
+/// Cut every line longer than `max` characters to `max - 1` plus "…".
+fn fit_lines(text: &str, max: usize) -> String {
+    text.lines()
+        .map(|l| {
+            if l.chars().count() > max {
+                let mut cut: String = l.chars().take(max.saturating_sub(1)).collect();
+                cut.push('…');
+                cut
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_lines;
+
+    #[test]
+    fn long_json_lines_are_shortened_short_ones_kept() {
+        let text = "{\n  \"thought\": \"Send the drafted email to the professor now\",\n  \"target\": 12\n}";
+        let out = fit_lines(text, 20);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "{");
+        assert_eq!(lines[1].chars().count(), 20);
+        assert!(lines[1].ends_with('…'));
+        assert_eq!(lines[2], "  \"target\": 12");
+        assert_eq!(lines[3], "}");
+    }
 }

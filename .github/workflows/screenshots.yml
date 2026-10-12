@@ -1,0 +1,84 @@
+# Capture every screen of the desktop app, light and dark, with made-up data
+# (KAI_CAPTURE mode, see screenshots/README.md) on a headless X server with
+# Mesa's software Vulkan, then commit the PNGs back to the branch.
+# Run it from the Actions tab (workflow_dispatch) after UI changes.
+name: Screenshots
+
+on:
+  workflow_dispatch:
+  # On feature branches, every app change re-captures (the bot's own commit
+  # uses GITHUB_TOKEN, so it does not trigger another run).
+  push:
+    branches-ignore: [main]
+    paths:
+      - .github/workflows/screenshots.yml
+      - crates/kai-app/**
+
+# A newer push to the same branch cancels the older run instead of paying
+# for both (private-repo Actions minutes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Named `check` like CI's job so rust-cache restores CI's cache: it holds
+  # the pinned Ely GPUI Components checkout, which can no longer be cloned.
+  check:
+    # Never commit captures onto the default branch from a push (it is not
+    # named `main` in this repo, so `branches-ignore` alone let it through);
+    # a manual run there is still allowed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_name != github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+      - name: Linux build and display dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \
+            libfontconfig-dev libdbus-1-dev libxdo-dev libxtst-dev libxrandr-dev libxi-dev \
+            libgbm-dev libegl-dev libpipewire-0.3-dev libclang-dev \
+            xvfb mesa-vulkan-drivers libvulkan1 fonts-dejavu-core
+      - name: Build the app
+        run: cargo build --release -p kai-app
+      - name: Capture
+        run: |
+          rm -f screenshots/*.png
+          export KAI_CAPTURE=screenshots
+          export HOME="$RUNNER_TEMP/home" && mkdir -p "$HOME"
+          timeout 600 xvfb-run -a -s "-screen 0 1600x1000x24" target/release/kai-app || echo "app exited with $?"
+          ls -la screenshots
+          test "$(ls screenshots/*.png | wc -l)" -gt 10
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*.png
+      - name: Commit the screenshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add screenshots/*.png
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Screenshots: captured in CI from ${GITHUB_SHA::7}"
+            # The branch may have moved while the app built.
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
