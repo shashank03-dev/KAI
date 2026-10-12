@@ -28,7 +28,9 @@ jobs:
       - name: Materialise the Ely checkout from the cached git db
         run: |
           ls -la ~/.cargo/git/db/ || true
-          CARGO_NET_OFFLINE=true cargo metadata --format-version 1 >/dev/null
+          # Online for crates.io; the pinned Ely revision is already in the db,
+          # so cargo does not try to clone it (as in every CI build).
+          cargo metadata --format-version 1 >/dev/null
           ls -la ~/.cargo/git/checkouts/
       - name: Copy it into vendor/ and check the license
         run: |
