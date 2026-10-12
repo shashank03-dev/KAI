@@ -36,6 +36,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "linux-
 jiff = "0.2"
 smallvec = "1"
 rand = "0.8"
+regex = { version = "1", default-features = false, features = ["std", "unicode-case", "unicode-perl"] }
 
 # These two are the Ely/GPUI snapshot. Pinned exactly; see DECISIONS.md.
 gpui = { package = "gpui-pre", version = "=0.3.8", default-features = false, features = ["stacker"] }

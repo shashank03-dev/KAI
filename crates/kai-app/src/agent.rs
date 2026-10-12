@@ -228,6 +228,7 @@ async fn drive(
         max_time,
         approval: settings.approval,
         executor: settings.use_executor,
+        outcomes: settings.verify_outcomes,
         learn: settings.learn,
         reflect: settings.reflect,
         ..Config::default()
@@ -343,11 +344,10 @@ async fn drive(
                 kai_core::RunOptions {
                     plan_cache: cache.as_ref(),
                     recorder: recorder.as_ref(),
-                    executor: executor
-                        .as_ref()
-                        .map(|c| c as &dyn kai_core::executor::Decider),
+                    executor: executor.as_ref().map(|c| c as _),
                     memory: memory.as_ref(),
                     learn_later: false,
+                    probe: Some(&kai_os::DesktopProbe),
                 },
             )
             .await;

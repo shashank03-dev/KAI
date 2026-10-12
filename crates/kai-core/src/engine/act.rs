@@ -186,6 +186,40 @@ pub(super) fn fixed_decision(st: &DeterministicStep) -> Decision {
     d
 }
 
+/// Steering and terminal output, shared by every action path.
+impl Engine<'_> {
+    /// Fold mid-run user messages into the next turn.
+    pub(super) fn drain_steering(&self, r: &mut Run<'_>, step: u32) -> bool {
+        let msgs = self.steering.take();
+        let any = !msgs.is_empty();
+        for m in msgs {
+            self.sink.emit(&EngineEvent::Steered {
+                step,
+                message: m.clone(),
+            });
+            r.notes.push(format!("User says (mid-run): {m}"));
+            r.trace.steered.push(m);
+        }
+        if any {
+            // The user may refer to what they see: look again properly.
+            r.force_full = true;
+        }
+        any
+    }
+
+    pub(super) fn emit_output(&self, step: u32, d: &crate::schema::Decision, output: Option<&str>) {
+        if d.action == Action::Shell
+            && let Some(out) = output
+        {
+            self.sink.emit(&EngineEvent::Output {
+                step,
+                command: d.text.clone().unwrap_or_default(),
+                output: out.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

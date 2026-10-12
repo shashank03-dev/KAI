@@ -294,6 +294,7 @@ fn record(i: u32, d: Decision, t: Timings, label: &str, elements: String, ok: bo
         path: Some("native".to_string()),
         call: Default::default(),
         executor: None,
+        effect: None,
     }
 }
 

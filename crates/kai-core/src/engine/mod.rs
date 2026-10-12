@@ -19,10 +19,17 @@
 //! code or sign-in approval on screen pauses the run until the user deals
 //! with it; the model never touches them. `ask_user` becomes a real question
 //! when someone can answer.
+//!
+//! Verification (`gate.rs`, `effect.rs`, `docs/VERIFICATION.md`): with
+//! `Config::outcomes`, the first call names required outcomes with read-only
+//! probes, and `done` is accepted only when every probed one holds; each
+//! action is labelled confirmed / unverifiable / no_op with no model call.
 
 mod act;
 mod batch;
+mod effect;
 mod execute;
+mod gate;
 mod human;
 mod memory;
 mod observe;
@@ -84,6 +91,9 @@ pub struct RunOptions<'a> {
     /// The caller judges the run after it ends (a bench check) and calls
     /// [`MemoryStore::after_run`] itself; the engine only recalls.
     pub learn_later: bool,
+    /// Read-only OS probes for the outcome ledger (`Config::outcomes`).
+    /// Without one, OS probes fail closed (`docs/VERIFICATION.md`).
+    pub probe: Option<&'a dyn Probe>,
 }
 
 /// Trace backend label for actions run from a model reply's `then` list.
@@ -150,6 +160,11 @@ struct Run<'t> {
     mem: memory::Recalled,
     /// Human checks this run: handled ones, codes typed, time waited.
     human: human::HumanState,
+    /// Required outcomes, gate refusals, and the OS probe port.
+    ledger: gate::LedgerState,
+    probe: Option<&'t dyn Probe>,
+    /// Accessibility-event count taken just before the last action.
+    events_mark: Option<u64>,
 }
 
 impl Engine<'_> {
@@ -184,9 +199,13 @@ impl Engine<'_> {
             memory: opts.memory,
             mem: Default::default(),
             human: Default::default(),
+            ledger: Default::default(),
+            probe: opts.probe,
+            events_mark: None,
         };
         self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
+        self.finish_ledger(&mut r);
         r.trace.finish(outcome);
         if let Some(store) = opts.memory
             && !opts.learn_later
@@ -280,6 +299,7 @@ impl Engine<'_> {
         };
         let obs = &seen.obs;
         let elements = obs.grounding.as_text();
+        self.ledger_observe(r, step, obs);
 
         // ---- Something only the user can get past (CAPTCHA, code, approval) ----
         if let Some(check) = self.unhandled_check(r, &obs.grounding) {
@@ -288,7 +308,8 @@ impl Engine<'_> {
 
         // ---- Decide ----
         self.sink.emit(&EngineEvent::Thinking { step });
-        let notes = std::mem::take(&mut r.notes);
+        let mut notes = std::mem::take(&mut r.notes);
+        let first = self.outcome_request(r, &mut notes, schema);
         let lessons = self.lessons_for(r, &obs.grounding);
         let user_text = prompt::build_turn(&TurnInput {
             lessons: lessons.as_deref(),
@@ -306,8 +327,10 @@ impl Engine<'_> {
             (true, Some(c)) => (c, true),
             _ => (self.client, false),
         };
+        let (schema, extra) = first.as_ref().map_or((schema, 0), |(s, n)| (s, *n));
+        let max_tokens = self.config.max_tokens + extra;
         let decided = self
-            .decide(client, system, &user_text, &obs.images, schema)
+            .decide(client, system, &user_text, &obs.images, schema, max_tokens)
             .await;
         r.step += 1;
         let decided = match decided {
@@ -322,6 +345,7 @@ impl Engine<'_> {
             }
         };
         r.failure_streak = 0;
+        self.ledger_start(r, step, &decided.reply.outcomes);
         let call = self.record_call(r, step, &user_text, obs, &decided, careful);
         let (reply, model_time, first_token) = (decided.reply, decided.total, decided.first_token);
         if reply.need_screen {
@@ -358,16 +382,13 @@ impl Engine<'_> {
             return self.refuse_for_human(r, check, rec).await;
         }
 
-        // ---- done / ask_user terminate ----
+        // ---- done (through the gate) / ask_user terminate ----
         match decision.action {
-            Action::Done | Action::AskUser => {
+            Action::Done => return self.claim_done(r, rec, obs).await,
+            Action::AskUser => {
                 rec.path = Some("none".into());
                 r.trace.push(rec);
-                return Some(if decision.action == Action::Done {
-                    Outcome::Success
-                } else {
-                    Outcome::AskedUser
-                });
+                return Some(Outcome::AskedUser);
             }
             _ => {}
         }
@@ -396,6 +417,7 @@ impl Engine<'_> {
         // ---- Act ----
         let t_act = Instant::now();
         let guarded = act::reopen_guard(&mut r.opened, &decision);
+        r.events_mark = self.perceptor.ui_events();
         let acted = match guarded {
             Some(note) => Ok((Some(note), "none")),
             None => self.act(&decision, &obs.grounding).await,
@@ -467,36 +489,5 @@ impl Engine<'_> {
             return self.run_plan(r, &reply.plan).await;
         }
         None
-    }
-
-    /// Fold mid-run user messages into the next turn.
-    fn drain_steering(&self, r: &mut Run<'_>, step: u32) -> bool {
-        let msgs = self.steering.take();
-        let any = !msgs.is_empty();
-        for m in msgs {
-            self.sink.emit(&EngineEvent::Steered {
-                step,
-                message: m.clone(),
-            });
-            r.notes.push(format!("User says (mid-run): {m}"));
-            r.trace.steered.push(m);
-        }
-        if any {
-            // The user may refer to what they see: look again properly.
-            r.force_full = true;
-        }
-        any
-    }
-
-    fn emit_output(&self, step: u32, d: &crate::schema::Decision, output: Option<&str>) {
-        if d.action == Action::Shell
-            && let Some(out) = output
-        {
-            self.sink.emit(&EngineEvent::Output {
-                step,
-                command: d.text.clone().unwrap_or_default(),
-                output: out.to_string(),
-            });
-        }
     }
 }

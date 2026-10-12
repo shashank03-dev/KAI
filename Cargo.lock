@@ -3986,6 +3986,7 @@ dependencies = [
  "futures",
  "jiff",
  "log",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

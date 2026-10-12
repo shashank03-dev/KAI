@@ -144,6 +144,16 @@ frame and the careful model next step. It never touches approvals. It is off by
 default: Jev is not available on a free-tier Gateway key, and the small-LLM
 judge measured p50 803 ms, which costs more than it saves per step.
 
+**Outcome ledger and DONE gate (off by default, `--outcomes`).** The first
+model call also names 1–4 required outcomes, each with an optional read-only
+probe (`file_exists`, `file_contains`, `a11y_has`, `window_title`, `url_is`,
+`shell_ro` on a strict allowlist). `done` is accepted only when every probed
+outcome holds. Otherwise the step is refused, the model is told which check
+failed, and after 3 refusals Kai asks you. Only probes change an outcome's
+status, never the model. Each action is also labelled `confirmed`,
+`unverifiable` or `no_op` from the tree diff, AT-SPI events and the screen
+hash; `no_op` is the no-progress signal. See [VERIFICATION.md](VERIFICATION.md).
+
 **Zoomed crop.** After a grid click that changed nothing, the next request
 carries a 2x crop around the clicked cell with its own numbered sub-grid.
 

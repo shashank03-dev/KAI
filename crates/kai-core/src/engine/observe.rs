@@ -1,7 +1,7 @@
 //! Observation policy: full vs tree-only, the cheap verifier, no-progress
 //! detection, and the zoomed crop after a missed grid click.
 
-use super::{Engine, Run};
+use super::{Engine, Run, effect};
 use crate::element::{Grounding, Rect};
 use crate::ports::{EngineEvent, Observation, ObserveTiming};
 use crate::schema::{Action, Decision};
@@ -219,14 +219,21 @@ impl Engine<'_> {
         }
         let observe_ms = (t0.elapsed().as_millis() as u64).saturating_sub(verify_ms);
 
-        // ---- No-progress: same screen (or same tree on tree-only steps) ----
+        // ---- No-progress: same screen (or same tree on tree-only steps),
+        // and no accessibility event since the action (stage 2) ----
         let th = text_hash(&obs.grounding.as_text());
-        let no_progress = match r.last_sig {
+        let same = match r.last_sig {
             Some((_, prev_th, was_tree)) if was_tree || tree_only => prev_th == th,
             // Both the pixels and the element list must be unchanged.
             Some((h, prev_th, _)) => h == obs.screen_hash && prev_th == th,
             None => false,
         };
+        let fx = effect::Seen {
+            list_changed: r.last_sig.is_some_and(|(_, prev_th, _)| prev_th != th),
+            same,
+            events: effect::events_since(r.events_mark.take(), self.perceptor.ui_events()),
+        };
+        let no_progress = fx.no_op();
         if no_progress {
             r.no_progress_streak += 1;
         } else {
@@ -238,10 +245,17 @@ impl Engine<'_> {
                 Some(p) if p >= VERIFY_OK => true,
                 _ => !no_progress || matches!(pend.action, Action::Shell | Action::Wait),
             };
+            let mut labelled = Vec::new();
             for i in pend.records {
                 if let Some(s) = r.trace.steps.get_mut(i) {
                     s.verified = ok;
+                    let e = effect::label(s.decision.action, s.output.as_deref(), fx);
+                    s.effect = Some(e);
+                    labelled.push((s.index, e));
                 }
+            }
+            for (idx, e) in labelled {
+                self.ledger_effect(r, idx, e);
             }
         }
 

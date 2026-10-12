@@ -123,3 +123,25 @@ fn categories_serialise_snake_case() {
     assert_eq!(j, r#"{"category":"false_done","detail":"x"}"#);
     assert_eq!(Category::GroundingMiss.as_str(), "grounding_miss");
 }
+
+#[test]
+fn a_gate_that_never_verified_is_its_own_category() {
+    use crate::ledger::{GateRecord, Ledger};
+    let mut t = trace(&[CLICK3, DONE, CLICK3, DONE], Outcome::AskedUser);
+    t.outcomes = Ledger::from_raw(&[serde_json::json!({"id":"sent","description":"sent",
+        "probe":{"kind":"window_title","pattern":"thank you"}})])
+    .records(&[]);
+    t.gate.push(GateRecord {
+        step: 1,
+        kind: "refused".into(),
+        failed: Vec::new(),
+        last_effect: None,
+    });
+    let f = classify(&t, Some(false)).unwrap();
+    assert_eq!(f.category, Category::GatedNeverVerified);
+    assert!(f.detail.contains("sent"), "{}", f.detail);
+    // The gate accepted (or was off) and the check failed: still false done.
+    let mut t = trace(&[SHELL, DONE], Outcome::Success);
+    t.gate.clear();
+    assert_eq!(cat(&t, Some(false)), Some(Category::FalseDone));
+}

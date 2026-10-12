@@ -493,20 +493,12 @@ mod tests {
             r#"{"thought":"go","action":"open_url","text":"https://bmsce.ac.in","risk":"none"}"#,
         )
         .unwrap();
-        trace.push(kai_core::trace::StepRecord {
-            index: 0,
-            decision: d,
-            timings: Default::default(),
-            backend: "x".into(),
-            elements: String::new(),
-            screenshot: None,
-            approval: None,
-            verified: true,
-            output: None,
-            path: None,
-            call: Default::default(),
-            executor: None,
-        });
+        trace.push(kai_core::trace::StepRecord::new(
+            0,
+            &d,
+            Default::default(),
+            "x",
+        ));
         let md = draft_from(&trace.task.clone(), Some(&trace));
         let name = slug(&trace.task);
         let s = kai_core::skill::load_from_str(&md, Path::new(&name)).unwrap();

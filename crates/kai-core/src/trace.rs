@@ -66,6 +66,11 @@ pub struct StepRecord {
     /// (`docs/EXECUTOR.md`). Absent on model, batched, cached and skill steps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor: Option<ExecutorRecord>,
+    /// What this action did, judged with no model call from the tree diff,
+    /// accessibility events and the screen hash (`docs/VERIFICATION.md`).
+    /// Absent in old traces and on steps that end the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<crate::ledger::Effect>,
 }
 
 /// The decision-model numbers behind one executor step.
@@ -157,6 +162,7 @@ impl StepRecord {
             path: None,
             call: CallRecord::default(),
             executor: None,
+            effect: None,
         }
     }
 }
@@ -201,6 +207,14 @@ pub struct Trace {
     /// code. Absent in old traces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub human: Vec<crate::human::HumanRecord>,
+    /// The required outcomes the model named at the first call, and how
+    /// each ended (`docs/VERIFICATION.md`). Absent when the ledger is off
+    /// or empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outcomes: Vec<crate::ledger::OutcomeRecord>,
+    /// Every `done` the gate refused, and a waiver by the user.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gate: Vec<crate::ledger::GateRecord>,
 }
 
 impl Trace {
@@ -216,6 +230,8 @@ impl Trace {
             steered: Vec::new(),
             lessons: Vec::new(),
             human: Vec::new(),
+            outcomes: Vec::new(),
+            gate: Vec::new(),
         }
     }
 
@@ -301,6 +317,7 @@ mod tests {
                 path: None,
                 call: Default::default(),
                 executor: None,
+                effect: None,
             });
         }
         let (p50, p95) = tr.step_percentiles();

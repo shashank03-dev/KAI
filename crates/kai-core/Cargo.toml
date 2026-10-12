@@ -19,6 +19,7 @@ reqwest.workspace = true
 tokio.workspace = true
 futures.workspace = true
 jiff.workspace = true
+regex.workspace = true
 async-trait = "0.1"
 
 [dev-dependencies]

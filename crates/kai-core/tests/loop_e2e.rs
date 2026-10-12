@@ -46,6 +46,7 @@ impl Perceptor for FakeScreen {
             screen_hash: f as u64,
             timing: Default::default(),
             screen: None,
+            window_title: None,
         })
     }
 }

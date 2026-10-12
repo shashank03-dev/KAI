@@ -180,6 +180,7 @@ impl DesktopPerceptor {
                 encode_ms: t_enc.elapsed().as_millis() as u64,
             },
             screen: Some(at),
+            window_title: a11y::active::title(),
         })
     }
 }
@@ -216,6 +217,7 @@ impl Perceptor for DesktopPerceptor {
                 encode_ms: 0,
             },
             screen: Some(screen),
+            window_title: a11y::active::title(),
         })
     }
 
@@ -232,6 +234,11 @@ impl Perceptor for DesktopPerceptor {
         })
         .await
         .ok()?
+    }
+
+    /// AT-SPI events from the active app (Linux); `None` on Windows.
+    fn ui_events(&self) -> Option<u64> {
+        a11y::ui_events()
     }
 
     /// Wait until two captures in a row match, or `max` passes.

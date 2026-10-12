@@ -208,6 +208,7 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
             path: None,
             call: Default::default(),
             executor: None,
+            effect: None,
         });
     }
     r.thinking = done.is_none();

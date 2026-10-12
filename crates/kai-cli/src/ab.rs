@@ -33,6 +33,11 @@ pub struct Ab {
     /// (docs/EXECUTOR.md).
     #[arg(long)]
     pub executor: bool,
+    /// Turn on the outcome ledger and DONE gate: the first call names
+    /// required outcomes with read-only probes, and `done` is accepted only
+    /// when they hold (docs/VERIFICATION.md).
+    #[arg(long)]
+    pub outcomes: bool,
 }
 
 impl Ab {
@@ -55,6 +60,9 @@ impl Ab {
         if self.executor {
             v.push("--executor");
         }
+        if self.outcomes {
+            v.push("--outcomes");
+        }
         v
     }
 }
@@ -71,6 +79,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.tree_only = !ab.no_tree_only;
     config.a11y_actions = !ab.no_a11y;
     config.executor = ab.executor;
+    config.outcomes = ab.outcomes;
     Ok(true)
 }
 

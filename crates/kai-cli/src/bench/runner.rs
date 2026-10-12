@@ -148,6 +148,7 @@ impl Perceptor for ScriptedScreen {
             screen_hash: self.frame.load(Ordering::SeqCst),
             timing: Default::default(),
             screen: None,
+            window_title: None,
         })
     }
 }
@@ -367,6 +368,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             memory: live.memory.store,
             // Learn after the check, which knows whether `done` was true.
             learn_later: true,
+            probe: Some(&kai_os::DesktopProbe),
             ..Default::default()
         };
         let started = Instant::now();

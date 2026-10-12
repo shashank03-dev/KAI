@@ -3,6 +3,9 @@
 //! numbers them in reading order, and falls back to a grid when the tree is
 //! empty or useless (games, canvases, some Electron apps).
 
+pub mod active;
+#[cfg(target_os = "linux")]
+pub mod events;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
@@ -71,6 +74,20 @@ async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
 #[cfg(target_os = "windows")]
 async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
     tokio::task::spawn_blocking(windows::read).await?
+}
+
+/// A running count of accessibility events from the active app (Linux,
+/// AT-SPI); `None` where events are not wired (Windows) or not running.
+pub fn ui_events() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        events::start();
+        events::count()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]

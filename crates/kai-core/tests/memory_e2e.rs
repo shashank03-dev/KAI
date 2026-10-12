@@ -141,6 +141,7 @@ impl Perceptor for Desk {
             screen_hash: self.frame.load(Ordering::SeqCst) as u64,
             timing: Default::default(),
             screen: None,
+            window_title: None,
         })
     }
 }

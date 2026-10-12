@@ -336,6 +336,7 @@ mod tests {
                 path: None,
                 call: Default::default(),
                 executor: None,
+                effect: None,
             });
         }
         let (spans, end) = spans(&t);

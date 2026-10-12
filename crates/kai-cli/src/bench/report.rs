@@ -145,6 +145,11 @@ fn metric_rows(s: &Summary) -> Vec<(&'static str, String)> {
         ),
         ("Cost (US$)", cost(s.cost_usd)),
         ("Failures", failures_text(&s.failures)),
+        (
+            "False done / gated, never verified",
+            format!("{} / {}", s.false_done, s.gated_never_verified),
+        ),
+        ("DONE gate refusals", s.gate_refusals.to_string()),
         ("Total time (s)", format!("{:.1}", s.total_seconds)),
         ("A/B flags", ab_text(s)),
         ("Executor", executor_text(s)),

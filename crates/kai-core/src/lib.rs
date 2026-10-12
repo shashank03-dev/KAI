@@ -13,18 +13,21 @@ pub mod engine;
 pub mod executor;
 pub mod failure;
 pub mod human;
+pub mod ledger;
 pub mod memory;
 pub mod models;
 pub mod orchestrator;
 pub mod plan;
 pub mod plan_cache;
 pub mod ports;
+pub mod probe;
 pub mod prompt;
 pub mod recorder;
 pub mod reply;
 pub mod risk;
 pub mod schema;
 pub mod settings;
+pub mod shell_ro;
 pub mod skill;
 pub mod trace;
 
@@ -34,12 +37,14 @@ pub use client::{
 pub use element::{Element, Grounding, Rect, Role};
 pub use engine::{
     Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Interrupt,
-    Observation, ObserveTiming, Perceptor, RunOptions,
+    Observation, ObserveTiming, Perceptor, Probe, RunOptions,
 };
 pub use failure::{Category, Failure};
 pub use human::{CheckKind, HumanCheck, HumanHelper, HumanReply, OneTimeCode};
+pub use ledger::{Effect, Ledger, OutcomeRecord};
 pub use memory::{Lesson, MemoryStore};
 pub use plan_cache::PlanCache;
+pub use probe::{ProbeSpec, ProbeVerdict};
 pub use recorder::{RunMeta, TraceRecorder};
 pub use reply::StepReply;
 pub use risk::ApprovalLevel;

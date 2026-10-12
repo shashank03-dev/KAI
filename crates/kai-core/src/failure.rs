@@ -18,6 +18,9 @@ pub enum Category {
     GaveUp,
     /// The model said done but the check failed.
     FalseDone,
+    /// Kai's DONE gate refused `done` and the run never verified a probed
+    /// outcome (`docs/VERIFICATION.md`).
+    GatedNeverVerified,
     /// The same action on the same target three or more times.
     Loop,
     /// Two or more undecodable replies.
@@ -40,6 +43,7 @@ impl Category {
             Category::TimeLimit => "time_limit",
             Category::GaveUp => "gave_up",
             Category::FalseDone => "false_done",
+            Category::GatedNeverVerified => "gated_never_verified",
             Category::Loop => "loop",
             Category::Malformed => "malformed",
             Category::EnvError => "env_error",
@@ -118,6 +122,9 @@ pub fn classify(trace: &Trace, check: Option<bool>) -> Option<Failure> {
                 short(last.unwrap_or(""))
             ),
         ));
+    }
+    if let Some(d) = gated_never_verified(trace) {
+        return Some(Failure::new(Category::GatedNeverVerified, d));
     }
     let malformed: Vec<&String> = trace
         .errors
@@ -201,6 +208,23 @@ fn short(s: &str) -> String {
     } else {
         s
     }
+}
+
+/// The gate refused `done` at least once and a probed outcome never held.
+fn gated_never_verified(trace: &Trace) -> Option<String> {
+    use crate::ledger::Status;
+    let refused = trace.gate.iter().filter(|g| g.kind == "refused").count();
+    let open = trace
+        .outcomes
+        .iter()
+        .find(|o| o.probe.is_some() && o.status != Status::Verified)?;
+    (refused > 0).then(|| {
+        format!(
+            "Kai refused done {refused} time(s); {} ({}) never verified",
+            open.id,
+            short(open.probe.as_deref().unwrap_or(""))
+        )
+    })
 }
 
 /// Act errors and shell timeouts recorded on steps.

@@ -74,6 +74,10 @@ pub struct RunState {
     pub outputs: Vec<OutputView>,
     pub steers: Vec<SteerView>,
     pub team_view: Team,
+    /// The outcome checklist (`docs/VERIFICATION.md`), and the last time
+    /// Kai refused `done`.
+    pub outcomes: Vec<kai_core::OutcomeRecord>,
+    pub gated: Option<String>,
 }
 
 impl RunState {
@@ -295,6 +299,11 @@ impl RunState {
                 command,
                 output,
             }),
+            EngineEvent::Outcomes { outcomes, .. } => self.outcomes = outcomes,
+            EngineEvent::Gated { reason, .. } => {
+                self.caption = reason.clone();
+                self.gated = Some(reason);
+            }
             EngineEvent::NeedsHuman { .. } => self.phase = Phase::Waiting,
             EngineEvent::HumanDone { result, .. } => {
                 self.phase = Phase::Running;

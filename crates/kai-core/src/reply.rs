@@ -25,6 +25,9 @@ pub struct StepReply {
     /// Upcoming subgoals for the executor; empty when absent (today's
     /// behaviour). See [`crate::plan::parse_plan`].
     pub plan: Vec<Subgoal>,
+    /// Raw `outcomes` (first call only; the engine reads them once and
+    /// ignores them on every later reply). See [`crate::ledger`].
+    pub outcomes: Vec<Value>,
 }
 
 impl StepReply {
@@ -41,6 +44,10 @@ impl StepReply {
             .ok_or_else(|| SchemaError::Parse("reply is not a JSON object".to_string()))?;
         let then_raw = obj.remove("then");
         let plan_raw = obj.remove("plan");
+        let outcomes = match obj.remove("outcomes") {
+            Some(Value::Array(items)) => items,
+            _ => Vec::new(),
+        };
         let need_screen = obj
             .remove("need_screen")
             .and_then(|b| b.as_bool())
@@ -78,7 +85,15 @@ impl StepReply {
             then,
             need_screen,
             plan,
+            outcomes,
         })
+    }
+
+    /// `schema` plus the optional `outcomes` the first call may name.
+    pub fn with_outcomes(schema: &Value) -> Value {
+        let mut s = schema.clone();
+        s["properties"]["outcomes"] = crate::ledger::outcomes_schema();
+        s
     }
 
     /// [`StepReply::json_schema`] plus the optional `plan` (executor on).

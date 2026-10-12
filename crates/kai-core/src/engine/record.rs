@@ -100,13 +100,14 @@ impl Engine<'_> {
         user_text: &str,
         images: &Images,
         schema: &serde_json::Value,
+        max_tokens: u32,
     ) -> anyhow::Result<Decided> {
         let req = ModelRequest {
             system,
             user_text,
             images,
             schema,
-            max_tokens: self.config.max_tokens,
+            max_tokens,
             temperature: 0.0,
         };
         let reply = client.decide(&req).await?;
@@ -138,11 +139,7 @@ impl Engine<'_> {
                 );
                 let req2 = ModelRequest {
                     user_text: &repair_text,
-                    max_tokens: self
-                        .config
-                        .max_tokens
-                        .saturating_mul(8)
-                        .max(REPAIR_MAX_TOKENS),
+                    max_tokens: max_tokens.saturating_mul(8).max(REPAIR_MAX_TOKENS),
                     ..req
                 };
                 let reply2 = client.decide(&req2).await?;

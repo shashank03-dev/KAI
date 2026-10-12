@@ -79,6 +79,11 @@ pub struct TaskResult {
     pub executor_escalations: u32,
     /// Steps the executor carried out.
     pub executor_steps: u32,
+    /// Required outcomes the model named, how many verified, and how often
+    /// the DONE gate refused `done` (`docs/VERIFICATION.md`; 0 when off).
+    pub outcomes: u32,
+    pub outcomes_verified: u32,
+    pub gate_refusals: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -134,6 +139,11 @@ pub struct Summary {
     /// Decision-request latency over all tasks (ms).
     pub executor_p50_ms: u64,
     pub executor_p95_ms: u64,
+    /// Tasks labelled `false_done` and `gated_never_verified`, and every
+    /// DONE gate refusal (`docs/VERIFICATION.md`).
+    pub false_done: usize,
+    pub gated_never_verified: usize,
+    pub gate_refusals: u32,
 }
 
 /// `loop 2 · false_done 1`, or `none`.
@@ -239,6 +249,13 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
             ex_lat.extend(x.latencies_ms.iter().copied());
             ex_avail += usize::from(x.enabled);
         }
+        r.outcomes = trace.outcomes.len() as u32;
+        r.outcomes_verified = trace
+            .outcomes
+            .iter()
+            .filter(|o| o.status == kai_core::ledger::Status::Verified)
+            .count() as u32;
+        r.gate_refusals = trace.gate.iter().filter(|g| g.kind == "refused").count() as u32;
         r.failure = super::record::label(&trace, run.check, run.setup_failed);
         r.outcome = trace.outcome;
         r.pass = pass;
@@ -297,7 +314,11 @@ pub fn summarise(meta: Meta, runs: Vec<Run>) -> Summary {
         ));
     }
     let (executor_p50_ms, executor_p95_ms) = p50_p95(ex_lat);
+    let count = |c: &str| failures.get(c).copied().unwrap_or(0);
     Summary {
+        false_done: count("false_done"),
+        gated_never_verified: count("gated_never_verified"),
+        gate_refusals: results.iter().map(|r| r.gate_refusals).sum(),
         executor,
         executor_available_tasks: ex_avail,
         executor_decisions: results.iter().map(|r| r.executor_decisions).sum(),

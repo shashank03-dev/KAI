@@ -82,13 +82,13 @@ impl Perceptor for Page {
             screen_hash: (self.stage.load(Ordering::SeqCst) * 1000 + typed) as u64,
             timing: Default::default(),
             screen: None,
+            window_title: None,
         })
     }
 }
 
 /// Records every action with its text; typing lands in the page. `then_go`
-/// moves the page on after the first action (a sign-in that leads to a
-/// code page).
+/// moves the page on after the first action (sign-in, then a code page).
 struct Hands<'a> {
     page: &'a Page,
     log: Mutex<Vec<String>>,

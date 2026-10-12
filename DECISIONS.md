@@ -504,3 +504,47 @@ Review of this branch against its own CI screenshots and code:
   warnings` is clean. The lockfile change is only Ely's `source` line, so
   every other dependency version is unchanged.
 
+
+## Verification: outcome ledger, DONE gate, per-action effect (2026-10-12)
+
+Ranked plan items #1 and #2 from `docs/RESEARCH_2026_10_FOUNDATIONS.md` §7.
+The design, guarantees and limits are in `docs/VERIFICATION.md`.
+
+- **"The planning call Kai already makes at step 0".** The single-agent loop
+  makes no separate planning call (only Team mode's orchestrator does). The
+  outcomes are asked for in the run's **first model call**, the one that
+  picks the first action, so no call is added. The request goes in that
+  user turn, not in the system prompt, so the cached prefix stays the same.
+  The first call gets +256 reply tokens to fit the outcomes.
+- **`url_is` reads the observation, not the OS.** Kai has no browser-protocol
+  access. The only OS-independent source of the URL is the address bar's
+  accessibility value, and that is already in the element list. So
+  `a11y_has`, `window_title` and `url_is` need no OS call, and the `Probe`
+  port only serves `file_exists`, `file_contains` and `shell_ro`.
+- **The window title** comes from the tree read Kai already does: the active
+  window's AT-SPI name on Linux, `GetWindowTextW` on the foreground window
+  on Windows. It is a new `Observation::window_title` field. No extra call.
+- **The probe port is a `RunOptions` field**, not an `Engine` field. Engine is
+  built with struct literals in ten places, while `RunOptions` has `Default`.
+  Without a port, OS probes fail closed.
+- **`shell_ro` runs without a shell.** The allowlist type (`ReadOnlyCmd`) has
+  no public constructor besides `parse`. kai-os runs POSIX stages straight
+  through `std::process` pipes, so a pipe between two allowed programs works,
+  and a pipe into anything else, redirection or substitution cannot even be
+  expressed. Globs are not expanded; `~/` is.
+- **No outcomes, no change.** With `Config::outcomes` off nothing changes. With
+  it on and no outcomes named, only the first turn differs (it carries the
+  request); a test compares the two runs turn by turn.
+- **Off by default.** The rule for shipping was "false done drops and the
+  pass rate does not fall". That needs a live model, and this container has
+  no model key and no browser (details in
+  `bench/results/2026-10-12-verification.md`). So the feature ships behind
+  `--outcomes` / *Settings › Safety*, and no gain is claimed.
+- **Stage 2, Windows.** UI Automation events are not wired: the UIA event
+  handlers could not be compile-checked here (the Windows cross-check stops
+  at `ring`, which needs the MSVC headers). Windows labels actions from the
+  tree diff and dHash only, which is exactly the old no-progress rule.
+- **Files over 500 lines.** `engine/mod.rs` was at 502. Steering and output
+  helpers moved to `engine/act.rs`, and it is now under 500. `agent.rs`,
+  `skills.rs` and `human_e2e.rs` were already over 500 before this change;
+  none of them grew.

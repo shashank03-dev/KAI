@@ -113,6 +113,9 @@ pub struct Settings {
     /// Let a fast local decision model (jevos) carry out Gemma's plan
     /// (docs/EXECUTOR.md). Off until measured.
     pub use_executor: bool,
+    /// Check the result before accepting "done": the outcome ledger and
+    /// DONE gate (docs/VERIFICATION.md). Off until measured.
+    pub verify_outcomes: bool,
     /// Catalog id of the model on this computer (`BackendChoice::Local`).
     pub local_model: String,
     /// Port of the local `llama-server` (127.0.0.1 only).
@@ -151,6 +154,7 @@ impl Default for Settings {
             record_traces: false,
             executor_endpoint: crate::client::jev::LOCAL_BASE.to_string(),
             use_executor: false,
+            verify_outcomes: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
             learn: true,

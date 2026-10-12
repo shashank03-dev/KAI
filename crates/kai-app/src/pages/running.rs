@@ -91,6 +91,27 @@ fn plan(r: &RunState) -> Option<AgentPlan> {
     })
 }
 
+/// The outcome checklist (`docs/VERIFICATION.md`): verified, waiting, or
+/// failed when Kai last checked.
+fn outcomes(r: &RunState) -> Option<AgentPlan> {
+    use kai_core::ledger::Status;
+    (!r.outcomes.is_empty()).then(|| {
+        AgentPlan::new(
+            "outcomes",
+            "Checked before done",
+            r.outcomes.iter().map(|o| {
+                let state = match o.status {
+                    Status::Verified => StepState::Done,
+                    Status::Reverted => StepState::Failed,
+                    Status::Pending => StepState::Waiting,
+                };
+                let how = o.probe.as_deref().unwrap_or("not checkable");
+                (format!("{} · {how}", o.description), state)
+            }),
+        )
+    })
+}
+
 /// The steering composer under the transcript.
 fn steer_box(id: u64, app: &KaiApp, _r: &RunState, cx: &Context<KaiApp>) -> AnyElement {
     // Team runs too: whichever sub-agent steps next reads the message.
@@ -113,6 +134,7 @@ pub fn tabs(app: &KaiApp, r: &RunState, live: bool, cx: &Context<KaiApp>) -> Any
             .flex_col()
             .gap_2()
             .children(plan(r))
+            .children(outcomes(r))
             .children(panes::transcript(r))
             .children(
                 (live && r.thinking && !r.held)

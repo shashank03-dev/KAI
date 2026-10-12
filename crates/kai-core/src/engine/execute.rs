@@ -264,6 +264,7 @@ impl Engine<'_> {
 
             // ---- Act ----
             let t_act = Instant::now();
+            r.events_mark = self.perceptor.ui_events();
             let acted = match super::act::reopen_guard(&mut r.opened, &decision) {
                 Some(note) => Ok((Some(note), "none")),
                 None => self.act(&decision, g).await,

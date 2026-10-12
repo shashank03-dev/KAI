@@ -433,6 +433,7 @@ async fn run_task(
                         .map(|j| j as &dyn kai_core::executor::Decider),
                     memory: memory.as_ref(),
                     learn_later: false,
+                    probe: Some(&kai_os::DesktopProbe),
                 },
             )
             .await;

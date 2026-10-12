@@ -6,7 +6,7 @@ use super::RawNode;
 use kai_core::{Rect, Role};
 use uiautomation::types::{ControlType, Handle, TreeScope, UIProperty};
 use uiautomation::{UIAutomation, UIElement};
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetForegroundWindow, GetWindowTextW};
 use windows::core::w;
 
 const MAX_NODES: usize = 3000;
@@ -49,6 +49,16 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
     if !fg.is_invalid() {
         roots.push(auto.element_from_handle(Handle::from(fg.0 as isize))?);
     }
+    // The title for the `window_title` probe (docs/VERIFICATION.md).
+    let mut buf = [0u16; 512];
+    // SAFETY: writes at most `buf.len()` UTF-16 units into our buffer.
+    let n = if fg.is_invalid() {
+        0
+    } else {
+        unsafe { GetWindowTextW(fg, &mut buf) }
+    };
+    let title = (n > 0).then(|| String::from_utf16_lossy(&buf[..n as usize]));
+    super::active::set(title, None);
     if let Ok(tray) = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }
         && !tray.is_invalid()
         && let Ok(el) = auto.element_from_handle(Handle::from(tray.0 as isize))

@@ -19,6 +19,9 @@ pub struct Observation {
     pub timing: ObserveTiming,
     /// The captured display in global screen pixels, when known.
     pub screen: Option<crate::element::Rect>,
+    /// The active window's title, from the same tree read (no extra OS
+    /// call); `None` when unknown. Read by the `window_title` probe.
+    pub window_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -44,6 +47,24 @@ pub trait Perceptor: Send + Sync {
     async fn zoom(&self, _rect: crate::element::Rect) -> Option<Vec<u8>> {
         None
     }
+    /// A running count of accessibility events from the active app (AT-SPI
+    /// state/text/property/children/window/document events). `None` when
+    /// this backend cannot see events; the effect label then falls back to
+    /// the tree diff and screen hash (`docs/VERIFICATION.md`).
+    fn ui_events(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Read-only checks for the outcome ledger's OS probes (`file_exists`,
+/// `file_contains`, `shell_ro`); observation probes never reach it. It must
+/// never write. Each call runs under `Config::probe_timeout`.
+#[async_trait]
+pub trait Probe: Send + Sync {
+    async fn check(
+        &self,
+        probe: &crate::probe::ProbeSpec,
+    ) -> anyhow::Result<crate::probe::ProbeVerdict>;
 }
 
 /// Moves the mouse/keyboard and reaches the OS for fast paths.
@@ -165,6 +186,18 @@ pub enum EngineEvent {
         kind: crate::human::CheckKind,
         result: String,
     },
+    /// The outcome ledger changed (set at the first call, or a status
+    /// moved). Strings are already redacted.
+    Outcomes {
+        step: u32,
+        outcomes: Vec<crate::ledger::OutcomeRecord>,
+    },
+    /// Kai refused the model's `done`: "not done: <outcome>: <probe>
+    /// failed (<reason>)".
+    Gated {
+        step: u32,
+        reason: String,
+    },
     /// A user message was folded into this step.
     Steered {
         step: u32,
@@ -209,6 +242,12 @@ pub struct Config {
     /// How long a human check waits for the user before the run ends as
     /// "asked user". The wait does not count against `max_time`.
     pub human_wait: Duration,
+    /// Ask for required outcomes at the first model call and accept `done`
+    /// only when every probed one holds (`docs/VERIFICATION.md`). Off until
+    /// measured on a live model.
+    pub outcomes: bool,
+    /// Longest one outcome probe may run; a timeout counts as failed.
+    pub probe_timeout: Duration,
 }
 
 impl Default for Config {
@@ -228,6 +267,8 @@ impl Default for Config {
             learn: true,
             reflect: false,
             human_wait: Duration::from_secs(600),
+            outcomes: false,
+            probe_timeout: Duration::from_secs(2),
         }
     }
 }

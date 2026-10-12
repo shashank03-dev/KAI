@@ -32,11 +32,34 @@ impl EventSink for Printer {
             EngineEvent::HumanDone { result, .. } => {
                 eprintln!("     ↩ back from you: {}", result.replace('_', " "));
             }
+            EngineEvent::Outcomes { outcomes, .. } => {
+                for o in outcomes {
+                    eprintln!("     {}", checklist_line(o));
+                }
+            }
+            EngineEvent::Gated { reason, .. } => eprintln!("     ⛔ {reason}"),
             EngineEvent::NeedsHuman { .. }
             | EngineEvent::Output { .. }
             | EngineEvent::Steered { .. } => {}
         }
     }
+}
+
+/// `✓ sent — the form was submitted [window_title(thank you)]`.
+pub fn checklist_line(o: &kai_core::OutcomeRecord) -> String {
+    use kai_core::ledger::{Status, VerifiedBy};
+    let mark = match (o.status, o.by) {
+        (Status::Verified, _) => "✓",
+        (Status::Reverted, _) => "↺",
+        (Status::Pending, Some(VerifiedBy::User)) => "☑ (you)",
+        (Status::Pending, _) => "☐",
+    };
+    let probe = match (&o.probe, &o.probe_refused) {
+        (Some(p), _) => format!(" [{p}]"),
+        (None, Some(why)) => format!(" [probe refused: {why}]"),
+        (None, None) => " [no probe]".into(),
+    };
+    format!("{mark} {} — {}{probe}", o.id, o.description)
 }
 
 /// One line saying what an action does, in plain words.

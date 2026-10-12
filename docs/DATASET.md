@@ -109,6 +109,7 @@ pass. The first rule that matches wins:
 |---|---|
 | `rate_limited` | an error mentions 429, a rate limit, a quota or too many requests |
 | `false_done` | the model said `done` (outcome success) but the check failed |
+| `gated_never_verified` | Kai's DONE gate refused `done` at least once and a probed outcome never verified (`docs/VERIFICATION.md`); `false_done` still means the gate accepted (or was off) and the check failed |
 | `malformed` | two or more replies that would not decode, even after the repair retry |
 | `env_error` | an action errored (`path: error` / `ERROR:` output), a shell command timed out, an observation failed, or (bench) the task's setup command failed |
 | `loop` | the same action on the same target (and text/keys) three or more times; `wait` and `scroll` are not counted |
@@ -119,8 +120,15 @@ pass. The first rule that matches wins:
 | `needs_human` | the run hit a CAPTCHA, one-time code, sign-in approval or question that nobody answered (headless run, timeout, or too many asks); see `docs/HUMAN_CHECKS.md` |
 | `other` | anything else (stopped by the user, failed) |
 
+Traces also carry `outcomes` (the required outcomes the model named at the
+first call, each with its probe, status, `verified_at` and evidence steps),
+`gate` (every refused `done` and any waiver) and, per step, `effect`
+(`confirmed`, `unverifiable` or `no_op`); all are left out when empty. See
+`docs/VERIFICATION.md`.
+
 The bench results JSON gets a `failure` per task and a `failures`
-histogram, and the Markdown gets a Failure column plus a
+histogram, plus `false_done`, `gated_never_verified` and `gate_refusals`
+counts, and the Markdown gets a Failure column plus a
 `Failure categories:` line. These are new fields; no existing field was renamed.
 
 ## Export

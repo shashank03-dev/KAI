@@ -206,6 +206,7 @@ optional deterministic steps in `metadata.kai`. Validate with
 ## Docs
 - [docs/HARNESS.md](docs/HARNESS.md) — the loop, speed, safety, sub-agents
 - [docs/DESIGN.md](docs/DESIGN.md) — screens, states and components
+- [docs/VERIFICATION.md](docs/VERIFICATION.md) — the outcome ledger and DONE gate (experimental, off by default)
 - [docs/SKILLS.md](docs/SKILLS.md) — the skill format and Kai's extension
 - [docs/DEMO.md](docs/DEMO.md) — the 3-minute demo
 - [DECISIONS.md](DECISIONS.md) — every assumption and deviation, and what was not run here

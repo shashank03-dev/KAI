@@ -46,6 +46,7 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
     let root = a11y.root_accessible_on_registry().await?;
 
     let mut roots: Vec<ObjectRefOwned> = Vec::new();
+    let mut active: (Option<String>, Option<String>) = (None, None);
     for app in root.get_children().await? {
         let Ok(app_proxy) = app.as_accessible_proxy(bus).await else {
             continue;
@@ -61,11 +62,19 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
                 continue;
             };
             let state = wp.get_state().await.unwrap_or_default();
+            if state.contains(State::Active) && !panel && active.0.is_none() {
+                active = (
+                    Some(wp.name().await.unwrap_or_default()),
+                    win.name_as_str().map(str::to_string),
+                );
+            }
             if state.contains(State::Active) || panel {
                 roots.push(win);
             }
         }
     }
+
+    super::active::set(active.0, active.1);
 
     let mut out = Vec::new();
     let mut visits = 0usize;

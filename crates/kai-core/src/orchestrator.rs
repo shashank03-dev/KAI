@@ -166,6 +166,7 @@ impl Perceptor for Headless {
             screen_hash: self.tick.fetch_add(1, Ordering::SeqCst),
             timing: Default::default(),
             screen: None,
+            window_title: None,
         })
     }
 }
@@ -334,7 +335,12 @@ impl Orchestrator<'_> {
             verifier: None,
             human: self.human,
             skills: self.skills,
-            config: self.config,
+            // Sub-agents run without the outcome ledger (no probe port here;
+            // docs/VERIFICATION.md).
+            config: Config {
+                outcomes: false,
+                ..self.config
+            },
         }
     }
 
