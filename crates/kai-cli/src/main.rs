@@ -6,6 +6,7 @@ mod backend;
 mod bench;
 mod console;
 mod data;
+mod mcp;
 mod memory;
 mod models;
 
@@ -84,6 +85,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: models::ModelsCmd,
     },
+    /// Serve Kai's eyes and hands over MCP on stdio (docs/MCP.md).
+    Mcp {
+        #[command(flatten)]
+        backend: BackendOpts,
+    },
     /// Store an API key in the OS keychain: `kai key gateway` (reads stdin).
     Key {
         #[arg(value_parser = ["gemini", "vllm", "gateway", "openai"])]
@@ -154,6 +160,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             eprintln!("Saved to the OS keychain.");
             Ok(ExitCode::SUCCESS)
         }
+        Cmd::Mcp { backend } => mcp::serve(&backend).await,
         Cmd::Doctor => {
             let checks = kai_os::permissions::check_all().await;
             for c in &checks {
@@ -367,7 +374,7 @@ async fn run_task(
         if let Some(e) = &run.error {
             eprintln!("native loop error: {e}");
         }
-        save_trace(&run.trace);
+        memory::save_trace(&run.trace);
         if let Some(rec) = &recorder {
             rec.finish(&run.trace)?;
         }
@@ -441,7 +448,7 @@ async fn run_task(
                 },
             )
             .await;
-        save_trace(&trace);
+        memory::save_trace(&trace);
         if let Some(rec) = &recorder {
             eprintln!("recorded to {}", rec.dir().display());
         }
@@ -482,17 +489,4 @@ fn run_recorder(
         rec = rec.with_careful_model(&s.careful_model);
     }
     Ok(rec)
-}
-
-fn save_trace(trace: &kai_core::Trace) {
-    let dir = Settings::traces_dir();
-    let name = format!("{}.json", jiff::Timestamp::now().as_second());
-    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| {
-        std::fs::write(
-            dir.join(&name),
-            serde_json::to_string_pretty(trace).unwrap_or_default(),
-        )
-    }) {
-        log::warn!("could not save trace: {e}");
-    }
 }

@@ -261,6 +261,20 @@ pub fn run(cmd: MemoryCmd) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Save a finished run where `kai memory consolidate` will find it.
+pub fn save_trace(trace: &kai_core::Trace) {
+    let dir = Settings::traces_dir();
+    let name = format!("{}.json", jiff::Timestamp::now().as_second());
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| {
+        std::fs::write(
+            dir.join(&name),
+            serde_json::to_string_pretty(trace).unwrap_or_default(),
+        )
+    }) {
+        log::warn!("could not save trace: {e}");
+    }
+}
+
 /// Every saved run under `dir` (the CLI's `<time>.json` files and the app's
 /// `<time>/trace.json` folders). Unreadable files are skipped.
 fn saved_traces(dir: &std::path::Path) -> Vec<kai_core::Trace> {

@@ -16,6 +16,7 @@ pub mod failure;
 pub mod human;
 pub mod ledger;
 pub mod macro_history;
+pub mod mcp;
 pub mod memory;
 pub mod models;
 pub mod orchestrator;

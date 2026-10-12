@@ -181,6 +181,12 @@ with a small bonus for brevity. The chosen plan rides along in every turn as
 a guide, and the trace keeps all plans and their scores. Not used when a
 skill or a procedure already covers the task (`best_of.rs`).
 
+**MCP server (`kai mcp`).** Kai's eyes and hands as tools for other
+agents: `kai_observe`, `kai_act` (by element name or the number from the
+last observe), `kai_probe` (read-only checks) and `kai_run_task`. Over MCP,
+high-risk actions, password and payment fields, human checks and the shell
+are refused, because nobody is there to approve. See [MCP.md](MCP.md).
+
 **Zoomed crop.** After a grid click that changed nothing, the next request
 carries a 2x crop around the clicked cell with its own numbered sub-grid.
 
