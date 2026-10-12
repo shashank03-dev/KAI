@@ -154,6 +154,7 @@ pub async fn fetch(
                 // The server ignored the range: start over.
                 if have > 0 {
                     file.set_len(0).await?;
+                    file.rewind().await?;
                     have = 0;
                     hasher = Sha256::new();
                 }
@@ -166,6 +167,7 @@ pub async fn fetch(
                     break;
                 }
                 file.set_len(0).await?;
+                file.rewind().await?;
                 have = 0;
                 hasher = Sha256::new();
                 continue;
