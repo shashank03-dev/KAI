@@ -78,6 +78,7 @@ async fn frames(out: Option<String>) -> anyhow::Result<()> {
                 max_side: side,
                 max_pixels: px,
                 quality: q,
+                window_scope: false,
             };
             let mut ts = Vec::new();
             let mut ds = Vec::new();
