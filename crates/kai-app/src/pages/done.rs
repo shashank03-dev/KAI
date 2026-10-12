@@ -3,19 +3,19 @@
 use crate::app::KaiApp;
 use crate::i18n::t;
 use crate::pages::running;
+use crate::ui::{self, Glass};
 use ely_gpui_component::{
     agent::{ComputerUseViewer, HumanInputRequest, ToolCallCard},
     buttons::{Button, ButtonVariant},
     chat::FollowUpSuggestions,
-    data_display::Statistic,
     documents::MarkdownRenderer,
-    feedback::{ErrorView, ResultView},
+    feedback::ErrorView,
     layout::ScrollArea,
     motion::Confetti,
-    primitives::IconName,
-    theme::{ActiveTheme, TextSize},
+    primitives::{Icon, IconName},
+    theme::{ActiveTheme, IconSize},
 };
-use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, px};
 use kai_core::{Action, Outcome};
 
 fn reason(outcome: Option<Outcome>) -> &'static str {
@@ -34,7 +34,6 @@ fn reason(outcome: Option<Outcome>) -> &'static str {
 }
 
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
-    let theme = cx.theme();
     let r = app.run.read(cx);
     let outcome = r.outcome();
     let ok = outcome == Some(Outcome::Success) && r.error.is_none();
@@ -47,19 +46,75 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     let per_step = if steps > 0 { secs / steps as f64 } else { 0.0 };
     let task = r.task.clone();
 
-    let result = if ok {
-        ResultView::success("result", t(cx, "done.success", &[])).into_any_element()
-    } else if let Some(e) = &r.error {
-        ErrorView::new(
-            "result",
-            IconName::TriangleAlert,
-            t(cx, "done.failure", &[]),
-        )
-        .detail(e.clone())
-        .into_any_element()
+    let g = Glass::of(cx);
+    let colors = &cx.theme().colors;
+    let stopped = outcome == Some(Outcome::Stopped) && r.error.is_none();
+    let (tone, icon) = if ok {
+        (colors.success, IconName::Check)
+    } else if stopped {
+        (colors.warning, IconName::CircleStop)
     } else {
-        ResultView::failure("result", t(cx, "done.failure", &[])).into_any_element()
+        (colors.danger, IconName::X)
     };
+    // The result as a hero: a glass orb lit in the outcome's colour.
+    let mut tint = tone;
+    tint.a = 0.14;
+    let hero = div()
+        .flex()
+        .items_center()
+        .gap(px(20.))
+        .child(
+            div()
+                .size(px(64.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(tint)
+                .border_1()
+                .border_color(tone)
+                .shadow(vec![g.sheen_shadow(), g.glow(tone, 28.)])
+                .child(Icon::new(icon).size(IconSize::Lg).color(tone)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .min_w_0()
+                .child(ui::eyebrow(
+                    if ok {
+                        "Finished".to_string()
+                    } else {
+                        outcome
+                            .map(crate::state::outcome_text)
+                            .unwrap_or("Ended")
+                            .to_string()
+                    },
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_size(px(26.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(g.text)
+                        .child(if ok {
+                            t(cx, "done.success", &[])
+                        } else {
+                            t(cx, "done.failure", &[])
+                        }),
+                )
+                .child(
+                    div()
+                        .text_size(px(14.))
+                        .text_color(g.dim)
+                        .child(reason(outcome)),
+                ),
+        );
+    let result = r.error.as_ref().map(|e| {
+        ErrorView::new("result", IconName::TriangleAlert, "What went wrong").detail(e.clone())
+    });
 
     // When Kai asked something, the last step's text is the question.
     let question = r
@@ -111,21 +166,30 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     let follow_task = task.clone();
     let follow = cx.entity();
 
+    let tile = |label: &str, value: String| {
+        ui::card(&g)
+            .flex_1()
+            .min_w(px(140.))
+            .p(px(16.))
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(ui::eyebrow(label.to_string(), cx))
+            .child(
+                div()
+                    .font_family(cx.theme().mono_family.clone())
+                    .text_size(px(24.))
+                    .text_color(g.text)
+                    .child(value),
+            )
+    };
     let stats = div()
         .flex()
         .flex_wrap()
-        .gap_6()
-        .child(Statistic::new("steps", "Steps", steps as f64))
-        .child(
-            Statistic::new("time", "Total time", secs)
-                .decimals(1)
-                .suffix(" s"),
-        )
-        .child(
-            Statistic::new("per-step", "Seconds per step", per_step)
-                .decimals(2)
-                .suffix(" s"),
-        );
+        .gap(px(10.))
+        .child(tile("Steps", steps.to_string()))
+        .child(tile("Total time", format!("{secs:.1}s")))
+        .child(tile("Per step", format!("{per_step:.2}s")));
 
     let actions = div()
         .flex()
@@ -192,10 +256,12 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     ScrollArea::new("done").vertical().child(
         div()
             .relative()
-            .p_6()
+            .px(px(32.))
+            .py(px(28.))
+            .max_w(px(920.))
             .flex()
             .flex_col()
-            .gap_5()
+            .gap(px(22.))
             .child(
                 div()
                     .flex()
@@ -205,14 +271,18 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         "done-status",
                         running::agent_state(r),
                     ))
-                    .child(div().text_size(theme.text_size(TextSize::Md)).child(task)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(13.))
+                            .text_color(g.dim)
+                            .truncate()
+                            .child(task),
+                    ),
             )
-            .child(result)
-            .child(
-                div()
-                    .text_color(theme.colors.fg_muted)
-                    .child(reason(outcome)),
-            )
+            .child(hero)
+            .children(result)
             .children(ask)
             .child(stats)
             .children(report)
@@ -224,7 +294,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().text_color(theme.colors.fg_muted).child("Terminal"))
+                    .child(ui::eyebrow("Terminal", cx))
                     .child(crate::pages::panes::terminal(r, cx))
             }))
             .children((!r.team_view.subs.is_empty()).then(|| {
@@ -232,7 +302,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().text_color(theme.colors.fg_muted).child("Sub-agents"))
+                    .child(ui::eyebrow("Sub-agents", cx))
                     .child(crate::pages::panes::team_tree(r, cx))
             }))
             .children(ok.then(|| Confetti::new("confetti", 1))),

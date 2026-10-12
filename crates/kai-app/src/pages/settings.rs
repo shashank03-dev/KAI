@@ -84,12 +84,32 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
 
 fn appearance(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
     let me = cx.entity();
+    let glass_me = cx.entity();
+    let glass = Switch::new("glass", app.settings.glass)
+        .label("Glass window: let the desktop show through, softly blurred (Mica on Windows 11)")
+        .on_change(move |on, window, cx| {
+            crate::brand::apply(on, cx);
+            window.set_background_appearance(crate::material(on));
+            glass_me.update(cx, |a, cx| {
+                a.settings.glass = on;
+                a.save_settings(cx);
+            })
+        });
     let current = match app.settings.theme.as_str() {
         "dark" => Appearance::Dark,
         "light" => Appearance::Light,
         _ => Appearance::System,
     };
-    SettingsSection::new("Appearance").row(ThemeSelector::new(
+    SettingsSection::new("Appearance")
+        .description("Kai Glass: graphite or porcelain, one ember light for what is alive.")
+        .row(glass)
+        .row(row(
+            "If text is hard to read",
+            "Without a compositor that blurs, the desktop shows through unblurred. Turn glass off for a solid window.",
+            div(),
+            cx,
+        ))
+        .row(ThemeSelector::new(
         "theme-sel",
         current,
         move |a, _, cx| {

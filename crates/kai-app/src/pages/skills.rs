@@ -1,17 +1,18 @@
 //! Skills: search, cards, enable/disable, import, details, and Save as skill.
 
 use crate::app::KaiApp;
+use crate::ui::{self, Glass};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     data_display::{Badge, Tone},
     documents::{MarkdownEditor, MarkdownMode, MarkdownRenderer},
     feedback::{EmptyState, InlineMessage, Toast},
     forms::{DropZone, SearchInput, Switch},
-    layout::{Page, ScrollArea, Sheet},
+    layout::{ScrollArea, Sheet},
     primitives::{IconName, Place, Severity},
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Styled, Window, div, px};
 use kai_core::Skill;
 use kai_core::settings::Settings;
 use std::path::Path;
@@ -25,6 +26,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .map(|s| detail_sheet(&s, cx));
     let draft = app.pages.drafting.then(|| draft_sheet(app, window, cx));
     let theme = cx.theme();
+    let g = Glass::of(cx);
     let q = app.pages.skill_search.read(cx).text().to_ascii_lowercase();
     let shown: Vec<Skill> = app
         .skills
@@ -43,16 +45,16 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         let on = !app.pages.disabled.contains(&name);
         let (toggle, open) = (cx.entity(), cx.entity());
         let (n1, n2) = (name.clone(), name.clone());
-        div()
+        let (hover, strong) = (g.card_hover, g.line_strong);
+        ui::card(&g)
             .id(gpui::SharedString::from(format!("skill-{name}")))
-            .p_4()
+            .p(px(18.))
             .flex()
             .flex_col()
-            .gap_2()
-            .rounded_lg()
-            .border_1()
-            .border_color(theme.colors.border)
-            .bg(theme.colors.surface)
+            .justify_between()
+            .gap(px(10.))
+            .opacity(if on { 1. } else { 0.6 })
+            .hover(move |s| s.bg(hover).border_color(strong))
             .child(
                 div()
                     .flex()
@@ -63,7 +65,10 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_size(theme.text_size(TextSize::Md))
+                            .font_family(theme.mono_family.clone())
+                            .text_size(px(13.))
+                            .text_color(g.text)
+                            .truncate()
                             .child(name.clone()),
                     )
                     .child(
@@ -118,13 +123,39 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .hint("Drop a skill folder (with SKILL.md) to add it")
         .on_drop(move |paths, _, cx| importer.update(cx, |a, cx| import_skills(a, paths, cx)));
 
-    Page::new("Skills")
-        .subtitle("Agent Skill Open Standard skills Kai can use. Only names and descriptions go to the model until one is picked.")
-        .child(div().flex().flex_col().gap_4()
+    let n = app.skills.len();
+    let on = n - app
+        .skills
+        .iter()
+        .filter(|s| app.pages.disabled.contains(&s.front.name))
+        .count();
+    let content = ui::page(
+        &format!("Library · {on} of {n} on"),
+        "Skills",
+        "Agent Skill Open Standard skills Kai can use. Only names and descriptions go to the model until one is picked.",
+        None,
+        cx,
+    )
+    .child(
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
             .child(SearchInput::new("skill-search", &app.pages.skill_search))
-            .child(div().grid().grid_cols(2).gap_3().children(cards))
-            .children((!has_own).then(|| EmptyState::new("no-own", IconName::Puzzle, "No skills of your own yet").body("Finish a run and press Save as skill, or drop a skill folder below.")))
-            .child(import))
+            .child(div().grid().grid_cols(2).gap(px(12.)).children(cards))
+            .children((!has_own).then(|| {
+                EmptyState::new("no-own", IconName::Puzzle, "No skills of your own yet")
+                    .body("Finish a run and press Save as skill, or drop a skill folder below.")
+            }))
+            .child(import),
+    );
+    div()
+        .size_full()
+        .child(
+            ScrollArea::new("skills-page")
+                .vertical()
+                .child(ui::body(1040., content)),
+        )
         .children(detail)
         .children(draft)
 }

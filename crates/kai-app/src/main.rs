@@ -18,6 +18,7 @@ mod runs;
 mod state;
 mod switcher;
 mod team;
+mod ui;
 
 use ely_gpui_component::{
     Assets,
@@ -25,7 +26,8 @@ use ely_gpui_component::{
     theme::{Mode, Theme},
 };
 use gpui::{
-    App, AppContext, Bounds, Global, TitlebarOptions, WindowBounds, WindowOptions, point, px, size,
+    App, AppContext, Bounds, Global, TitlebarOptions, WindowBackgroundAppearance, WindowBounds,
+    WindowOptions, point, px, size,
 };
 use std::sync::Arc;
 
@@ -64,7 +66,7 @@ fn main() {
             ely_gpui_component::init(cx).expect("Ely failed to start");
             let settings = kai_core::settings::Settings::load();
             i18n::install(cx);
-            brand::apply(cx);
+            brand::apply(settings.glass, cx);
             let mode = match settings.theme.as_str() {
                 "dark" => Mode::Dark,
                 "light" => Mode::Light,
@@ -98,6 +100,7 @@ fn main() {
                 }),
                 window_min_size: Some(size(px(720.0), px(520.0))),
                 app_id: Some("dev.kai.Kai".into()),
+                window_background: material(settings.glass),
                 ..Default::default()
             };
             let window = cx
@@ -111,6 +114,18 @@ fn main() {
             let _ = window.update(cx, |app, window, cx| app.after_open(window, cx));
             cx.activate(true);
         });
+}
+
+/// The window material: Mica on Windows 11, compositor blur elsewhere, or
+/// opaque when glass is off.
+pub(crate) fn material(glass: bool) -> WindowBackgroundAppearance {
+    if !glass {
+        WindowBackgroundAppearance::Opaque
+    } else if cfg!(windows) {
+        WindowBackgroundAppearance::MicaBackdrop
+    } else {
+        WindowBackgroundAppearance::Blurred
+    }
 }
 
 /// Light or dark, as the OS currently asks.

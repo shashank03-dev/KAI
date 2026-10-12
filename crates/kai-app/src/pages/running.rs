@@ -6,6 +6,7 @@ use crate::app::KaiApp;
 use crate::i18n::t;
 use crate::pages::panes;
 use crate::state::{Phase, RunState};
+use crate::ui::{self, Glass};
 use ely_gpui_component::{
     agent::{AgentPlan, AgentState, AgentStatus, BrowserPreview, ComputerUseViewer},
     buttons::{Button, ButtonVariant},
@@ -17,7 +18,10 @@ use ely_gpui_component::{
     primitives::IconName,
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{AnyElement, Axis, Context, IntoElement, ParentElement, Styled, Window, div, point, px};
+use gpui::{
+    AnyElement, Axis, Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, point,
+    px,
+};
 
 /// Context a step costs, roughly: the stable prompt plus one screenshot.
 const TOKENS_PER_STEP: usize = 1_400;
@@ -153,14 +157,24 @@ pub fn seen(app: &KaiApp, r: &RunState, cx: &Context<KaiApp>) -> AnyElement {
             }
             v.into_any_element()
         }
-        None => div()
-            .h(px(240.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(theme.colors.fg_muted)
-            .child("Kai's first look at your screen will appear here.")
-            .into_any_element(),
+        None => {
+            let g = Glass::of(cx);
+            ui::card(&g)
+                .h(px(260.))
+                .flex()
+                .flex_col()
+                .gap_2()
+                .items_center()
+                .justify_center()
+                .child(ui::eyebrow("Kai's view", cx))
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(theme.colors.fg_muted)
+                        .child("Kai's first look at your screen will appear here."),
+                )
+                .into_any_element()
+        }
     };
     let strip = (r.frames.len() > 1).then(|| {
         let frames: Vec<String> = r
@@ -242,36 +256,48 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             ("max", &r.max_steps.to_string()),
         ],
     );
-    let theme = cx.theme();
+    let g = Glass::of(cx);
+    let done = step_no as f32 / r.max_steps.max(1) as f32;
+    let line_color = if r.paused || r.phase == Phase::Waiting {
+        cx.theme().colors.warning
+    } else {
+        g.ember
+    };
     let header = div()
         .flex()
-        .flex_wrap()
-        .items_center()
-        .gap_3()
-        .px_4()
-        .py_3()
+        .flex_col()
+        .bg(g.pane)
         .border_b_1()
-        .border_color(theme.colors.border)
-        .child(status)
+        .border_color(g.line)
         .child(
             div()
-                .flex_1()
-                .min_w_0()
                 .flex()
-                .flex_col()
+                .flex_wrap()
+                .items_center()
+                .gap_3()
+                .px(px(20.))
+                .py(px(14.))
+                .child(status)
                 .child(
                     div()
-                        .text_size(theme.text_size(TextSize::Md))
-                        .child(r.task.clone()),
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.))
+                        .child(
+                            div()
+                                .text_size(px(15.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(g.text)
+                                .truncate()
+                                .child(r.task.clone()),
+                        )
+                        .child(ui::mono(format!("{step} · {}", r.model), g.faint, cx)),
                 )
-                .child(
-                    div()
-                        .text_size(theme.text_size(TextSize::Xs))
-                        .text_color(theme.colors.fg_muted)
-                        .child(format!("{step} · {}", r.model)),
-                ),
+                .child(controls(id, r, cx)),
         )
-        .child(controls(id, r, cx));
+        .child(ui::progress(done, line_color, &g));
 
     let left = div()
         .size_full()
@@ -288,7 +314,8 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             div()
                 .p_3()
                 .border_t_1()
-                .border_color(cx.theme().colors.border)
+                .border_color(g.line)
+                .bg(g.pane)
                 .child(steer_box(id, app, r, cx)),
         );
     let right = ScrollArea::new("seen").vertical().child(seen(app, r, cx));

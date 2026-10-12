@@ -2,6 +2,7 @@
 //! its time went and the frames Kai saw, exportable as a zip for bug reports.
 
 use crate::app::KaiApp;
+use crate::ui;
 use ely_gpui_component::{
     agent::BrowserPreview,
     buttons::{Button, ButtonVariant},
@@ -9,11 +10,11 @@ use ely_gpui_component::{
     debug::{Span, TimelineProfiler},
     feedback::{EmptyState, Toast},
     forms::SearchInput,
-    layout::{Page, ScrollArea},
+    layout::ScrollArea,
     primitives::{IconName, Severity},
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{Context, IntoElement, ParentElement, Styled, Window, div, px};
 use kai_core::Trace;
 use kai_core::settings::Settings;
 use std::io::Write;
@@ -276,9 +277,23 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             )
             .into_any_element()
     };
-    Page::new("History")
-        .subtitle("Past runs, kept only on this computer.")
-        .child(body)
+    let n = app.pages.history.len();
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .gap(px(24.))
+        .px(px(40.))
+        .pt(px(36.))
+        .pb(px(24.))
+        .child(ui::page(
+            &format!("On this computer · {n} runs"),
+            "History",
+            "Past runs, kept only on this computer.",
+            None,
+            cx,
+        ))
+        .child(div().flex_1().min_h_0().child(body))
 }
 
 #[cfg(test)]

@@ -6,10 +6,11 @@ use crate::app::{KaiApp, Page as AppPage};
 use crate::local::LocalState;
 use crate::local_api::{Fit, HardwareSummary};
 use crate::pages::models_card;
+use crate::ui;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::Callout,
-    layout::{Card, CardHeader, Page, ScrollArea},
+    layout::{Card, CardHeader, ScrollArea},
     motion::Spinner,
     overlays::ConfirmDialog,
     primitives::{Icon, IconName, Severity},
@@ -198,9 +199,15 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             })
         })
     });
-    let page = ScrollArea::new("models").vertical().child(
-        Page::new("Models")
-            .subtitle("Run an open model on this computer: free, private, no key. Your screen never leaves this machine.")
+    let page = ScrollArea::new("models").vertical().child(ui::body(
+        1040.,
+        ui::page(
+            "On this computer",
+            "Models",
+            "Run an open model on this computer: free, private, no key. Your screen never leaves this machine.",
+            None,
+            cx,
+        )
             .child(hardware(l, cx))
             .children(ready(l, cx))
             .children(none_fit.then(|| {
@@ -210,7 +217,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             }))
             .child(div().flex().flex_col().gap_3().children(cards))
             .child(note),
-    );
+    ));
     div().size_full().child(page).children(confirm)
 }
 

@@ -125,6 +125,10 @@ pub struct Settings {
     pub reflect: bool,
     /// Skills the user switched off on the Skills page, by name.
     pub disabled_skills: Vec<String>,
+    /// See-through window material (Mica on Windows 11, blur where the Linux
+    /// compositor offers it). On by default on Windows only: without a
+    /// compositor blur, Linux would show the raw desktop behind the text.
+    pub glass: bool,
 }
 
 impl Default for Settings {
@@ -152,6 +156,7 @@ impl Default for Settings {
             learn: true,
             reflect: false,
             disabled_skills: Vec::new(),
+            glass: cfg!(windows),
         }
     }
 }

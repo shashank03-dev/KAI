@@ -62,6 +62,39 @@ Everywhere: Command palette (Ctrl+K) · Quick launcher (Ctrl+Shift+Space, global
 While running: Mini window (always on top, corner) ⇄ full Run view
 ```
 
+## Kai Glass (v2, 2026-10-12)
+
+A revamp of the look, not the information architecture. Research that shaped
+it: Apple's Liquid Glass guidance and the 2026 readability pass (glass for
+chrome and overlays, never for content; keep text contrast high over it;
+respect a solid fallback), and dark product UIs in the Raycast/Linear family
+(near-black surfaces, hairline borders around 6–10 % white, one sparing hue).
+
+- **Monochrome, one light.** Graphite canvas `#09090B` (porcelain `#F4F4F5`
+  in light). The primary colour is *ink* (white on dark, black on light), so
+  the main action is the brightest thing on screen without a hue. Kai's
+  saffron becomes **ember** (`#F5A524` / `#C2410C`) and marks only what is
+  alive: the brand orb, a running run's dot and progress line, the
+  composer's halo, the mini window's edge. Green/amber/red keep their meaning.
+- **Glass as layers, not blur everywhere.** `ui.rs` tokens: `pane` (task list,
+  run header), `card`, `raised`, each a low-alpha fill with a hairline border
+  and a 1 px top *sheen* (an inset highlight). Shadows only lift the composer.
+- **Real window glass, opt-in where it can fail.** `Settings::glass`: Mica on
+  Windows 11 (on by default), compositor blur on Linux (off by default: without
+  a blurring compositor the desktop would show through unblurred). The canvas
+  goes to 78 % alpha only when glass is on.
+- **Code-flavoured type.** Inter for reading; JetBrains Mono, upper case, 11 px
+  for eyebrows, counters, step meta, skill names and key caps.
+- **Home.** Orb → status pill (dot + model) → 40 px greeting → the composer as
+  the one raised layer with an ember halo → key hints (↵ run, Ctrl K, the stop
+  shortcut) → "Start from a skill" as a 2×3 grid of glass cards. A static
+  ember light leak (`ui::aurora`) along the top; nothing animates while idle.
+- **Pages.** Models, Skills, History and Benchmarks share `ui::page` (eyebrow,
+  30 px title, subtitle, optional action) in a 1040 px column.
+- **Runs.** Task list rows with live ember dots and mono meta; the run header
+  carries a 2 px progress line (amber when paused or waiting); results open
+  with a lit orb and mono stat tiles.
+
 ## Screens, components and states
 
 Each screen lists its Ely components and every state. All screens exist in

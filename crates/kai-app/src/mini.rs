@@ -105,8 +105,12 @@ impl MiniView {
 impl Render for MiniView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let g = crate::ui::Glass::of(cx);
         let r = self.run.read(cx);
         let waiting = r.phase == Phase::Waiting;
+        // An ember edge while Kai works, so the corner window reads as live.
+        let mut edge = g.ember;
+        edge.a = if r.held { 0.25 } else { 0.6 };
         let step = t(
             cx,
             "run.step",
@@ -154,14 +158,11 @@ impl Render for MiniView {
             .bg(if waiting {
                 theme.colors.warning_subtle
             } else {
-                theme.colors.bg
+                theme.colors.surface
             })
             .border_1()
-            .border_color(if waiting {
-                theme.colors.warning
-            } else {
-                theme.colors.border
-            })
+            .border_color(if waiting { theme.colors.warning } else { edge })
+            .shadow(vec![g.sheen_shadow()])
             .child(
                 div()
                     .flex()
@@ -176,6 +177,15 @@ impl Render for MiniView {
                             .child(step),
                     ),
             )
+            .child(crate::ui::progress(
+                r.current_step().max(1) as f32 / r.max_steps.max(1) as f32,
+                if waiting {
+                    theme.colors.warning
+                } else {
+                    g.ember
+                },
+                &g,
+            ))
             .child(
                 div()
                     .text_size(theme.text_size(TextSize::Sm))
