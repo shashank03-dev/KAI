@@ -3,7 +3,7 @@
 ---
 
 You are continuing work on **Kai**, in the repo `shashank03-dev/KAI`, branch
-`ccr-904952eb-q0l216`. Read these first, in this order, before doing anything:
+`main`. Read these first, in this order, before doing anything:
 `README.md`, `DECISIONS.md`, `docs/HARNESS.md`, `docs/DESIGN.md`,
 `docs/SKILLS.md`, then skim `crates/*/src`. They describe what already exists
 and what was not finished. Do not redo work that is done and tested.
@@ -22,7 +22,13 @@ same harness in a terminal, and the desktop app is a richer front end over it.
   `effort: "medium"`. Split by crate or concern so agents don't edit the same
   files at once; you integrate, build, test and commit.
 - Commit as the repo owner with **no** `Co-Authored-By` or Claude lines.
-  Push to `ccr-904952eb-q0l216`. Do not open a PR unless asked.
+  Do not open a PR unless asked.
+- **One push per batch of work, and only when I say "push".** Commit
+  locally as you go, but do not push in between: CI runs only on pushes to
+  `main` (Linux + Windows, ~25 min) and Actions minutes cost money. Run the
+  full local check first (fmt, clippy, test, skill validate), then push
+  everything to `main` in one go. Screenshots run only by hand from the
+  Actions tab.
 - English only in the UI. Linux + Windows only (no macOS work).
 - Keep every claim honest: README and the Benchmarks page show only numbers
   that were actually measured, with how they were measured.

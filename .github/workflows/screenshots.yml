@@ -1,18 +1,12 @@
 # Capture every screen of the desktop app, light and dark, with made-up data
 # (KAI_CAPTURE mode, see screenshots/README.md) on a headless X server with
 # Mesa's software Vulkan, then commit the PNGs back to the branch.
-# Run it from the Actions tab (workflow_dispatch) after UI changes.
+# Manual only: run it from the Actions tab after UI changes (it is the most
+# expensive job, so it never runs on a push).
 name: Screenshots
 
 on:
   workflow_dispatch:
-  # On feature branches, every app change re-captures (the bot's own commit
-  # uses GITHUB_TOKEN, so it does not trigger another run).
-  push:
-    branches-ignore: [main]
-    paths:
-      - .github/workflows/screenshots.yml
-      - crates/kai-app/**
 
 # A newer push to the same branch cancels the older run instead of paying
 # for both (private-repo Actions minutes).
@@ -30,12 +24,6 @@ jobs:
   # Named `check` like CI's job so rust-cache reuses CI's build cache (Ely
   # itself is vendored under vendor/ now, so no clone is needed).
   check:
-    # Never commit captures onto the default branch from a push (it is not
-    # named `main` in this repo, so `branches-ignore` alone let it through);
-    # a manual run there is still allowed.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.ref_name != github.event.repository.default_branch
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

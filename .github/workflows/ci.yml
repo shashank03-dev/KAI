@@ -1,8 +1,24 @@
 name: CI
 
+# Runs only when work lands on main (one push per batch of work), on PRs,
+# or by hand from the Actions tab. Pushes to other branches cost nothing;
+# validate locally there (fmt, clippy -D warnings, test, skill validate).
+# Doc-only, bench-result and screenshot changes never trigger a run.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - bench/results/**
+      - screenshots/**
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - bench/results/**
+      - screenshots/**
+  workflow_dispatch:
 
 # A newer push to the same branch cancels the older run instead of paying
 # for both (private-repo Actions minutes).
