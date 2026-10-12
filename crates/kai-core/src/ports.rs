@@ -259,6 +259,9 @@ pub struct Config {
     /// follow the one the others agree with most (`best_of.rs`). 0 or 1:
     /// off. Each plan is one model call (made in parallel).
     pub best_of: u32,
+    /// When two steps change nothing, diagnose why and change course once
+    /// before stopping to ask (`engine/recover.rs`). Off until measured.
+    pub recover: bool,
 }
 
 impl Default for Config {
@@ -283,6 +286,7 @@ impl Default for Config {
             macro_history: false,
             procedures: false,
             best_of: 0,
+            recover: false,
         }
     }
 }

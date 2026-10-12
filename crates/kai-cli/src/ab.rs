@@ -50,6 +50,10 @@ pub struct Ab {
     /// others agree with most (0 = off; one model call per plan).
     #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=5))]
     pub best_of: u32,
+    /// When two steps change nothing, diagnose why and change course once
+    /// before stopping to ask.
+    #[arg(long)]
+    pub recover: bool,
 }
 
 impl Ab {
@@ -84,6 +88,9 @@ impl Ab {
         if self.best_of >= 2 {
             v.push("--best-of");
         }
+        if self.recover {
+            v.push("--recover");
+        }
         v
     }
 }
@@ -104,6 +111,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.macro_history = ab.macro_history;
     config.procedures = ab.procedures;
     config.best_of = ab.best_of;
+    config.recover = ab.recover;
     Ok(true)
 }
 

@@ -11,7 +11,7 @@ use kai_core::engine::{ApprovalChoice, Approver, EngineEvent, EventSink};
 use kai_core::human::{HumanCheck, HumanHelper, HumanReply};
 use kai_core::orchestrator::{Orchestrator, Plan};
 use kai_core::settings::{Keys, Settings};
-use kai_core::{Config, Decision, Engine, Grounding, Images, Rect, Skill, Trace};
+use kai_core::{Decision, Engine, Grounding, Images, Rect, Skill, Trace};
 use kai_os::{DesktopActuator, DesktopPerceptor, KillSwitch};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -222,20 +222,7 @@ async fn drive(
     actuator: &DesktopActuator,
 ) -> anyhow::Result<()> {
     let (fast, careful) = settings.clients(&keys)?;
-    let (max_steps, max_time) = settings.limits();
-    let config = Config {
-        max_steps,
-        max_time,
-        approval: settings.approval,
-        executor: settings.use_executor,
-        outcomes: settings.verify_outcomes,
-        macro_history: settings.macro_history,
-        procedures: settings.use_procedures,
-        best_of: if settings.best_of_plans { 3 } else { 0 },
-        learn: settings.learn,
-        reflect: settings.reflect,
-        ..Config::default()
-    };
+    let config = settings.engine_config();
     let dir = run_dir();
     std::fs::create_dir_all(&dir)?;
     let sink = Sink {

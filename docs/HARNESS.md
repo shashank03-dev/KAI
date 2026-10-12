@@ -187,6 +187,15 @@ last observe), `kai_probe` (read-only checks) and `kai_run_task`. Over MCP,
 high-risk actions, password and payment fields, human checks and the shell
 are refused, because nobody is there to approve. See [MCP.md](MCP.md).
 
+**Diagnosed recovery (off by default, `--recover`).** Normally two steps
+that change nothing end the run with a question to you. With `--recover`,
+Kai first names the cause from the last few steps: a click on the wrong
+element (the thought quoted another name), an action that errored, or a
+repeated action. It tells the model what to do instead, switches to the
+careful model and takes a full screenshot, once per run. A second stall
+still stops and asks. `trace.recoveries` records each recovery
+(`engine/recover.rs`).
+
 **Zoomed crop.** After a grid click that changed nothing, the next request
 carries a 2x crop around the clicked cell with its own numbered sub-grid.
 

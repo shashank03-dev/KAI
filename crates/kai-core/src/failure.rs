@@ -342,6 +342,54 @@ fn grounding_miss(trace: &Trace) -> Option<String> {
     None
 }
 
+/// Steps a live diagnosis looks back over.
+const RECENT: usize = 4;
+
+/// Why the last few steps changed nothing, while the run is still going
+/// (diagnosed recovery, `--recover`). Reads only the most recent steps:
+/// a grounding miss, then an action error, then a repeat, else plain no
+/// progress. The text says what happened, for the model's next turn.
+pub fn diagnose_live(trace: &Trace) -> (Category, String) {
+    let from = trace.steps.len().saturating_sub(RECENT);
+    let recent = Trace {
+        steps: trace.steps[from..].to_vec(),
+        ..Trace::new(trace.task.clone())
+    };
+    if let Some(d) = grounding_miss(&recent) {
+        return (Category::GroundingMiss, d);
+    }
+    if let Some(d) = env_error(&recent) {
+        return (Category::EnvError, d);
+    }
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for s in &recent.steps {
+        if let Some(k) = action_key(&s.decision) {
+            *seen.entry(k).or_default() += 1;
+        }
+    }
+    if let Some(s) =
+        recent.steps.iter().rev().find(|s| {
+            action_key(&s.decision).is_some_and(|k| seen.get(&k).copied().unwrap_or(0) >= 2)
+        })
+    {
+        let name = s
+            .decision
+            .target
+            .and_then(|t| mark_name(&s.elements, t))
+            .map(|n| format!(" on \"{n}\""))
+            .unwrap_or_default();
+        let what = format!("{:?}", s.decision.action).to_lowercase();
+        return (
+            Category::Loop,
+            format!("{what}{name} was repeated and changed nothing"),
+        );
+    }
+    (
+        Category::Loop,
+        "the last two actions changed nothing on screen".into(),
+    )
+}
+
 #[cfg(test)]
 #[path = "failure_tests.rs"]
 mod tests;

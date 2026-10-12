@@ -83,6 +83,7 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         .row(Switch::new("macro-history", app.settings.macro_history).label("Remember older steps as a short summary instead of only the last three — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.macro_history = v; a.save_settings(cx); }) }))
         .row(Switch::new("procedures", app.settings.use_procedures).label("Replay remembered procedures for tasks Kai has done before, with no model calls — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_procedures = v; a.save_settings(cx); }) }))
         .row(Switch::new("best-of", app.settings.best_of_plans).label("Plan long tasks three ways first and follow the plan they agree on (3 extra model calls) — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.best_of_plans = v; a.save_settings(cx); }) }))
+        .row(Switch::new("recover", app.settings.recover).label("When nothing changes, work out why and try another way once before asking — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.recover = v; a.save_settings(cx); }) }))
         .row(Switch::new("team-default", app.settings.team_mode).label("Use sub-agents by default").on_change(move |v, _, cx| team.update(cx, |a, cx| { a.settings.team_mode = v; a.team = v; a.save_settings(cx); })))
 }
 

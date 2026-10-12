@@ -36,6 +36,8 @@ mod memory;
 mod observe;
 mod procedure;
 mod record;
+mod recover;
+pub use recover::RecoveryRecord;
 mod run;
 pub use procedure::PROCEDURE;
 use run::{Pending, Run};
@@ -403,7 +405,7 @@ impl Engine<'_> {
         }
         r.pending = Some(pending);
 
-        if r.no_progress_streak >= 2 {
+        if r.no_progress_streak >= 2 && !self.recover(r) {
             // Two steps with no change despite acting: stop and ask.
             return Some(Outcome::AskedUser);
         }

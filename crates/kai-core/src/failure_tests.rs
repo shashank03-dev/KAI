@@ -145,3 +145,24 @@ fn a_gate_that_never_verified_is_its_own_category() {
     t.gate.clear();
     assert_eq!(cat(&t, Some(false)), Some(Category::FalseDone));
 }
+
+#[test]
+fn live_diagnosis_names_the_cause_from_recent_steps_only() {
+    // A click on the wrong element: the thought quotes another name.
+    let miss = r#"{"thought":"open \"Settings\"","action":"click","target":3,"risk":"none"}"#;
+    let mut t = trace(&[miss], Outcome::AskedUser);
+    t.steps[0].verified = false;
+    t.steps[0].elements = "#3 button \"Help\" (enabled)".into();
+    assert_eq!(diagnose_live(&t).0, Category::GroundingMiss);
+    // An action error.
+    let mut t = trace(&[SHELL], Outcome::AskedUser);
+    t.steps[0].path = Some("error".into());
+    t.steps[0].output = Some("ERROR: no window".into());
+    assert_eq!(diagnose_live(&t).0, Category::EnvError);
+    // An old error far back does not count; the recent repeat does.
+    let mut t = trace(&[SHELL, WAIT, CLICK3, WAIT, CLICK3], Outcome::AskedUser);
+    t.steps[0].path = Some("error".into());
+    let (c, why) = diagnose_live(&t);
+    assert_eq!(c, Category::Loop);
+    assert!(why.contains("repeated"), "{why}");
+}

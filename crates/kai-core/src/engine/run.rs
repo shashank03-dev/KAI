@@ -71,6 +71,8 @@ pub(super) struct Run<'t> {
     pub(super) procedure: Option<String>,
     /// The best-of-N plan, shown in every turn (`crate::best_of`).
     pub(super) plan_note: Option<String>,
+    /// Diagnosed recoveries so far (`Config::recover`).
+    pub(super) recoveries: u32,
 }
 
 impl<'t> Run<'t> {
@@ -109,6 +111,7 @@ impl<'t> Run<'t> {
             events_mark: None,
             procedure: None,
             plan_note: None,
+            recoveries: 0,
         }
     }
 }

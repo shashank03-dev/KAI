@@ -254,6 +254,9 @@ pub struct Trace {
     /// (`Config::best_of`, `crate::best_of`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub best_of: Option<crate::best_of::BestOf>,
+    /// Diagnosed recoveries (`Config::recover`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recoveries: Vec<crate::engine::RecoveryRecord>,
 }
 
 impl Trace {
@@ -272,6 +275,7 @@ impl Trace {
             outcomes: Vec::new(),
             gate: Vec::new(),
             best_of: None,
+            recoveries: Vec::new(),
         }
     }
 

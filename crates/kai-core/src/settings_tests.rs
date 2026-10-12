@@ -135,3 +135,22 @@ fn limits_are_clamped() {
     };
     assert_eq!(s.limits(), (1, Duration::from_secs(240 * 60)));
 }
+
+#[test]
+fn experimental_switches_are_off_until_turned_on() {
+    let s = Settings::default();
+    let c = s.engine_config();
+    assert!(!c.outcomes && !c.macro_history && !c.procedures && !c.recover && !c.executor);
+    assert_eq!(c.best_of, 0);
+    let s = Settings {
+        verify_outcomes: true,
+        macro_history: true,
+        use_procedures: true,
+        best_of_plans: true,
+        recover: true,
+        ..Settings::default()
+    };
+    let c = s.engine_config();
+    assert!(c.outcomes && c.macro_history && c.procedures && c.recover);
+    assert_eq!(c.best_of, 3);
+}
