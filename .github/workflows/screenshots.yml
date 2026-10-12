@@ -27,8 +27,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Named `check` like CI's job so rust-cache restores CI's cache: it holds
-  # the pinned Ely GPUI Components checkout, which can no longer be cloned.
+  # Named `check` like CI's job so rust-cache reuses CI's build cache (Ely
+  # itself is vendored under vendor/ now, so no clone is needed).
   check:
     # Never commit captures onto the default branch from a push (it is not
     # named `main` in this repo, so `branches-ignore` alone let it through);
