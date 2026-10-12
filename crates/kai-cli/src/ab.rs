@@ -46,6 +46,10 @@ pub struct Ab {
     /// (docs/PROCEDURES.md).
     #[arg(long)]
     pub procedures: bool,
+    /// For long tasks, sample this many plans first and follow the one the
+    /// others agree with most (0 = off; one model call per plan).
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=5))]
+    pub best_of: u32,
 }
 
 impl Ab {
@@ -77,6 +81,9 @@ impl Ab {
         if self.procedures {
             v.push("--procedures");
         }
+        if self.best_of >= 2 {
+            v.push("--best-of");
+        }
         v
     }
 }
@@ -96,6 +103,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.outcomes = ab.outcomes;
     config.macro_history = ab.macro_history;
     config.procedures = ab.procedures;
+    config.best_of = ab.best_of;
     Ok(true)
 }
 

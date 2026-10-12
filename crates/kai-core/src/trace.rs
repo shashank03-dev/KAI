@@ -250,6 +250,10 @@ pub struct Trace {
     /// Every `done` the gate refused, and a waiver by the user.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gate: Vec<crate::ledger::GateRecord>,
+    /// The plans sampled before the first action and the one followed
+    /// (`Config::best_of`, `crate::best_of`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub best_of: Option<crate::best_of::BestOf>,
 }
 
 impl Trace {
@@ -267,6 +271,7 @@ impl Trace {
             human: Vec::new(),
             outcomes: Vec::new(),
             gate: Vec::new(),
+            best_of: None,
         }
     }
 

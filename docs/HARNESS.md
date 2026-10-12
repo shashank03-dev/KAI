@@ -172,6 +172,15 @@ missing target, an approval or a human check stops the replay and hands
 over to the model. A failed replay quarantines the procedure. See
 [PROCEDURES.md](PROCEDURES.md).
 
+**Best-of-N plans for long tasks (off by default, `--best-of 3`).** A
+task with several clauses ("…, then …") or 14+ words gets N short plans
+before the first action. They are sampled in parallel at temperature 0.7
+from the element list alone, so one round trip of wall time. A judge with no
+model call picks the plan the others agree with most (self-consistency),
+with a small bonus for brevity. The chosen plan rides along in every turn as
+a guide, and the trace keeps all plans and their scores. Not used when a
+skill or a procedure already covers the task (`best_of.rs`).
+
 **Zoomed crop.** After a grid click that changed nothing, the next request
 carries a 2x crop around the clicked cell with its own numbered sub-grid.
 

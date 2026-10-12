@@ -27,6 +27,7 @@
 
 mod act;
 mod batch;
+mod best_of;
 mod effect;
 mod execute;
 mod gate;
@@ -35,7 +36,9 @@ mod memory;
 mod observe;
 mod procedure;
 mod record;
+mod run;
 pub use procedure::PROCEDURE;
+use run::{Pending, Run};
 
 pub use crate::ports::*;
 
@@ -112,68 +115,6 @@ pub const EXECUTOR: &str = crate::executor::BACKEND;
 /// Trace backend label for steps the user settled (human checks).
 pub use human::HUMAN;
 
-/// What the last action expected, waiting for the next observation to check.
-struct Pending {
-    summary: String,
-    action: Action,
-    expect: String,
-    /// Text typed by this step (or batch), to look for in a tree-only read.
-    typed: Option<String>,
-    /// Keys pressed last; Enter usually submits/navigates, so look properly.
-    keys: Vec<String>,
-    /// The last click hit a dropdown/menu: a popup needs a real look.
-    popup: bool,
-    /// Indices into `trace.steps` this check confirms.
-    records: Vec<usize>,
-}
-
-/// Mutable state of one run.
-struct Run<'t> {
-    task: &'t str,
-    trace: Trace,
-    history: Vec<HistoryItem>,
-    step: u32,
-    /// (screen hash, element-list hash, was tree-only) of the last observation.
-    last_sig: Option<(u64, u64, bool)>,
-    no_progress_streak: u32,
-    failure_streak: u32,
-    /// The next observation must include a screenshot.
-    force_full: bool,
-    /// Use the careful model for the next decision.
-    careful_next: bool,
-    tree_only_streak: u32,
-    /// The last observation had a rich Set-of-Marks list.
-    last_rich: bool,
-    pending: Option<Pending>,
-    /// One-shot lines for the next user turn.
-    notes: Vec<String>,
-    /// A grid click (cell number, screen rect) that may have missed.
-    grid_click: Option<(u32, crate::element::Rect)>,
-    /// URLs already opened in this run (normalised), to refuse a reload that
-    /// would wipe what was typed.
-    opened: Vec<String>,
-    /// Where this run is recorded, if anywhere, and the system prompt hash.
-    recorder: Option<&'t TraceRecorder>,
-    system_hash: Option<String>,
-    /// The executor's decision model, while it is usable this run.
-    decider: Option<&'t dyn Decider>,
-    /// Escalations in a row, and model steps left before plans run again.
-    exec_streak: u32,
-    exec_cooldown: u32,
-    /// Experience memory, the apps/sites seen so far and the lesson block.
-    memory: Option<&'t MemoryStore>,
-    mem: memory::Recalled,
-    /// Human checks this run: handled ones, codes typed, time waited.
-    human: human::HumanState,
-    /// Required outcomes, gate refusals, and the OS probe port.
-    ledger: gate::LedgerState,
-    probe: Option<&'t dyn Probe>,
-    /// Accessibility-event count taken just before the last action.
-    events_mark: Option<u64>,
-    /// The shape of the procedure this run replayed, if any.
-    procedure: Option<String>,
-}
-
 impl Engine<'_> {
     /// Run a task to completion, returning the trace.
     pub async fn run(&self, task: &str) -> Trace {
@@ -182,35 +123,8 @@ impl Engine<'_> {
 
     /// [`Engine::run`] with per-run options (plan cache).
     pub async fn run_with(&self, task: &str, opts: RunOptions<'_>) -> Trace {
-        let mut r = Run {
-            task,
-            trace: Trace::new(task),
-            history: Vec::new(),
-            step: 0,
-            last_sig: None,
-            no_progress_streak: 0,
-            failure_streak: 0,
-            force_full: true,
-            careful_next: false,
-            tree_only_streak: 0,
-            last_rich: false,
-            pending: None,
-            opened: Vec::new(),
-            notes: Vec::new(),
-            grid_click: None,
-            recorder: opts.recorder,
-            system_hash: None,
-            decider: opts.executor.filter(|_| self.config.executor),
-            exec_streak: 0,
-            exec_cooldown: 0,
-            memory: opts.memory,
-            mem: Default::default(),
-            human: Default::default(),
-            ledger: Default::default(),
-            probe: opts.probe,
-            events_mark: None,
-            procedure: None,
-        };
+        let decider = opts.executor.filter(|_| self.config.executor);
+        let mut r = Run::new(task, &opts, decider);
         self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
         self.finish_ledger(&mut r);
@@ -255,6 +169,10 @@ impl Engine<'_> {
             && let Some(o) = self.run_prefix(r, &steps, label).await
         {
             return o;
+        }
+        // A long task with nothing remembered: plan it a few ways first.
+        if r.procedure.is_none() && active_skill.is_none() {
+            self.best_of_plan(r).await;
         }
 
         while r.step < self.config.max_steps {
@@ -309,6 +227,7 @@ impl Engine<'_> {
         // ---- Decide ----
         self.sink.emit(&EngineEvent::Thinking { step });
         let mut notes = std::mem::take(&mut r.notes);
+        notes.extend(r.plan_note.clone());
         let first = self.outcome_request(r, &mut notes, schema);
         let lessons = self.lessons_for(r, obs);
         let verified = self.config.macro_history.then(|| self.verified_outcomes(r));

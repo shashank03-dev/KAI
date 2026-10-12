@@ -122,6 +122,9 @@ pub struct Settings {
     /// Replay remembered procedures for repeated tasks and record verified
     /// runs (docs/PROCEDURES.md). Off until measured.
     pub use_procedures: bool,
+    /// Plan long tasks three ways first and follow the plan the others
+    /// agree with (3 extra model calls, in parallel). Off until measured.
+    pub best_of_plans: bool,
     /// Catalog id of the model on this computer (`BackendChoice::Local`).
     pub local_model: String,
     /// Port of the local `llama-server` (127.0.0.1 only).
@@ -163,6 +166,7 @@ impl Default for Settings {
             verify_outcomes: false,
             macro_history: false,
             use_procedures: false,
+            best_of_plans: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
             learn: true,

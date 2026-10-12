@@ -148,7 +148,13 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         .unwrap_or_default();
 
     let s = backend::settings_for(b, args.backend.model.as_deref())?;
-    let (config, applied) = backend::config(&s, &args.backend.ab)?;
+    let (mut config, applied) = backend::config(&s, &args.backend.ab)?;
+    // Recorded replies hold no plan answers: sampling plans would only eat
+    // the step replies. Best-of needs a live model.
+    if config.best_of >= 2 && matches!(b, BackendArg::Mock | BackendArg::Replay) {
+        eprintln!("--best-of ignored: recorded replies have no plans (use a live backend)");
+        config.best_of = 0;
+    }
     let keys = kai_os::secrets::keys();
     let prices = match (args.usd_per_mtok_in, args.usd_per_mtok_out) {
         (None, None) => None,
@@ -263,7 +269,10 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         command: machine::command_line(),
         machine: Some(Machine::probe()),
         ab: Some(AbRecord {
-            flags: args.backend.ab,
+            flags: crate::ab::Ab {
+                best_of: config.best_of,
+                ..args.backend.ab
+            },
             applied,
         }),
         prices,

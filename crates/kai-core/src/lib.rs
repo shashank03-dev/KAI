@@ -6,6 +6,7 @@
 //! model is behind [`client::ModelClient`], with vLLM, Gemini, failover and mock
 //! backends. See `docs/HARNESS.md`.
 
+pub mod best_of;
 pub mod client;
 pub mod cua;
 pub mod element;

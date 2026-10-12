@@ -231,6 +231,7 @@ async fn drive(
         outcomes: settings.verify_outcomes,
         macro_history: settings.macro_history,
         procedures: settings.use_procedures,
+        best_of: if settings.best_of_plans { 3 } else { 0 },
         learn: settings.learn,
         reflect: settings.reflect,
         ..Config::default()

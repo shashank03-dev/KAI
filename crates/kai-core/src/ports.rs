@@ -255,6 +255,10 @@ pub struct Config {
     /// (needs `RunOptions::procedures`; `docs/PROCEDURES.md`). Off until
     /// measured on repeated live tasks.
     pub procedures: bool,
+    /// For long tasks, sample this many plans before the first action and
+    /// follow the one the others agree with most (`best_of.rs`). 0 or 1:
+    /// off. Each plan is one model call (made in parallel).
+    pub best_of: u32,
 }
 
 impl Default for Config {
@@ -278,6 +282,7 @@ impl Default for Config {
             probe_timeout: Duration::from_secs(2),
             macro_history: false,
             procedures: false,
+            best_of: 0,
         }
     }
 }
