@@ -17,6 +17,9 @@ const THINKING_UNSUPPORTED: u8 = 2;
 
 /// How many 429/5xx replies are retried before giving up.
 const MAX_TRANSIENT_TRIES: u32 = 8;
+/// The longest single wait on a rate limit (a per-day quota asks for hours;
+/// that run fails after its retries instead of hanging).
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(60);
 
 /// `"a, b"` → `["a", "b"]`; never empty (an empty key fails at the API).
 fn split_keys(raw: &str) -> Vec<String> {
@@ -199,12 +202,22 @@ impl ModelClient for GeminiClient {
             let code = status.as_u16();
             if (code == 429 || code == 500 || code == 503) && attempts < MAX_TRANSIENT_TRIES {
                 let all_keys_tried = (attempts as usize).is_multiple_of(self.api_keys.len().max(1));
+                // Once every key is limited, wait as long as the API asks
+                // (its `RetryInfo`), so retries do not burn more quota.
                 let wait = match code {
-                    429 if all_keys_tried => Duration::from_secs(10),
+                    429 if all_keys_tried => retry_delay(&v)
+                        .unwrap_or(Duration::ZERO)
+                        .clamp(Duration::from_secs(10), MAX_RETRY_WAIT),
                     429 => Duration::ZERO,
                     _ => Duration::from_millis(800),
                 };
-                log::warn!("Gemini {code} on {}; retrying in {wait:?}", self.model);
+                log::warn!(
+                    "Gemini {code} on {}{}; retrying in {wait:?}",
+                    self.model,
+                    quota_metric(&v)
+                        .map(|m| format!(" ({m})"))
+                        .unwrap_or_default()
+                );
                 tokio::time::sleep(wait).await;
                 continue;
             }
@@ -252,6 +265,31 @@ impl ModelClient for GeminiClient {
             cost_usd: None,
         })
     }
+}
+
+/// `RetryInfo.retryDelay` (`"23s"`, `"1.5s"`) from a 429 error body.
+fn retry_delay(v: &serde_json::Value) -> Option<Duration> {
+    v["error"]["details"]
+        .as_array()?
+        .iter()
+        .find_map(|d| d["retryDelay"].as_str())
+        .and_then(|s| s.trim().strip_suffix('s')?.parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s >= 0.0)
+        .map(Duration::from_secs_f64)
+}
+
+/// Which quota a 429 hit (`QuotaFailure.violations[].quotaMetric`), for the
+/// log: per-minute tokens and requests need different pacing.
+fn quota_metric(v: &serde_json::Value) -> Option<String> {
+    let m = v["error"]["details"]
+        .as_array()?
+        .iter()
+        .filter_map(|d| d["violations"].as_array())
+        .flatten()
+        .filter_map(|x| x["quotaId"].as_str().or(x["quotaMetric"].as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    (!m.is_empty()).then_some(m)
 }
 
 fn mentions(v: &serde_json::Value, what: &str) -> bool {
@@ -326,5 +364,25 @@ mod tests {
         let body = c.body(&req, false, false);
         assert!(body["generationConfig"].get("thinkingConfig").is_none());
         assert!(body["generationConfig"].get("responseJsonSchema").is_none());
+    }
+
+    #[test]
+    fn a_rate_limit_says_how_long_to_wait_and_which_quota() {
+        let v = serde_json::json!({"error": {"code": 429, "details": [
+            {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [
+                {"quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_input_token_count",
+                 "quotaId": "GenerateContentInputTokensPerModelPerMinute-FreeTier"}]},
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "23.5s"}
+        ]}});
+        assert_eq!(retry_delay(&v), Some(Duration::from_millis(23_500)));
+        assert_eq!(
+            quota_metric(&v).as_deref(),
+            Some("GenerateContentInputTokensPerModelPerMinute-FreeTier")
+        );
+        let none = serde_json::json!({"error": {"code": 429, "message": "slow down"}});
+        assert_eq!(retry_delay(&none), None);
+        assert_eq!(quota_metric(&none), None);
+        let bad = serde_json::json!({"error": {"details": [{"retryDelay": "-1s"}]}});
+        assert_eq!(retry_delay(&bad), None);
     }
 }

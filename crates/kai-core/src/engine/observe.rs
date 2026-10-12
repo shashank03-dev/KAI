@@ -233,7 +233,13 @@ impl Engine<'_> {
             same,
             events: effect::events_since(r.events_mark.take(), self.perceptor.ui_events()),
         };
-        let no_progress = fx.no_op();
+        // Terminal work changes no pixels; an unchanged screen after a
+        // shell step is not a stall (its output already went to the model).
+        let after_shell = r
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.action == Action::Shell);
+        let no_progress = fx.no_op() && !after_shell;
         if no_progress {
             r.no_progress_streak += 1;
         } else {
