@@ -269,3 +269,8 @@ Numbers and method: [`bench/results/2026-10-12-verification.md`](../bench/result
   on only after `kai bench --backend gemini --model gemma-4-26b-a4b-it`, run
   with and without `--outcomes` on the same tasks (at least twice each),
   shows false done going down without the pass rate going down.
+- **Live, 2026-10-12 (Gemma 4 26B, 14 tasks, two runs each side):** false
+  done 1 with and 1 without, 26/28 vs 27/28 passed, and 69% more steps
+  (36 gate refusals). The false done that got through (`open-folder`) named
+  no outcome a probe could check. It stays off.
+  [`bench/results/2026-10-12-live.md`](../bench/results/2026-10-12-live.md)

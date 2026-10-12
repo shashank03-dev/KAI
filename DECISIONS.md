@@ -604,3 +604,83 @@ procedure step when its accessibility signature fails. If that turns out to
 matter, normalised cross-correlation on Kai's own capture, searched near the
 element's old position, is about 100 lines. It is not built, because it would
 only back up procedures, which are off by default.
+
+## Live runs on Gemma 4, and what they changed (2026-10-12)
+
+The handoff's item 1 needed a model key; the owner provided two Gemini API
+keys for this session. They were passed only as `GEMINI_API_KEY` in the
+environment of each command, never written to a file, a log, a trace or a
+commit (results JSON holds the bench command, which has no key).
+Results: `bench/results/2026-10-12-live.md`.
+
+- **The bench desktop had to be fixed first.** Firefox's policy loads
+  `p11-kit-trust.so`, which `p11-kit-modules` provides and the install
+  script did not install, so every page failed behind the TLS-inspecting
+  proxy. `xdg-utils` was missing, a killed Firefox left "already running"
+  and Troubleshoot Mode dialogs on top of later tasks, and SIGTERM does not
+  close a Mousepad with unsaved text. The first live run (11/14) was on that
+  broken desktop and is not used; all measured runs are on the fixed one.
+- **Harness fixes from what Gemma actually did** (all with tests):
+  - `shell` with no `text` and the command in `then[0]` takes that command
+    (16 of 49 repairs in the first run were this shape);
+  - a silent shell step no longer counts as "the screen has not changed";
+    but the same command with the same result twice in a row does, the model
+    is told so, and a third identical run is refused. The first version
+    without the repeat rule let Gemma write one file 40 times: the stall
+    warning had been the only brake. Both halves are needed;
+  - a dedicated repair hint for `open_url` without a URL;
+  - on 429, once every key is limited, wait as long as `RetryInfo` asks
+    (10–60 s) and log the quota. The keys share one per-minute input-token
+    quota, so rotating keys alone does not help;
+  - a shell command that would kill Kai (its own PID or its parent's from a
+    `ps | grep` match, `kill -1`, or Kai by name) is refused: Gemma did
+    exactly that and ended a run;
+  - `xdg-open` / `gio open` start detached (`xdg-open ~/dir` blocked 180 s).
+- **Measured switches: none turned on.** Two runs per side; the table and
+  reasons are in the results page. The rule from the handoff (pass rate
+  holds and the target metric improves) was not met by any of
+  `--outcomes`, `--macro-history`, `--recover`, `--best-of 3`, procedures
+  or window scope.
+- **Item 5 (visual re-aim) not built.** Its condition was replays failing on
+  renamed targets; none were seen.
+
+## The desktop app, driven for real (2026-10-12)
+
+`kai-app` built and ran on Xvfb with Mesa's software Vulkan (lavapipe).
+Driving it with real tasks found three bugs, now fixed and tested:
+
+- **Team: "You stopped Kai" when nobody did.** A terminal and a screen
+  sub-agent run side by side and share one run state. Every `Acted` event
+  cleared the run's pending approval, and a dropped approval answers Stop.
+  Approvals and human checks now queue per run and are removed only by
+  answering them.
+- **Approvals for harmless steps.** Risk words matched as raw substrings of
+  the model's thought: "display" contained "pay", "information" "format",
+  and a `wait` "to confirm" Mousepad opened asked for approval on
+  high-risk-only. Words now have to start a word (stems keep inflections:
+  `delet`, `remov`), and `wait`, `done` and `ask_user` never escalate. A
+  click whose thought says "deleting" or "payments" still does.
+- **Team splitting simple tasks.** Team is on by default, and Gemma split
+  "open Mousepad and type a sentence" into a terminal and a screen subtask
+  that both did the work (the sentence typed three times). A split is kept
+  only when it has two or more terminal subtasks, the only case where
+  sub-agents run side by side; otherwise the task runs as one agent.
+
+After the fixes the same task ran as one agent in 3 steps and the editor
+held the sentence exactly once (read back over AT-SPI).
+
+## Item 3 and 4: background driving and the driver matrix (2026-10-12)
+
+Design notes: `docs/BACKGROUND.md`, `docs/DRIVER_MATRIX.md`.
+
+- Built: window-scoped frames (`KAI_WINDOW_SCOPE=1`, off). Not built: a
+  pointer path that keeps the real cursor still (none works for GTK/Qt on
+  X11 or Wayland), and a session per sub-agent (it needs that path).
+- The matrix found two real gaps on its first run: **Qt 5.15 apps publish
+  no accessibility tree** on this stack (Kai uses the grid for them), and
+  **Firefox ESR 140 exposes no AT-SPI action on page buttons**, so Kai
+  clicks them with the mouse. Both are recorded as expectations, so a fix
+  upstream (or a driver regression here) makes the matrix fail and get
+  updated.
+- Qt 6, GTK 4, Electron/Chromium and Windows UIA rows are not built: no
+  Chromium in the container (Ubuntu's is a snap), no Windows machine.

@@ -60,8 +60,9 @@ model sees the focused app instead of the whole display:
 Why this and not true background capture: it is the part that helps on
 every platform today. Other apps (a chat, a mail window) never reach the
 model, which matters for privacy and for injected text, and a small window
-is sent at its own size instead of being shrunk with the whole screen, so it
-costs fewer image tokens and keeps text legible. Checked live: with pcmanfm
+is sent at its own size instead of being shrunk with the whole screen, which
+keeps its text legible. (It does not save tokens on the Gemini API; see
+Measured.) Checked live: with pcmanfm
 focused and Mousepad open beside it, the frame was pcmanfm's 640x480 window
 with its marks in place, Mousepad absent.
 
@@ -83,9 +84,11 @@ compositor.
   which is common (`a11y` covers press and empty-field fill only). Team mode
   keeps taking turns for screen subtasks until a focus-free fallback exists.
 
-## How to measure
+## Measured
 
 `KAI_WINDOW_SCOPE=1 kai bench --backend gemini --model gemma-4-26b-a4b-it`
-against the same run without it; compare pass rate, steps and tokens in
-(image tokens fall when windows are smaller than the screen). Results:
-`bench/results/2026-10-12-live.md`.
+against the same run without it, two runs each (14 tasks): 28/28 vs 27/28
+passed, 95 vs 90 steps per run, and input tokens per call unchanged (the
+Gemini API appears to bill an image at a fixed size, so smaller frames save
+nothing there). It stays off by default: a privacy option, not a cost
+saving. `bench/results/2026-10-12-live.md`.

@@ -2,88 +2,67 @@
 
 ---
 
-You are continuing work on **Kai** (`shashank03-dev/KAI`, branch `main`): an
-open-source desktop agent in Rust for **Linux and Windows** that lets Gemma 4
-operate the computer. `kai-core` is the OS-free harness, `kai-os` holds the OS
-ports, `kai-cli` is the `kai` CLI and `kai-app` is the GPUI desktop app.
+You are continuing work on **Kai** (`shashank03-dev/KAI`): an open-source
+desktop agent in Rust for **Linux and Windows** that lets Gemma 4 operate
+the computer. `kai-core` is the OS-free harness, `kai-os` the OS ports,
+`kai-cli` the `kai` CLI, `kai-app` the GPUI desktop app.
 
 ## Read first (don't redo what is done)
 
-`README.md`, `DECISIONS.md` (the newest sections), `docs/HARNESS.md`, and
-the end of `docs/RESEARCH_2026_10_FOUNDATIONS.md` §7 (status of the ranked
-plan). Open a feature doc only when your work touches that feature:
-VERIFICATION, PROCEDURES, MEMORY, MCP, SAFETY, HUMAN_CHECKS, EXECUTOR.
+`README.md`, the newest sections of `DECISIONS.md` (2026-10-12: live runs,
+the desktop app driven for real, items 3 and 4), and
+`bench/results/2026-10-12-live.md`. Then only the docs your work touches:
+`docs/BACKGROUND.md`, `docs/DRIVER_MATRIX.md`, `docs/SAFETY.md`,
+`docs/HARNESS.md`, `docs/VERIFICATION.md`, `docs/PROCEDURES.md`.
 
-Already built and tested, each **off by default** until measured:
-`--outcomes`, `--macro-history`, `--procedures`, `--best-of 3`, `--recover`,
-plus screen-scoped lessons, app facts, `kai memory consolidate` / `exam`,
-`kai mcp` and the safety rules. Don't rebuild any of these.
+Done and measured on 2026-10-12 with live Gemma 4 26B (Gemini API):
+- harness fixes from live runs (shell repair, repeat guard, retry delay,
+  self-kill guard, detached openers): −25% steps, −34% calls, −36% tokens;
+- every switch measured twice; none turned on (`--outcomes`,
+  `--macro-history`, `--recover`, `--best-of 3`, procedures, window scope);
+- both safety gaps closed (focus-aware untargeted typing; replay reads the
+  screen before every step);
+- window-scoped frames (`KAI_WINDOW_SCOPE=1`, off), driver matrix
+  (`crates/kai-os/tests/driver_matrix.rs`, ignored without a desktop);
+- three app bugs found by driving `kai-app` (Team approvals dropped,
+  false approvals from substring risk words, needless Team splits).
 
-## How to work: research first, then build
+## How to work
 
-For **each** item below, in order:
-
-1. **Research before writing code.** Read the code it touches and the
-   relevant docs, and look up current sources (papers, OS API docs, how
-   other agents do it) with dates. Write a short design note: what you'll
-   build, why, what you rejected, and how you'll test and measure it. Put
-   it in the feature's doc, or a new `docs/<FEATURE>.md`. Only then build.
-   If the research says an item isn't worth it, don't build it; record why
-   in `DECISIONS.md`.
-2. **Build it to the repo's standard.** Match the surrounding code's style,
-   naming and comment density. Keep OS-free logic in `kai-core` behind a
-   port, and OS code in `kai-os`. Nothing hardcoded that belongs in config:
-   no paths, model names, keys or machine-specific values. Never print to
-   stdout outside the CLI's user output (stdout is the MCP channel in
-   `kai mcp`). New behaviour goes behind a switch, off until measured.
-3. **Test it properly.** Add unit tests and an engine test with the fakes in
-   `crates/kai-core/tests/common/`. Every safety guarantee gets a test that
-   fails when the guard is removed.
-4. **Measure, honestly.** Compare before and after with `kai bench`. Never
-   claim a number that wasn't measured, and say how it was measured.
+Research first, write a short design note, build behind a switch (off until
+measured), test (every safety guarantee gets a test that fails without the
+guard), measure with `kai bench` at least twice per side, and say how.
 
 ## Repo rules
 
-- Commit as the repo owner with **no** `Co-Authored-By` or Claude lines. Do
-  not open a PR unless asked.
-- **One push per batch, only when I say "push".** Commit locally; backing up
-  to a non-`main` branch is free (CI runs only on `main`). Before pushing,
-  run `cargo fmt --all --check`,
+- Commit as the repo owner with **no** `Co-Authored-By` or Claude lines. No
+  PR unless asked. Before pushing: `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace`, `kai skill validate skills` and
-  `kai bench --backend mock`. Windows code can't compile here, so keep it
-  small and cfg-gated.
-- Files are at most 500 lines. English only. No macOS work.
-- Secrets come from environment variables or the OS keychain. Never write
-  them to files, logs, traces or commits.
-- Disk is tight: use `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`.
+  `cargo test --workspace`, `kai skill validate skills`,
+  `kai bench --backend mock`.
+- Files at most 500 lines. English only. No macOS work.
+- Secrets only from environment variables or the OS keychain; never in
+  files, logs, traces or commits.
+- `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`. Desktop for live runs:
+  `sudo scripts/desktop/install.sh`, `source scripts/desktop/start.sh`.
 
-## What to build, in order
+## What is left, in order
 
-1. **Measure what exists (needs a model key and the GUI apps).** Run
-   `kai bench --backend gemini --model gemma-4-26b-a4b-it` with and without
-   each switch, at least twice per side. The exact commands are in
-   `bench/results/2026-10-12-verification.md` and each feature's doc. Turn a
-   default on only where the pass rate holds and the target metric improves
-   (false done, steps, model calls). If there's no key, say so and go to 2.
-2. **Close the two known safety gaps.**
-   - Typing into an already-focused password field with no `target` doesn't
-     ask for approval (predates this work).
-   - Procedure replay doesn't read the screen before untargeted steps, so a
-     CAPTCHA or suspicious text there goes unseen.
-3. **Background, window-scoped driving** (RESEARCH_2026_10_FOUNDATIONS §4):
-   - a pointer fallback that doesn't steal focus or move the real cursor;
-   - per-window capture instead of whole-screen;
-   - a session per sub-agent, so Team subtasks run side by side.
-   Research the Linux (AT-SPI, X11/Wayland) and Windows (UIA, SendInput,
-   PrintWindow) options first.
-4. **Driver regression matrix:** tiny per-toolkit fixture apps (GTK, Qt,
-   Electron or web) that check an accessibility action really changed the
-   widget, so a driver change can't silently fall back to the mouse.
-5. **Visual re-aim for procedures, only if 1 shows replays failing on
-   renamed targets:** normalised cross-correlation on Kai's own capture,
-   searched near the element's old position. `rustautogui` was evaluated and
-   rejected; see `DECISIONS.md`.
+1. **False done on "show the folder".** Gemma's main live failure: it lists a
+   folder in the terminal and says done when asked to show it in the file
+   manager. Look at why the DONE gate did not fire (no outcome named) and
+   whether a `window_title` outcome can be asked for when the task says
+   "show / open … in <app>".
+2. **Qt accessibility.** Qt 5.15 apps publish no AT-SPI tree in the test
+   container. Find out whether that is the container or Qt with AT-SPI 2.52
+   (try a real KDE session, Qt 6), and fix or document.
+3. **Firefox page buttons** expose no AT-SPI action, so Kai clicks them with
+   the mouse. Check whether a newer Firefox or `accessibility.*` prefs
+   expose `press`; otherwise leave the mouse path.
+4. **Windows:** UI Automation events, `PostMessage` clicks for Win32
+   controls, and the driver matrix on a real Windows machine.
+5. **Chromium/Electron row** of the driver matrix (needs a non-snap
+   Chromium or an Electron fixture).
 
-**When done:** tell me plainly what you researched, what you built, what you
-measured (with numbers), what you didn't, and what I need to do next.
+**When done:** tell me plainly what you researched, built, measured (with
+numbers), what you didn't, and what I need to do next.
