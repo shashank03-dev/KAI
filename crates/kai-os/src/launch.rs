@@ -232,9 +232,14 @@ pub mod linux {
         if cmd.is_empty() || cmd.contains(['|', ';', '&', '>', '<', '`', '$', '(', ')']) {
             return false;
         }
-        let first = cmd.split_whitespace().next().unwrap_or("");
+        let mut words = cmd.split_whitespace();
+        let first = words.next().unwrap_or("");
         let first = first.rsplit('/').next().unwrap_or(first);
-        all_entries().iter().any(|e| program(e) == first)
+        // Openers hand the file or folder to an app and, for a folder in
+        // pcmanfm, wait for it (seen live: `xdg-open ~/dir` blocked 180 s).
+        let opener = matches!(first, "xdg-open" | "kde-open" | "exo-open" | "gnome-open")
+            || (first == "gio" && words.next() == Some("open"));
+        opener || all_entries().iter().any(|e| program(e) == first)
     }
 
     fn all_entries() -> Vec<DesktopEntry> {
@@ -287,6 +292,24 @@ pub mod linux {
             )
             .unwrap();
             assert_eq!(program(&e), "mousepad");
+        }
+
+        #[test]
+        fn openers_start_detached() {
+            for c in [
+                "xdg-open ~/kai-bench/photos",
+                "/usr/bin/xdg-open a.pdf",
+                "gio open .",
+            ] {
+                assert!(is_gui_command(c), "{c}");
+            }
+            for c in [
+                "gio list ~",
+                "xdg-open x | cat",
+                "xdg-mime query default inode/directory",
+            ] {
+                assert!(!is_gui_command(c), "{c}");
+            }
         }
 
         #[test]
