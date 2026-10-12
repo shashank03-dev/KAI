@@ -54,6 +54,7 @@ Fixed rules first — no model call (`crates/kai-core/src/memory/learn.rs`):
 | Failing command | a shell command errored or timed out — kept when a corrected command followed (attached) or the run failed | `avoid` "shell `pythn x.py` fails here: command not found; shell `python3 x.py` worked instead." |
 | Steering | every message you sent mid-run | `preference` "User prefers: save to ~/Notes" (source user) |
 | False done | said done but the task's check failed (bench) | `avoid` "Before done on tasks like 'export report pdf', verify the PDF is saved." |
+| App fact | a run that passed reached a goal through a menu path (2+ menu items in a row) or an uncommon shortcut | `fact` "In libreoffice, export as pdf dialog open: use the menu File › Export as PDF…" (scoped to the app only, no task words) |
 
 At most 4 rule-based lessons per run (your messages are always kept).
 
@@ -77,6 +78,22 @@ user turn**:
 From earlier runs on this computer:
 - Start Mousepad with open_app, not shell `mousepad`: a shell step waits for the app and blocks.
 ```
+
+**Screens (decision-point recall).** Each step records a coarse screen
+signature: the app part of the window title plus the kinds of elements on
+screen (`mousepad/button,textfield`). The document name is ignored, and a
+dialog opening changes it. A lesson keeps the signature of the screen it was
+learned on. Recall ranks it +2 on that screen and −1 elsewhere in the same
+app (still shown if there is room), and recall runs again whenever the
+screen changes, not only when a new app or site comes into play. This is
+the fix for the loose task-word scope the first live test found
+(`docs/RESEARCH_2026_10_FOUNDATIONS.md` §3.3).
+
+**App facts (hidden operations).** The commands a task needs are often in a
+menu or behind a shortcut that is not on screen. When a run passes through a
+menu path or an uncommon shortcut (`ctrl+shift+e`, not `ctrl+c` or
+`ctrl+s`), Kai keeps it as a `fact` scoped to the app alone, so any later
+task in that app sees it. At most 2 per run, and only from runs that passed.
 
 Why the user turn and not the system prompt: the system prompt is kept
 byte-for-byte stable across runs and sessions so the backend's prefix cache

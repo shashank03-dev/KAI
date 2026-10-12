@@ -5,9 +5,9 @@
 
 use super::{Engine, Run};
 use crate::client::{Images, ModelRequest};
-use crate::element::Grounding;
 use crate::memory::recall::{self, Context};
 use crate::memory::{MemoryStore, learn, reflect, scope};
+use crate::ports::Observation;
 use crate::trace::Trace;
 
 /// What recall has seen this run.
@@ -36,7 +36,8 @@ fn add_all(into: &mut Vec<String>, from: Vec<String>) -> bool {
 
 impl Engine<'_> {
     /// The lesson block for this step's user turn, if any.
-    pub(super) fn lessons_for(&self, r: &mut Run<'_>, g: &Grounding) -> Option<String> {
+    pub(super) fn lessons_for(&self, r: &mut Run<'_>, obs: &Observation) -> Option<String> {
+        let g = &obs.grounding;
         let store = r.memory?;
         let (apps, domains) = scope::of_steps(&r.trace);
         let text = g.as_text();
@@ -45,7 +46,8 @@ impl Engine<'_> {
         add_all(&mut r.mem.apps, scope::apps_in(&text, &known));
         add_all(&mut r.mem.domains, domains);
         add_all(&mut r.mem.domains, scope::domains_in(&text));
-        let cx = Context::new(r.task, &r.mem.apps, &r.mem.domains);
+        let cx = Context::new(r.task, &r.mem.apps, &r.mem.domains)
+            .at_screen(scope::screen_sig(obs.window_title.as_deref(), g));
         let key = cx.key();
         if r.mem.key.as_deref() != Some(key.as_str()) {
             let lessons = store.recall_in(&cx);

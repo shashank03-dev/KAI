@@ -338,6 +338,7 @@ mod tests {
                 executor: None,
                 effect: None,
                 target: None,
+                screen: None,
             });
         }
         let (spans, end) = spans(&t);

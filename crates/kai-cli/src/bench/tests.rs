@@ -49,6 +49,7 @@ fn trace(steps: &[(u64, u64, u64)], outcome: Outcome) -> Trace {
             executor: None,
             effect: None,
             target: None,
+            screen: None,
         });
     }
     t.finish(outcome);

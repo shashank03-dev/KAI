@@ -15,6 +15,7 @@
 //! - [`MemoryStore`]: the local JSONL store with merging, caps and credit;
 //! - [`promote`]: skill-draft suggestions from proven lessons.
 
+pub mod facts;
 pub mod learn;
 pub mod promote;
 pub mod recall;
@@ -92,6 +93,10 @@ pub struct Scope {
     pub domains: Vec<String>,
     /// Stopword-filtered words of the task it was learned on.
     pub task_words: Vec<String>,
+    /// Coarse signatures of the screens it was learned on
+    /// ([`scope::screen_sig`]): recall ranks it higher there.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub screens: Vec<String>,
 }
 
 impl Scope {
@@ -115,6 +120,7 @@ impl Scope {
         join(&mut self.apps, &other.apps, 6);
         join(&mut self.domains, &other.domains, 6);
         join(&mut self.task_words, &other.task_words, 16);
+        join(&mut self.screens, &other.screens, 6);
     }
 }
 

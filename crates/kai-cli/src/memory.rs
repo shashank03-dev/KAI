@@ -114,6 +114,7 @@ pub fn run(cmd: MemoryCmd) -> anyhow::Result<ExitCode> {
                     .filter_map(|d| kai_core::memory::scope::domain_of(d))
                     .collect(),
                 task_words: kai_core::memory::scope::task_words(&text),
+                screens: Vec::new(),
             };
             let l = s.add_user(kind, &text, scope)?;
             println!("{}", row(&l));

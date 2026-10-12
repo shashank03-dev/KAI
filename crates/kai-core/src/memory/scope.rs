@@ -176,6 +176,7 @@ pub fn of_task(task: &str, extra_apps: &[String]) -> Scope {
         apps: apps_in(task, extra_apps),
         domains: domains_in(task),
         task_words: task_words(task),
+        screens: Vec::new(),
     }
 }
 
@@ -214,8 +215,40 @@ pub fn of_run(trace: &Trace) -> Scope {
         apps,
         domains,
         task_words: Vec::new(),
+        screens: Vec::new(),
     });
     s
+}
+
+/// A coarse signature of where the run is: the app part of the window title
+/// (its last ` - ` / ` — ` / ` | ` segment) and the kinds of elements on
+/// screen. A dialog opening changes it; typing into a field does not.
+/// `None` without a window title.
+pub fn screen_sig(title: Option<&str>, g: &crate::element::Grounding) -> Option<String> {
+    let title = title?.trim();
+    let cut = [" - ", " — ", " | "]
+        .iter()
+        .filter_map(|sep| title.rfind(sep).map(|i| i + sep.len()))
+        .max()
+        .unwrap_or(0);
+    let app: String = title[cut..]
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if app.is_empty() {
+        return None;
+    }
+    let mut roles: Vec<&str> = match g {
+        crate::element::Grounding::Marks(els) => els.iter().map(|e| e.role.label()).collect(),
+        crate::element::Grounding::Grid { .. } => vec!["grid"],
+    };
+    roles.sort_unstable();
+    roles.dedup();
+    Some(format!("{app}/{}", roles.join(",")))
 }
 
 /// The app (or site) step `i` happened in: the last app opened or site

@@ -129,6 +129,7 @@ fn add_lesson(a: &mut KaiApp, cx: &mut Context<KaiApp>) {
         apps: scope::apps_in(&text, &[]),
         domains: scope::domains_in(&text),
         task_words: scope::task_words(&text),
+        screens: Vec::new(),
     };
     let r = store()
         .ok_or_else(|| anyhow::anyhow!("the memory folder can't be opened"))

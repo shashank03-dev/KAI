@@ -11,6 +11,7 @@ fn lesson(kind: Kind, text: &str, apps: &[&str], words: &[&str]) -> Lesson {
         apps: apps.iter().map(|s| s.to_string()).collect(),
         domains: Vec::new(),
         task_words: words.iter().map(|s| s.to_string()).collect(),
+        screens: Vec::new(),
     };
     Lesson::new(kind, text, scope, Source::Derived)
 }

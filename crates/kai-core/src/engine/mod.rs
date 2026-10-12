@@ -310,7 +310,7 @@ impl Engine<'_> {
         self.sink.emit(&EngineEvent::Thinking { step });
         let mut notes = std::mem::take(&mut r.notes);
         let first = self.outcome_request(r, &mut notes, schema);
-        let lessons = self.lessons_for(r, &obs.grounding);
+        let lessons = self.lessons_for(r, obs);
         let verified = self.config.macro_history.then(|| self.verified_outcomes(r));
         let user_text = prompt::build_turn(&TurnInput {
             lessons: lessons.as_deref(),
@@ -361,6 +361,7 @@ impl Engine<'_> {
         let mut rec = StepRecord::new(step, &decision, timings, backend);
         rec.elements = elements;
         rec.target = TargetSig::of(&decision, &obs.grounding);
+        rec.screen = crate::memory::scope::screen_sig(obs.window_title.as_deref(), &obs.grounding);
         if let Some((shot, call)) = call {
             rec.screenshot = shot;
             rec.call = call;

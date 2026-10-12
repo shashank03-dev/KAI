@@ -296,6 +296,7 @@ fn record(i: u32, d: Decision, t: Timings, label: &str, elements: String, ok: bo
         executor: None,
         effect: None,
         target: None,
+        screen: None,
     }
 }
 

@@ -19,6 +19,8 @@ pub struct Context {
     pub task_words: Vec<String>,
     pub apps: Vec<String>,
     pub domains: Vec<String>,
+    /// The current screen's signature ([`scope::screen_sig`]), if known.
+    pub screen: Option<String>,
 }
 
 impl Context {
@@ -28,6 +30,7 @@ impl Context {
             task_words: t.task_words,
             apps: t.apps,
             domains: t.domains,
+            screen: None,
         };
         for a in apps {
             if !c.apps.contains(a) {
@@ -42,13 +45,21 @@ impl Context {
         c
     }
 
-    /// A key that changes when the apps or sites in play change.
+    /// The same context on a known screen.
+    pub fn at_screen(mut self, screen: Option<String>) -> Self {
+        self.screen = screen;
+        self
+    }
+
+    /// A key that changes when the apps or sites in play, or the screen,
+    /// change: recall runs again at each new decision point.
     pub fn key(&self) -> String {
         let mut a = self.apps.clone();
         a.sort();
         let mut d = self.domains.clone();
         d.sort();
-        format!("{}|{}", a.join(","), d.join(","))
+        let screen = self.screen.as_deref().unwrap_or("");
+        format!("{}|{}|{screen}", a.join(","), d.join(","))
     }
 }
 
@@ -86,6 +97,16 @@ pub fn score(l: &Lesson, cx: &Context, now: i64) -> Option<f32> {
     }
     if domain_hit {
         s += 2.0;
+    }
+    // Learned on a particular screen: best there, weaker elsewhere.
+    if !l.scope.screens.is_empty()
+        && let Some(here) = &cx.screen
+    {
+        s += if l.scope.screens.contains(here) {
+            2.0
+        } else {
+            -1.0
+        };
     }
     Some(s)
 }
@@ -139,6 +160,7 @@ mod scope_tests {
             apps: apps.iter().map(|s| s.to_string()).collect(),
             domains: vec![],
             task_words: words.iter().map(|s| s.to_string()).collect(),
+            screens: Vec::new(),
         };
         Lesson::new(
             Kind::Prefer,
@@ -162,5 +184,54 @@ mod scope_tests {
         );
         let same = Context::new("Turn on line numbers", &["mousepad".into()], &[]);
         assert!(score(&l, &same, 0).is_some());
+    }
+
+    #[test]
+    fn the_screen_a_lesson_was_learned_on_ranks_it_higher() {
+        let mut here = lesson(&["mousepad"], &[]);
+        here.scope.screens = vec!["mousepad/button,textfield".into()];
+        let anywhere = lesson(&["mousepad"], &[]);
+        let cx = |screen: &str| {
+            Context::new("write a note", &["mousepad".into()], &[]).at_screen(Some(screen.into()))
+        };
+        let on = cx("mousepad/button,textfield");
+        let off = cx("mousepad/button,menuitem");
+        assert!(score(&here, &on, 0) > score(&anywhere, &on, 0));
+        assert!(score(&here, &off, 0) < score(&anywhere, &off, 0));
+        // Still shown elsewhere in the app, just ranked lower.
+        assert!(score(&here, &off, 0).is_some());
+        // The screen is part of the recall key: a new screen recalls again.
+        assert_ne!(on.key(), off.key());
+    }
+
+    #[test]
+    fn screen_signatures_ignore_the_document_name() {
+        use crate::element::{Element, Grounding, Rect, Role};
+        let g = |roles: &[Role]| {
+            Grounding::Marks(
+                roles
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| Element {
+                        mark: i as u32 + 1,
+                        role: *r,
+                        name: format!("e{i}"),
+                        bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
+                        enabled: true,
+                        secure: false,
+                        value: None,
+                    })
+                    .collect(),
+            )
+        };
+        let editor = g(&[Role::Button, Role::TextField, Role::Button]);
+        let a = scope::screen_sig(Some("notes.txt - Mousepad"), &editor);
+        let b = scope::screen_sig(Some("todo.md - Mousepad"), &editor);
+        assert_eq!(a.as_deref(), Some("mousepad/button,textfield"));
+        assert_eq!(a, b);
+        // A dialog adds kinds of elements: a different screen.
+        let dialog = g(&[Role::Button, Role::TextField, Role::ComboBox]);
+        assert_ne!(a, scope::screen_sig(Some("Save As - Mousepad"), &dialog));
+        assert_eq!(scope::screen_sig(None, &editor), None);
     }
 }

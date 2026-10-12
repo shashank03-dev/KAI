@@ -123,6 +123,20 @@ fn dead_end_repeats_become_avoid() {
 }
 
 #[test]
+fn a_lesson_remembers_the_screen_it_was_learned_on() {
+    let click = r#"{"thought":"x","action":"click","target":1,"risk":"low","expect":"saved"}"#;
+    let mut steps = vec![
+        step(0, click, false, None, EDITOR),
+        step(1, click, false, None, EDITOR),
+    ];
+    for s in &mut steps {
+        s.screen = Some("mousepad/button,textfield".into());
+    }
+    let ls = learn(&trace("save it", steps, Outcome::AskedUser), None);
+    assert_eq!(ls[0].scope.screens, vec!["mousepad/button,textfield"]);
+}
+
+#[test]
 fn failing_shell_with_a_fix_and_without() {
     let bad = r#"{"thought":"x","action":"shell","text":"pythn x.py","risk":"low","expect":"script runs"}"#;
     let good = r#"{"thought":"x","action":"shell","text":"python3 x.py","risk":"low","expect":"script runs"}"#;

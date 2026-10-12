@@ -76,6 +76,11 @@ pub struct StepRecord {
     /// steps, grid cells, unnamed and secure elements, and in old traces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<TargetSig>,
+    /// A coarse signature of the screen the step was decided on
+    /// ([`crate::memory::scope::screen_sig`]), so lessons learned here are
+    /// recalled here. Absent without a window title and in old traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<String>,
 }
 
 /// An element by what it is, not where it was: mark numbers change every
@@ -192,6 +197,7 @@ impl StepRecord {
             executor: None,
             effect: None,
             target: None,
+            screen: None,
         }
     }
 }
@@ -348,6 +354,7 @@ mod tests {
                 executor: None,
                 effect: None,
                 target: None,
+                screen: None,
             });
         }
         let (p50, p95) = tr.step_percentiles();

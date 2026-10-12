@@ -211,17 +211,23 @@ pub fn learn(trace: &Trace, check: Option<bool>) -> Vec<Lesson> {
                 .target
                 .is_some_and(|t| crate::risk::mark_is_secure_in_text(&s.elements, t))
     };
-    let push = |out: &mut Vec<Lesson>, kind, text: String, app: &Option<String>, tg| {
-        let text = clip_words(&scrub(&text), super::MAX_WORDS);
-        if !allowed(&text, &secure, false) || out.iter().any(|l: &Lesson| l.text == text) {
-            return;
-        }
-        out.push(
-            Lesson::new(kind, &text, scoped(app), Source::Derived)
-                .with_evidence(run)
-                .targeting(tg),
-        );
-    };
+    // `at`: the step the lesson is about; its screen goes into the scope.
+    let push =
+        |out: &mut Vec<Lesson>, kind, text: String, app: &Option<String>, tg, at: Option<usize>| {
+            let text = clip_words(&scrub(&text), super::MAX_WORDS);
+            if !allowed(&text, &secure, false) || out.iter().any(|l: &Lesson| l.text == text) {
+                return;
+            }
+            let mut sc = scoped(app);
+            if let Some(screen) = at.and_then(|i| steps[i].screen.clone()) {
+                sc.screens.push(screen);
+            }
+            out.push(
+                Lesson::new(kind, &text, sc, Source::Derived)
+                    .with_evidence(run)
+                    .targeting(tg),
+            );
+        };
 
     // ---- Recovery and failing shell commands ----
     let mut fixed = vec![false; steps.len()];
@@ -276,7 +282,7 @@ pub fn learn(trace: &Trace, check: Option<bool>) -> Vec<Lesson> {
                 Action::OpenApp => scope::app_name(b.decision.text.as_deref().unwrap_or("")),
                 _ => scope::at_step(trace, j),
             };
-            push(&mut out, kind, text, &where_, Some(tg));
+            push(&mut out, kind, text, &where_, Some(tg), Some(i));
         }
     }
     for (i, s) in steps.iter().enumerate() {
@@ -297,7 +303,14 @@ pub fn learn(trace: &Trace, check: Option<bool>) -> Vec<Lesson> {
             ),
             _ => format!("{} fails here: {}.", what(s), short_error(out_text)),
         };
-        push(&mut out, Kind::Avoid, text, &app, Some(Category::EnvError));
+        push(
+            &mut out,
+            Kind::Avoid,
+            text,
+            &app,
+            Some(Category::EnvError),
+            Some(i),
+        );
     }
 
     // ---- Dead ends: the same thing twice with no progress ----
@@ -319,7 +332,14 @@ pub fn learn(trace: &Trace, check: Option<bool>) -> Vec<Lesson> {
                 "{key}{} did nothing ({n} tries); try another way.",
                 in_app(&app)
             );
-            push(&mut out, Kind::Avoid, text, &app, Some(Category::Loop));
+            push(
+                &mut out,
+                Kind::Avoid,
+                text,
+                &app,
+                Some(Category::Loop),
+                Some(i),
+            );
         }
     }
 
@@ -340,10 +360,18 @@ pub fn learn(trace: &Trace, check: Option<bool>) -> Vec<Lesson> {
             text,
             &None,
             Some(Category::FalseDone),
+            None,
         );
     }
 
     out.truncate(MAX_DERIVED);
+    if passed {
+        for f in super::facts::learn(trace, &secure) {
+            if !out.iter().any(|l| l.text == f.text) {
+                out.push(f.with_evidence(run));
+            }
+        }
+    }
 
     // ---- Steering: the user's words, kept as preferences ----
     for m in &trace.steered {

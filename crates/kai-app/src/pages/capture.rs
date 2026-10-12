@@ -210,6 +210,7 @@ fn fake_run(r: &mut RunState, done: Option<Outcome>) {
             executor: None,
             effect: None,
             target: None,
+            screen: None,
         });
     }
     r.thinking = done.is_none();
