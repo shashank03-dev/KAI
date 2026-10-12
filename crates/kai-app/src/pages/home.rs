@@ -122,11 +122,11 @@ fn status_line(app: &KaiApp, g: &Glass, cx: &App) -> AnyElement {
         .bg(g.card)
         .border_1()
         .border_color(g.line)
-        .child(if live {
-            anim::live_dot(color, "status-dot", g)
-        } else {
-            ui::dot(color, false, g)
-        })
+        // A steady glow, not the breathing dot: the connection is "ready"
+        // whenever Kai sits idle, and a looping animation there would keep
+        // the window redrawing forever (anim.rs: nothing loops while idle).
+        // The busy line below breathes while a run is going.
+        .child(ui::dot(color, live, g))
         .child(ui::eyebrow(
             format!("{word} · {}", crate::runs::model_label(&app.settings)),
             cx,

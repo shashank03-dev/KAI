@@ -5,7 +5,7 @@ use crate::ui::{self, Glass};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     data_display::{Badge, Tone},
-    documents::{MarkdownEditor, MarkdownMode, MarkdownRenderer},
+    documents::MarkdownRenderer,
     feedback::{EmptyState, InlineMessage, Toast},
     forms::{DropZone, SearchInput, Switch},
     layout::{ScrollArea, Sheet},
@@ -353,6 +353,20 @@ fn draft_sheet(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> gp
     };
     let (closer, saver) = (cx.entity(), cx.entity());
     let ok = check.is_ok();
+    // The sheet is narrow: a split editor squeezed both panes into a few
+    // words per line and its preview overflowed onto the Save button (seen
+    // in the CI screenshots). So: the plain source, then a preview of the
+    // body below it, all in one scroll area with Save at the end. The
+    // preview leaves out the frontmatter, which Markdown would render as one
+    // giant heading (its closing `---` reads as an underline).
+    let preview = body_of(&text).to_string();
+    let theme = cx.theme();
+    let label = |s: &'static str| {
+        div()
+            .text_size(theme.text_size(TextSize::Sm))
+            .text_color(theme.colors.fg_muted)
+            .child(s)
+    };
     Sheet::new(
         "draft-sheet",
         Place::Right,
@@ -365,22 +379,23 @@ fn draft_sheet(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> gp
         },
     )
     .child(
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(msg)
-            .child(div().h_96().child(MarkdownEditor::new(
-                "draft-editor",
-                &app.pages.skill_draft,
-                MarkdownMode::Split,
-            )))
-            .child(
-                Button::new("draft-save", "Save skill")
-                    .variant(ButtonVariant::Primary)
-                    .disabled(!ok)
-                    .on_click(move |_, _, cx| saver.update(cx, save_draft)),
-            ),
+        ScrollArea::new("draft-scroll").vertical().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(msg)
+                .child(label("SKILL.md"))
+                .child(div().w_full().child(app.pages.skill_draft.clone()))
+                .child(label("Preview"))
+                .child(MarkdownRenderer::new("draft-preview", preview))
+                .child(
+                    Button::new("draft-save", "Save skill")
+                        .variant(ButtonVariant::Primary)
+                        .disabled(!ok)
+                        .on_click(move |_, _, cx| saver.update(cx, save_draft)),
+                ),
+        ),
     )
     .into_any_element()
 }

@@ -30,6 +30,12 @@ jobs:
   # Named `check` like CI's job so rust-cache restores CI's cache: it holds
   # the pinned Ely GPUI Components checkout, which can no longer be cloned.
   check:
+    # Never commit captures onto the default branch from a push (it is not
+    # named `main` in this repo, so `branches-ignore` alone let it through);
+    # a manual run there is still allowed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_name != github.event.repository.default_branch
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

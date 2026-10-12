@@ -302,7 +302,6 @@ impl RunState {
     }
 }
 
-/// An action in plain words: "Clicking “Save”", "Typing “hello”".
 /// A run's outcome in a few plain words, for lists, toasts and badges.
 pub fn outcome_text(o: Outcome) -> &'static str {
     match o {
@@ -315,6 +314,7 @@ pub fn outcome_text(o: Outcome) -> &'static str {
     }
 }
 
+/// An action in plain words: "Clicking “Save”", "Typing “hello”".
 pub fn describe(d: &Decision, element: Option<&str>) -> String {
     let on = element
         .map(|e| format!(" “{e}”"))
