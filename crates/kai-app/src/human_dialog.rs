@@ -34,7 +34,7 @@ pub fn dialog(
         div()
             .w_full()
             .child(PromptInput::new("human-input", draft, move |_, cx| {
-                submit.update(cx, |a, cx| send(a, cx))
+                submit.update(cx, send)
             }))
     });
     let what = if check.accepts_code() {
