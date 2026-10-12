@@ -93,6 +93,13 @@ impl Actuator for DesktopActuator {
     }
 
     async fn shell(&self, cmd: &str) -> anyhow::Result<String> {
+        if kills_kai(cmd, &own_pids()) {
+            return Ok(
+                "Not run: this command would stop Kai itself (it names Kai's own process). \
+                 Kai is not the app you are looking for; find the target app's own process."
+                    .to_string(),
+            );
+        }
         // `mousepad file.txt` as a shell step would block until the timeout
         // (a GUI app never exits by itself): start it detached instead.
         #[cfg(target_os = "linux")]
@@ -112,8 +119,73 @@ impl Actuator for DesktopActuator {
     }
 }
 
+/// Kai's own process and its parent (the app, or the terminal running
+/// `kai`).
+fn own_pids() -> Vec<u32> {
+    let mut v = vec![std::process::id()];
+    #[cfg(unix)]
+    v.push(std::os::unix::process::parent_id());
+    v
+}
+
+/// Would `cmd` kill Kai? A kill-family command (`kill`, `pkill`, `killall`,
+/// `taskkill`, `Stop-Process`) that names one of `own` as a number, targets
+/// every process (`kill -1`), or matches Kai by name. Seen live: Gemma ran
+/// `ps aux | grep mousepad`, which matched Kai's own command line, then
+/// killed that PID.
+pub fn kills_kai(cmd: &str, own: &[u32]) -> bool {
+    let c = cmd.to_ascii_lowercase();
+    let words: Vec<&str> = c
+        .split(|ch: char| ch.is_whitespace() || ";|&()`'\"".contains(ch))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let killer = |w: &str| {
+        let w = w.rsplit('/').next().unwrap_or(w);
+        matches!(
+            w,
+            "kill" | "pkill" | "killall" | "taskkill" | "stop-process"
+        )
+    };
+    let Some(start) = words.iter().position(|w| killer(w)) else {
+        return false;
+    };
+    words[start + 1..].iter().any(|w| {
+        w.trim_start_matches('-')
+            .parse::<u32>()
+            .is_ok_and(|n| own.contains(&n))
+            || *w == "-1"
+            || w.starts_with("kai")
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_command_that_would_kill_kai_is_refused() {
+        let own = [31093, 400];
+        for cmd in [
+            "kill 31093",
+            "kill -9 31093",
+            "ps aux | grep mousepad; kill 31093",
+            "/bin/kill -TERM 400",
+            "kill -9 -1",
+            "pkill kai",
+            "killall kai-app",
+            "taskkill /PID 31093 /F",
+            "Stop-Process -Id 31093",
+        ] {
+            assert!(super::kills_kai(cmd, &own), "{cmd}");
+        }
+        for cmd in [
+            "kill 1234",
+            "pkill mousepad",
+            "ls -la 31093",
+            "killall mousepad",
+        ] {
+            assert!(!super::kills_kai(cmd, &own), "{cmd}");
+        }
+    }
+
     use super::*;
     use kai_core::{Element, Rect, Role};
 
