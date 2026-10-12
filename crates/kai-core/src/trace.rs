@@ -279,8 +279,12 @@ impl Trace {
         }
     }
 
-    pub fn push(&mut self, step: StepRecord) {
+    pub fn push(&mut self, mut step: StepRecord) {
         self.total_ms += step.timings.total_ms();
+        // Sensitive data Kai typed never reaches the saved trace.
+        if let Some(kind) = crate::risk::sensitive_typed(&step.decision) {
+            step.decision.text = Some(format!("[{kind}]"));
+        }
         self.steps.push(step);
     }
 

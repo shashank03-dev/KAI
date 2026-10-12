@@ -213,6 +213,47 @@ pub fn load_dir(root: &Path, builtin: bool) -> Vec<Skill> {
     out
 }
 
+/// Pick the most relevant skill for a task by keyword overlap between the task
+/// and each skill's name + description. Returns the best match if it clears a
+/// small threshold. This is the cheap keyword path; the model can also pick.
+pub fn select_skill<'a>(task: &str, skills: &'a [Skill]) -> Option<&'a Skill> {
+    let task_words: Vec<String> = tokenize(task);
+    if task_words.is_empty() {
+        return None;
+    }
+    let mut best: Option<(&Skill, usize)> = None;
+    for sk in skills {
+        let hay = format!(
+            "{} {}",
+            sk.front.name.replace('-', " "),
+            sk.front.description
+        );
+        let hay_words = tokenize(&hay);
+        let score = task_words
+            .iter()
+            .filter(|w| w.len() > 2 && !STOPWORDS.contains(&w.as_str()) && hay_words.contains(w))
+            .count();
+        if score > best.map(|(_, s)| s).unwrap_or(0) {
+            best = Some((sk, score));
+        }
+    }
+    best.filter(|(_, s)| *s >= 2).map(|(sk, _)| sk)
+}
+
+/// Words too common to say which skill fits.
+const STOPWORDS: &[&str] = &[
+    "the", "and", "for", "with", "use", "when", "user", "wants", "that", "this", "from", "into",
+    "your", "you", "my", "can", "please", "then", "what", "which", "are", "was", "all", "any",
+];
+
+fn tokenize(s: &str) -> Vec<String> {
+    s.to_ascii_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

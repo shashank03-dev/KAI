@@ -548,3 +548,59 @@ The design, guarantees and limits are in `docs/VERIFICATION.md`.
   helpers moved to `engine/act.rs`, and it is now under 500. `agent.rs`,
   `skills.rs` and `human_e2e.rs` were already over 500 before this change;
   none of them grew.
+
+## Untrusted content and sensitive data (2026-10-12)
+
+The owner's rules: only direct user instructions are permission; everything
+on screen (sites, PDFs, emails, invites, chats, tool output) is untrusted;
+phishing, injection or an unexpected warning means stop and ask; confirm at
+the point of risk, not before starting; typing sensitive data counts as
+sending it. Design and tests: `docs/SAFETY.md`.
+
+- **Rules in code, not only in the prompt.** The system prompt says screen
+  text is data, but a model can be talked out of a prompt. So
+  `untrusted::suspicious` pauses the run as a human check (`Suspicious`) when
+  the screen holds a known injection or phishing phrase, and
+  `risk::is_payment_or_password` now also covers typed sensitive data, which
+  makes the confirmation unconditional, even on autopilot.
+- **Phrase lists, not a classifier.** Deterministic and testable, with no
+  extra model call. They will miss novel wording; the prompt rule covers the
+  rest. "Gift card" was dropped from the phishing list: shops show it all the
+  time.
+- **One question per sighting.** "Ignore it and continue" acknowledges that
+  exact text for the run, like a handled CAPTCHA.
+- **Redaction.** Typed sensitive data is replaced by `[card number]` and
+  similar in the saved trace (`Trace::push`) and in the model's step history
+  (`HistoryItem::from_decision`). The approval prompt still shows the real
+  value, so the user can check it. Training-data recordings (opt-in) keep
+  the raw model reply.
+
+## rustautogui evaluated, not added (2026-10-12)
+
+Asked to add `rustautogui` 2.5 as a fallback, provided it improves the
+foundations significantly. I read the code behind the functions Kai would
+use (`find_image_on_screen`, the template preparation, mouse and keyboard)
+and left it out:
+
+- `RustAutoGui::new` panics (`panic!`, not an error) when no X display can
+  be opened, as on Wayland or headless machines. A fallback must not crash
+  Kai.
+- Linux capture is `XGetImage` on the X11 root window: it cannot see native
+  Wayland windows. Kai's capture already handles Wayland, X11 and Windows on
+  every monitor.
+- Windows capture covers the main monitor only, sized by
+  `GetSystemMetrics(0/1)`, without DPI handling.
+- `find_image_on_screen` prints to stdout on every call (27 `println!` in
+  the crate). That would corrupt `kai mcp`, whose stdout is the protocol.
+- The FFT matcher pads a 1080p screen to 2048×2048 and runs a 4.2M-point
+  FFT per search (over 100 MB of temporaries, sums in f32).
+- The struct holds raw X11 pointers (not `Send`), so each call would need a
+  fresh instance and display connection.
+- Mouse and keyboard duplicate enigo, which Kai already uses, and are
+  X11-only on Linux.
+
+The one capability Kai lacks is template matching, for re-aiming a
+procedure step when its accessibility signature fails. If that turns out to
+matter, normalised cross-correlation on Kai's own capture, searched near the
+element's old position, is about 100 lines. It is not built, because it would
+only back up procedures, which are off by default.

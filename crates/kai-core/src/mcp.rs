@@ -200,7 +200,9 @@ impl<'a> Server<'a> {
             obs.window_title.as_deref().unwrap_or("(unknown)"),
             obs.grounding.as_compact_text()
         );
-        if let Some(c) = crate::human::detect(&obs.grounding) {
+        if let Some(c) = crate::human::detect(&obs.grounding)
+            .or_else(|| crate::untrusted::suspicious(&obs.grounding))
+        {
             text.push_str(&format!(
                 "\n\nA human check is on screen ({:?}): only the user can do it.",
                 c.kind

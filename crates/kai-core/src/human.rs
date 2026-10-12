@@ -28,6 +28,9 @@ pub enum CheckKind {
     DeviceApproval,
     /// The model asked the user something (`ask_user`).
     Question,
+    /// Text on screen that looks like a prompt injection, phishing or a fake
+    /// warning (`crate::untrusted`): the user decides whether Kai goes on.
+    Suspicious,
 }
 
 impl CheckKind {
@@ -37,6 +40,7 @@ impl CheckKind {
             CheckKind::OneTimeCode => "one_time_code",
             CheckKind::DeviceApproval => "device_approval",
             CheckKind::Question => "question",
+            CheckKind::Suspicious => "suspicious",
         }
     }
 
@@ -47,6 +51,7 @@ impl CheckKind {
             CheckKind::OneTimeCode => "Kai needs a verification code",
             CheckKind::DeviceApproval => "Kai needs you to approve a sign-in",
             CheckKind::Question => "Kai has a question",
+            CheckKind::Suspicious => "Kai found something suspicious on screen",
         }
     }
 }

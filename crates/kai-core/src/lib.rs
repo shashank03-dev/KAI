@@ -34,6 +34,7 @@ pub mod settings;
 pub mod shell_ro;
 pub mod skill;
 pub mod trace;
+pub mod untrusted;
 
 pub use client::{
     Backend, ClientError, FailoverClient, GeminiClient, Images, MockClient, ModelClient, VllmClient,

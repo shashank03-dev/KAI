@@ -146,6 +146,11 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
     {
         return true;
     }
+    // Typing sensitive data (a card number, IBAN, ID number, key) sends it:
+    // always the user's call (`crate::untrusted`).
+    if sensitive_typed(decision).is_some() {
+        return true;
+    }
     // Only what the action touches counts here: the model's own `thought`
     // ("avoid password/payment") must not turn an email field into a payment,
     // and "pay" inside "display" is not a payment either.
@@ -168,6 +173,37 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
     ]
     .iter()
     .any(|w| has_phrase(&h, w))
+}
+
+/// The kind of sensitive data a `type` step would enter, if any.
+pub fn sensitive_typed(d: &Decision) -> Option<&'static str> {
+    (d.action == Action::Type)
+        .then(|| crate::untrusted::sensitive(d.text.as_deref().unwrap_or("")))
+        .flatten()
+}
+
+/// For the approval prompt, when the step needs the user's confirmation
+/// because of sensitive data or a secure field: what Kai will do, the risk,
+/// and how the data is used. `None` for other steps (their own description
+/// is enough).
+pub fn explain(d: &Decision, g: &Grounding) -> Option<String> {
+    let field = d
+        .target
+        .and_then(|t| g.element(t))
+        .map(|e| format!("the {} \"{}\"", e.role.label(), e.name))
+        .unwrap_or_else(|| "the field that has focus".into());
+    let what = match sensitive_typed(d) {
+        Some(kind) => format!("your {kind}"),
+        None if d.action == Action::Type && d.target.is_some_and(|t| targets_secure(g, t)) => {
+            "text into a password or secure field".into()
+        }
+        None => return None,
+    };
+    Some(format!(
+        "Kai wants to type {what} into {field}. Risk: typing it sends it to whatever app or \
+         site owns that field. It is typed there once and nowhere else; Kai's lessons, \
+         procedures and traces blank it out."
+    ))
 }
 
 /// `phrase` appears in `hay` on word boundaries.

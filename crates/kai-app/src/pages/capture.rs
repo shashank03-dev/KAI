@@ -375,6 +375,7 @@ fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiAp
                 r.apply(Ui::Approval(Pending {
                     decision: decision(r#"{"thought":"Send the drafted email to the professor","action":"click","target":12,"risk":"high"}"#),
                     element: Some("Send".into()),
+                    explain: None,
                     reply,
                 }));
             });

@@ -55,6 +55,9 @@ pub struct Pending {
     pub decision: Decision,
     /// The element's name, when the step targets one.
     pub element: Option<String>,
+    /// For sensitive data or a secure field: the action, its risk and how
+    /// the data is used (`kai_core::risk::explain`).
+    pub explain: Option<String>,
     pub reply: oneshot::Sender<ApprovalChoice>,
 }
 
@@ -406,6 +409,7 @@ impl Approver for UiApprover {
             .unbounded_send(Ui::Approval(Pending {
                 decision: decision.clone(),
                 element,
+                explain: kai_core::risk::explain(decision, grounding),
                 reply,
             }))
             .is_err()

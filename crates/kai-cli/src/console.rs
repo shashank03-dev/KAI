@@ -111,7 +111,11 @@ impl Approver for TerminalApprover {
             .and_then(|t| g.element(t))
             .map(|e| format!(" on \"{}\"", e.name))
             .unwrap_or_default();
+        let explain = kai_core::risk::explain(d, g);
         tokio::task::spawn_blocking(move || {
+            if let Some(e) = explain {
+                eprintln!("\n  ⚠ {e}");
+            }
             eprint!("\n  ⚠ Kai wants to {what}{on}. Approve? [y]es / [s]kip / [n]o, stop: ");
             let _ = std::io::stderr().flush();
             let mut line = String::new();
@@ -144,6 +148,8 @@ impl HumanHelper for TerminalHuman {
             eprintln!("     (seen: {})", check.evidence);
             let hint = if check.accepts_code() {
                 "Type the code for Kai to enter, or press Enter once you entered it; `stop` stops"
+            } else if check.kind == CheckKind::Suspicious {
+                "Press Enter to ignore it and continue; `stop` stops"
             } else if check.kind == CheckKind::Question {
                 "Type your answer (Enter alone: you handled it); `stop` stops"
             } else {

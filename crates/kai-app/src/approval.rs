@@ -64,7 +64,11 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
         },
     )
     .detail(format!(
-        "{reason}{why}Nothing happens until you choose. Escape stops the run."
+        "{}{reason}{why}Nothing happens until you choose. Escape stops the run.",
+        p.explain
+            .as_deref()
+            .map(|e| format!("{e} "))
+            .unwrap_or_default()
     ))
     .children(frame)
     .child(

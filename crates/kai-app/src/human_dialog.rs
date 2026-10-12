@@ -45,10 +45,10 @@ pub fn dialog(
     } else {
         ""
     };
-    let done_label = if check.kind == CheckKind::Question {
-        "Carry on without answering"
-    } else {
-        "I did it"
+    let done_label = match check.kind {
+        CheckKind::Question => "Carry on without answering",
+        CheckKind::Suspicious => "Ignore it and continue",
+        _ => "I did it",
     };
 
     Dialog::new("human-check", check.kind.title(), move |_, cx| {
