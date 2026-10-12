@@ -14,10 +14,16 @@
 //!   and [`crate::plan_cache`];
 //! - the executor: a local decision model carries out the reply's `plan`,
 //!   gated by confidence, approvals unchanged — `execute.rs`.
+//!
+//! Human checks (`human.rs`, `docs/HUMAN_CHECKS.md`): a CAPTCHA, one-time
+//! code or sign-in approval on screen pauses the run until the user deals
+//! with it; the model never touches them. `ask_user` becomes a real question
+//! when someone can answer.
 
 mod act;
 mod batch;
 mod execute;
+mod human;
 mod memory;
 mod observe;
 mod record;
@@ -52,6 +58,10 @@ pub struct Engine<'a> {
     pub steering: &'a dyn Steering,
     /// Optional cheap verifier (text-only decision model).
     pub verifier: Option<&'a dyn Verifier>,
+    /// Who to ask when the run needs a person: a CAPTCHA, a one-time code, a
+    /// sign-in approval or a question. `None` (headless, bench) ends the run
+    /// as "asked user" at those moments instead.
+    pub human: Option<&'a dyn crate::human::HumanHelper>,
     pub skills: &'a [Skill],
     pub config: Config,
 }
@@ -84,6 +94,8 @@ pub const SKILL: &str = "skill (no model call)";
 pub const CACHED: &str = "plan cache (no model call)";
 /// Trace backend label for executor steps.
 pub const EXECUTOR: &str = crate::executor::BACKEND;
+/// Trace backend label for steps the user settled (human checks).
+pub use human::HUMAN;
 
 /// What the last action expected, waiting for the next observation to check.
 struct Pending {
@@ -136,6 +148,8 @@ struct Run<'t> {
     /// Experience memory, the apps/sites seen so far and the lesson block.
     memory: Option<&'t MemoryStore>,
     mem: memory::Recalled,
+    /// Human checks this run: handled ones, codes typed, time waited.
+    human: human::HumanState,
 }
 
 impl Engine<'_> {
@@ -169,6 +183,7 @@ impl Engine<'_> {
             exec_cooldown: 0,
             memory: opts.memory,
             mem: Default::default(),
+            human: Default::default(),
         };
         self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
@@ -227,7 +242,8 @@ impl Engine<'_> {
             if self.interrupt.stopped() {
                 return Outcome::Stopped;
             }
-            if Instant::now() >= deadline {
+            // Time spent waiting for the user is not Kai's time.
+            if Instant::now() >= deadline + r.human.waited {
                 return Outcome::TimeLimit;
             }
             if let Some(o) = self.model_step(r, &system, &schema, active_skill).await {
@@ -264,6 +280,11 @@ impl Engine<'_> {
         };
         let obs = &seen.obs;
         let elements = obs.grounding.as_text();
+
+        // ---- Something only the user can get past (CAPTCHA, code, approval) ----
+        if let Some(check) = self.unhandled_check(r, &obs.grounding) {
+            return self.pause_for_human(r, check, None, &elements).await;
+        }
 
         // ---- Decide ----
         self.sink.emit(&EngineEvent::Thinking { step });
@@ -323,6 +344,19 @@ impl Engine<'_> {
             decision: Box::new(decision.clone()),
             target: decision.target.and_then(|t| obs.grounding.target_rect(t)),
         });
+
+        // ---- ask_user: a real question when someone can answer ----
+        if decision.action == Action::AskUser && self.human.is_some() {
+            let q = crate::human::HumanCheck::question(
+                decision.text.as_deref().unwrap_or(&decision.thought),
+            );
+            return self.pause_for_human(r, q, Some(rec), "").await;
+        }
+
+        // ---- The model never works a CAPTCHA or guesses a one-time code ----
+        if let Some(check) = crate::human::guard(&decision, &obs.grounding) {
+            return self.refuse_for_human(r, check, rec).await;
+        }
 
         // ---- done / ask_user terminate ----
         match decision.action {

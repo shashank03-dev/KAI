@@ -14,6 +14,8 @@ use ely_gpui_component::{feedback::Toast, primitives::Severity};
 use futures::StreamExt;
 use gpui::{AppContext, Context, Entity, Window};
 use kai_core::ApprovalChoice;
+use kai_core::engine::EngineEvent;
+use kai_core::human::HumanReply;
 use std::sync::Arc;
 
 /// One run in the sessions list.
@@ -168,11 +170,29 @@ impl KaiApp {
         let main = window.window_handle().downcast::<KaiApp>();
         cx.spawn(async move |_, cx| {
             let mut rx = rx;
+            // Raised for a code or a question (they are typed in the main
+            // window); stepped aside again once the user answered, so it
+            // never covers what Kai clicks.
+            let mut raised = false;
             while let Some(msg) = rx.next().await {
+                let wants_typing = matches!(
+                    &msg,
+                    Ui::Human(h) if h.check.accepts_code() || h.check.accepts_answer()
+                );
+                let answered = matches!(&msg, Ui::Event(EngineEvent::HumanDone { .. }));
                 state.update(cx, |r, cx| {
                     r.apply(msg);
                     cx.notify();
                 });
+                if let Some(main) = main.as_ref() {
+                    if wants_typing {
+                        raised = true;
+                        let _ = main.update(cx, |_, window, _| window.activate_window());
+                    } else if answered && raised {
+                        raised = false;
+                        let _ = main.update(cx, |_, window, _| window.minimize_window());
+                    }
+                }
             }
             // A run that ends without a result (the agent stopped) still ends.
             state.update(cx, |r, cx| {
@@ -246,6 +266,7 @@ impl KaiApp {
             self.queue_held = true;
         }
         self.answer(ApprovalChoice::Stop, cx);
+        self.answer_human(HumanReply::Stop, cx);
         cx.notify();
     }
 
@@ -267,6 +288,9 @@ impl KaiApp {
                 cx.global::<AgentHandle>().0.stop();
                 if let Some(p) = state.update(cx, |r, _| r.approval.take()) {
                     let _ = p.reply.send(ApprovalChoice::Stop);
+                }
+                if let Some(h) = state.update(cx, |r, _| r.human.take()) {
+                    let _ = h.reply.send(HumanReply::Stop);
                 }
             }
             _ => {}
@@ -342,6 +366,48 @@ impl KaiApp {
             self.select(None, cx);
         }
         cx.notify();
+    }
+
+    /// Answer the active run's human check (CAPTCHA, code, question).
+    pub fn answer_human(&mut self, reply: HumanReply, cx: &mut Context<Self>) {
+        let Some(state) = self.active_state() else {
+            return;
+        };
+        if let Some(h) = state.update(cx, |r, cx| {
+            if r.phase == Phase::Waiting {
+                r.phase = Phase::Running;
+            }
+            cx.notify();
+            r.human.take()
+        }) {
+            let _ = h.reply.send(reply);
+        }
+        self.human_draft.update(cx, |d, cx| d.set_text("", cx));
+    }
+
+    /// The code or answer typed into the human-check dialog. `false` when
+    /// the dialog expects a code and the text is not one (nothing is sent).
+    pub fn send_human_text(&mut self, cx: &mut Context<Self>) -> bool {
+        let text = self.human_draft.read(cx).text().trim().to_string();
+        let Some(state) = self.active_state() else {
+            return false;
+        };
+        let reply = state.read(cx).human.as_ref().map(|h| {
+            if h.check.accepts_code() {
+                kai_core::OneTimeCode::parse(&text).map(HumanReply::Code)
+            } else if h.check.accepts_answer() && !text.is_empty() {
+                Some(HumanReply::Answer(text.clone()))
+            } else {
+                Some(HumanReply::Resolved)
+            }
+        });
+        match reply.flatten() {
+            Some(r) => {
+                self.answer_human(r, cx);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Answer the active run's approval.

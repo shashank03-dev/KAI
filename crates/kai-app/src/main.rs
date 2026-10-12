@@ -9,6 +9,7 @@ mod assets;
 mod brand;
 mod chrome;
 mod control;
+mod human_dialog;
 mod i18n;
 mod local;
 mod local_api;

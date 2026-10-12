@@ -20,6 +20,7 @@ use gpui::{
     App, AppContext, AsyncApp, Context, Entity, FocusHandle, Global, IntoElement, ParentElement,
     Render, Styled, Window, WindowHandle, div, px, size,
 };
+use kai_core::human::HumanReply;
 use kai_core::{ApprovalChoice, Rect};
 use std::sync::Arc;
 
@@ -100,6 +101,17 @@ impl MiniView {
             let _ = p.reply.send(choice);
         }
     }
+
+    /// Answer a human check (CAPTCHA, code, sign-in approval, question).
+    fn answer_human(run: &Entity<RunState>, reply: HumanReply, cx: &mut App) {
+        if let Some(h) = run.update(cx, |r, cx| {
+            r.phase = Phase::Running;
+            cx.notify();
+            r.human.take()
+        }) {
+            let _ = h.reply.send(reply);
+        }
+    }
 }
 
 impl Render for MiniView {
@@ -126,7 +138,48 @@ impl Render for MiniView {
             self.run.clone(),
         );
 
-        let answers = waiting.then(|| {
+        // A human check: the user does it on screen (or types a code or an
+        // answer in Kai's main window), then says so here.
+        let (h_done, h_stop) = (self.run.clone(), self.run.clone());
+        let human = r.human.as_ref().map(|h| {
+            let typed = h.check.accepts_code() || h.check.accepts_answer();
+            let hint = if typed {
+                format!("{} You can type it in Kai's main window.", h.check.prompt)
+            } else {
+                h.check.prompt.clone()
+            };
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(theme.text_size(TextSize::Xs))
+                        .line_clamp(3)
+                        .child(hint),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("mini-human-done", "I did it")
+                                .variant(ButtonVariant::Primary)
+                                .on_click(move |_, _, cx| {
+                                    Self::answer_human(&h_done, HumanReply::Resolved, cx)
+                                }),
+                        )
+                        .child(
+                            Button::new("mini-human-stop", "Stop")
+                                .variant(ButtonVariant::Danger)
+                                .on_click(move |_, _, cx| {
+                                    Self::answer_human(&h_stop, HumanReply::Stop, cx)
+                                }),
+                        ),
+                )
+        });
+        let has_human = human.is_some();
+        let answers = (waiting && !has_human).then(|| {
             div()
                 .flex()
                 .gap_2()
@@ -203,6 +256,7 @@ impl Render for MiniView {
                 }),
             )
             .child(div().flex_1())
+            .children(human)
             .children(answers)
             .children((!waiting).then(|| {
                 let (control, run) = (self.control.clone(), self.run.clone());

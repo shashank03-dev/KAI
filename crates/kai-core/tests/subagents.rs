@@ -104,6 +104,7 @@ async fn shell_subagents_run_in_parallel_and_feed_dependents() {
         interrupt: &kai_core::engine::NeverStops,
         sink: &NullSink,
         steering: &kai_core::engine::NoSteering,
+        human: None,
         skills: &[],
         config: Config::default(),
         parallelism: 4,

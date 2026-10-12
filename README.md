@@ -132,6 +132,11 @@ a mock); Jev (free tier: 403). How we plan to make Gemma beat frontier models:
 - **You see everything.** The mini window shows what Kai is doing right now;
   the run view shows every frame it sent and every action it took, with
   timings.
+- **You handle CAPTCHAs, codes and questions.** At a CAPTCHA, a one-time
+  code or a sign-in approval, Kai stops and notifies you; it never solves a
+  CAPTCHA or guesses a code. Give it the code and it types it in (the model
+  never sees it); answer its question and it carries on.
+  [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md)
 - **Risky actions ask first.** Sending, buying, deleting, submitting, changing
   settings, destructive commands — and typing into a password field, which is
   always high risk whatever the model says. Autopilot still always asks for

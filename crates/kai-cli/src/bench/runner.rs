@@ -244,6 +244,7 @@ pub async fn run_mock_with(
             sink: &NullSink,
             steering: &kai_core::engine::NoSteering,
             verifier: None,
+            human: None,
             skills,
             config,
         };
@@ -355,6 +356,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             sink: &Printer,
             steering: &kai_core::engine::NoSteering,
             verifier: None,
+            human: None,
             skills: live.skills,
             config: live.config,
         };

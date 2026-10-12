@@ -27,6 +27,9 @@ pub enum Category {
     RateLimited,
     /// Clicked a mark whose name does not match what the thought said.
     GroundingMiss,
+    /// Blocked on a human check (CAPTCHA, one-time code, sign-in approval
+    /// or question) that nobody answered.
+    NeedsHuman,
     Other,
 }
 
@@ -42,6 +45,7 @@ impl Category {
             Category::EnvError => "env_error",
             Category::RateLimited => "rate_limited",
             Category::GroundingMiss => "grounding_miss",
+            Category::NeedsHuman => "needs_human",
             Category::Other => "other",
         }
     }
@@ -151,6 +155,22 @@ pub fn classify(trace: &Trace, check: Option<bool>) -> Option<Failure> {
             ));
         }
         Some(Outcome::AskedUser) => {
+            if let Some(h) = trace.human.last().filter(|h| {
+                matches!(
+                    h.result.as_str(),
+                    "no_one_to_ask" | "timed_out" | "too_many_asks"
+                )
+            }) {
+                return Some(Failure::new(
+                    Category::NeedsHuman,
+                    format!(
+                        "needed the user for a {} ({}): {}",
+                        h.kind.as_str().replace('_', " "),
+                        h.evidence,
+                        h.result.replace('_', " ")
+                    ),
+                ));
+            }
             let why = match trace.steps.last() {
                 Some(s) if s.decision.action == Action::AskUser => {
                     format!("asked the user: {}", short(&s.decision.thought))

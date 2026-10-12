@@ -215,6 +215,13 @@ becomes DNS, TLS and header checks in parallel, then one summary.
   if taken), the pointer in the top-left corner, or the Stop button. The engine
   checks the flag before every step; a running command is killed with its
   process tree. Tested: stopped within one step, every time.
+- **Human checks:** a CAPTCHA, a one-time-code field, "approve the sign-in on
+  your phone" or the model's `ask_user` pauses the run and asks you (desktop
+  notification, mini window, dialog; the bell in a terminal). Kai never clicks
+  a CAPTCHA or types a guessed code — the harness refuses those steps on every
+  path. A code you give is typed into the field you saw and blanked from
+  everything the model, trace and memory read. Waiting is not counted against
+  the time limit; the kill switch still works. See [HUMAN_CHECKS.md](HUMAN_CHECKS.md).
 - **Limits:** 40 steps / 10 minutes per task by default.
 - **Privacy:** screenshots go only to the configured model endpoint. Traces
   (JSON + frames) stay in the local config folder. Keys live in the OS keychain.

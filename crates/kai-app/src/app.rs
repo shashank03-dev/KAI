@@ -125,6 +125,8 @@ pub struct KaiApp {
     pub next_id: u64,
     pub draft: Entity<TextInput>,
     pub steer_draft: Entity<TextInput>,
+    /// The code or answer typed into the human-check dialog.
+    pub human_draft: Entity<TextInput>,
     /// Which pane the run view shows: "steps", "terminal" or "team".
     pub run_tab: String,
     pub settings: Settings,
@@ -166,6 +168,11 @@ impl KaiApp {
                 .multi_line(1, 4)
                 .placeholder("Tell Kai something mid-run, e.g. \"use Firefox, not Chrome\"")
         });
+        let human_draft = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line(1, 2)
+                .placeholder("The code, or your answer")
+        });
         let idle = cx.new(|_| RunState::default());
         Self {
             focus,
@@ -179,6 +186,7 @@ impl KaiApp {
             next_id: 0,
             draft,
             steer_draft,
+            human_draft,
             run_tab: "steps".into(),
             team: settings.team_mode,
             pages: pages::PageState::new(&settings, window, cx),
@@ -439,6 +447,12 @@ impl Render for KaiApp {
                 .as_ref()
                 .map(|p| approval::dialog(p, me.clone(), r).into_any_element())
         });
+        let human = self.active_state().and_then(|state| {
+            let r = state.read(cx);
+            r.human.as_ref().map(|h| {
+                crate::human_dialog::dialog(h, me.clone(), &self.human_draft).into_any_element()
+            })
+        });
         let shortcuts = self.shortcuts.then(|| {
             pages::shortcuts_dialog(me.clone(), self.pages.shortcut_search.clone())
                 .into_any_element()
@@ -510,6 +524,7 @@ impl Render for KaiApp {
                     )
                     .children(palette)
                     .children(approval)
+                    .children(human)
                     .children(shortcuts)
                     .child(ToastViewport::new("toasts", &self.toaster)),
             )
