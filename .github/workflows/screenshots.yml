@@ -6,9 +6,13 @@ name: Screenshots
 
 on:
   workflow_dispatch:
+  # On feature branches, every app change re-captures (the bot's own commit
+  # uses GITHUB_TOKEN, so it does not trigger another run).
   push:
+    branches-ignore: [main]
     paths:
       - .github/workflows/screenshots.yml
+      - crates/kai-app/**
 
 permissions:
   contents: write
