@@ -418,6 +418,9 @@ async fn run_task(
             o.ab.plan_cache()
                 .then(|| kai_core::PlanCache::load(Settings::dir().join("plans")).ok())
                 .flatten();
+        let procs = (o.ab.procedures)
+            .then(|| kai_core::ProcedureStore::load(Settings::dir().join("procedures")).ok())
+            .flatten();
         // Experience memory: lessons from earlier runs, and learning from this one.
         let memory = use_memory
             .then(|| kai_core::MemoryStore::load(Settings::memory_dir()))
@@ -434,6 +437,7 @@ async fn run_task(
                     memory: memory.as_ref(),
                     learn_later: false,
                     probe: Some(&kai_os::DesktopProbe),
+                    procedures: procs.as_ref(),
                 },
             )
             .await;

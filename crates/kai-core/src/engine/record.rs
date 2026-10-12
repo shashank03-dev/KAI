@@ -1,11 +1,11 @@
 //! Feeding the [`crate::recorder::TraceRecorder`]: what one model call sent
 //! and got back, attached to the step it produced.
 
-use super::{Engine, Run};
+use super::{Engine, Run, RunOptions};
 use crate::client::{ClientError, Images, ModelClient, ModelReply, ModelRequest};
-use crate::ports::Observation;
+use crate::ports::{EngineEvent, Observation};
 use crate::reply::StepReply;
-use crate::trace::CallRecord;
+use crate::trace::{CallRecord, Outcome};
 use std::time::Duration;
 
 /// Reply budget for the one repair retry (a cut-off script needs room).
@@ -60,6 +60,25 @@ pub(super) fn error_line(step: u32, e: &anyhow::Error) -> String {
 }
 
 impl Engine<'_> {
+    /// After the run: finish the recording, tell the UI, and keep what a
+    /// later run can reuse (the plan cache prefix, a procedure).
+    pub(super) fn wrap_up(&self, r: &Run<'_>, opts: RunOptions<'_>, outcome: Outcome) {
+        if let Some(rec) = opts.recorder
+            && let Err(e) = rec.finish(&r.trace)
+        {
+            log::warn!("recording the run failed: {e}");
+        }
+        self.sink.emit(&EngineEvent::Finished { outcome });
+        log::info!("run finished: {outcome:?}, {} steps", r.trace.steps.len());
+        if outcome == Outcome::Success
+            && let Some(cache) = opts.plan_cache
+            && let Err(e) = cache.record(&r.trace)
+        {
+            log::warn!("plan cache record failed: {e}");
+        }
+        self.finish_procedure(r, opts, outcome);
+    }
+
     /// When the run is recorded: write the frames sent and return the
     /// screenshot path and the call record for the step.
     pub(super) fn record_call(

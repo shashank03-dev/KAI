@@ -119,6 +119,9 @@ pub struct Settings {
     /// Summarise older steps for the model instead of dropping them
     /// (macro-action history). Off until measured.
     pub macro_history: bool,
+    /// Replay remembered procedures for repeated tasks and record verified
+    /// runs (docs/PROCEDURES.md). Off until measured.
+    pub use_procedures: bool,
     /// Catalog id of the model on this computer (`BackendChoice::Local`).
     pub local_model: String,
     /// Port of the local `llama-server` (127.0.0.1 only).
@@ -159,6 +162,7 @@ impl Default for Settings {
             use_executor: false,
             verify_outcomes: false,
             macro_history: false,
+            use_procedures: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
             learn: true,

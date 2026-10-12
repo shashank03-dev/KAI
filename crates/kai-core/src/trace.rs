@@ -71,6 +71,34 @@ pub struct StepRecord {
     /// Absent in old traces and on steps that end the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect: Option<crate::ledger::Effect>,
+    /// The element the step acted on, by role and name, so a procedure can
+    /// find it again on a later screen (`procedure.rs`). Absent for untargeted
+    /// steps, grid cells, unnamed and secure elements, and in old traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<TargetSig>,
+}
+
+/// An element by what it is, not where it was: mark numbers change every
+/// frame, role and name usually do not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetSig {
+    pub role: crate::element::Role,
+    pub name: String,
+}
+
+impl TargetSig {
+    /// The signature of `d`'s target on `g`, if it has a usable one.
+    pub fn of(d: &Decision, g: &crate::element::Grounding) -> Option<Self> {
+        let crate::element::Grounding::Marks(_) = g else {
+            return None;
+        };
+        let e = g.element(d.target?)?;
+        let name = e.name.trim();
+        (!name.is_empty() && !e.secure).then(|| Self {
+            role: e.role,
+            name: name.to_string(),
+        })
+    }
 }
 
 /// The decision-model numbers behind one executor step.
@@ -163,6 +191,7 @@ impl StepRecord {
             call: CallRecord::default(),
             executor: None,
             effect: None,
+            target: None,
         }
     }
 }
@@ -318,6 +347,7 @@ mod tests {
                 call: Default::default(),
                 executor: None,
                 effect: None,
+                target: None,
             });
         }
         let (p50, p95) = tr.step_percentiles();

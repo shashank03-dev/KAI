@@ -235,6 +235,7 @@ impl Engine<'_> {
             };
             let mut rec = StepRecord::new(step, &decision, timings, EXECUTOR);
             rec.elements = g.as_text();
+            rec.target = crate::trace::TargetSig::of(&decision, g);
             rec.executor = Some(xrec);
             self.sink.emit(&EngineEvent::Decided {
                 step,

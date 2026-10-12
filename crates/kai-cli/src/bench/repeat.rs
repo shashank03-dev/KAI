@@ -111,6 +111,7 @@ mod tests {
         let mem = MemoryOpts {
             store: Some(&store),
             repeat: 2,
+            ..Default::default()
         };
         let runs = run_mock_with(&some, &[], kai_core::Config::default(), None, None, mem).await;
         assert_eq!(runs.len(), 6);

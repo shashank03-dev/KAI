@@ -108,6 +108,7 @@ impl Engine<'_> {
 
             let mut rec = StepRecord::new(step, d, timings, BATCHED);
             rec.elements = grounding.as_text();
+            rec.target = crate::trace::TargetSig::of(d, &grounding);
             rec.path = Some(path.to_string());
             rec.output = output.clone();
             // Confirmed by the next observation (or the verifier).

@@ -33,7 +33,9 @@ mod gate;
 mod human;
 mod memory;
 mod observe;
+mod procedure;
 mod record;
+pub use procedure::PROCEDURE;
 
 pub use crate::ports::*;
 
@@ -47,7 +49,7 @@ use crate::reply::StepReply;
 use crate::risk;
 use crate::schema::Action;
 use crate::skill::Skill;
-use crate::trace::{Outcome, StepRecord, Trace};
+use crate::trace::{Outcome, StepRecord, TargetSig, Trace};
 use std::time::{Duration, Instant};
 
 /// All the collaborators the loop drives.
@@ -94,6 +96,9 @@ pub struct RunOptions<'a> {
     /// Read-only OS probes for the outcome ledger (`Config::outcomes`).
     /// Without one, OS probes fail closed (`docs/VERIFICATION.md`).
     pub probe: Option<&'a dyn Probe>,
+    /// Stored procedures: replay one for a known task and record this run
+    /// when it succeeds (`Config::procedures`, `docs/PROCEDURES.md`).
+    pub procedures: Option<&'a crate::procedure::ProcedureStore>,
 }
 
 /// Trace backend label for actions run from a model reply's `then` list.
@@ -165,6 +170,8 @@ struct Run<'t> {
     probe: Option<&'t dyn Probe>,
     /// Accessibility-event count taken just before the last action.
     events_mark: Option<u64>,
+    /// The shape of the procedure this run replayed, if any.
+    procedure: Option<String>,
 }
 
 impl Engine<'_> {
@@ -202,6 +209,7 @@ impl Engine<'_> {
             ledger: Default::default(),
             probe: opts.probe,
             events_mark: None,
+            procedure: None,
         };
         self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
@@ -212,19 +220,7 @@ impl Engine<'_> {
         {
             self.learn_from(store, &r.trace).await;
         }
-        if let Some(rec) = opts.recorder
-            && let Err(e) = rec.finish(&r.trace)
-        {
-            log::warn!("recording the run failed: {e}");
-        }
-        self.sink.emit(&EngineEvent::Finished { outcome });
-        log::info!("run finished: {outcome:?}, {} steps", r.trace.steps.len());
-        if outcome == Outcome::Success
-            && let Some(cache) = opts.plan_cache
-            && let Err(e) = cache.record(&r.trace)
-        {
-            log::warn!("plan cache record failed: {e}");
-        }
+        self.wrap_up(&r, opts, outcome);
         r.trace
     }
 
@@ -239,13 +235,17 @@ impl Engine<'_> {
         let deadline = Instant::now() + self.config.max_time;
         r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
 
-        // A skill's deterministic steps, or a cached plan's prefix, run first
-        // with no model call.
+        // A skill's deterministic steps, a stored procedure, or a cached
+        // plan's prefix run first with no model call.
+        if let Some(o) = self.replay_procedure(r, opts, active_skill).await {
+            return o;
+        }
         let prefix = match active_skill {
             Some(sk) if !sk.steps.is_empty() => Some((
                 sk.steps.iter().map(act::fixed_decision).collect::<Vec<_>>(),
                 SKILL,
             )),
+            _ if r.procedure.is_some() => None,
             _ => opts
                 .plan_cache
                 .and_then(|c| c.lookup(r.task))
@@ -360,6 +360,7 @@ impl Engine<'_> {
         let backend = client.backend().label();
         let mut rec = StepRecord::new(step, &decision, timings, backend);
         rec.elements = elements;
+        rec.target = TargetSig::of(&decision, &obs.grounding);
         if let Some((shot, call)) = call {
             rec.screenshot = shot;
             rec.call = call;

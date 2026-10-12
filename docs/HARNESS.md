@@ -162,6 +162,16 @@ mark numbers, shell exit codes kept, and repeats merged ("scroll down ×3").
 It is built in code, with no model call (`macro_history.rs`). Off until a
 live A/B shows fewer steps per task.
 
+**Procedures (off by default, `--procedures`).** A successful run is kept
+whole: each step with its target's role and name, and the task's specifics
+(quoted text, addresses, file names, numbers) as slots. Once proven (its
+outcomes were all verified, or it succeeded twice), the same task, even
+with new specifics, replays with no model call. Each target is found again
+by role and name, and the model makes one call at the end to check. A
+missing target, an approval or a human check stops the replay and hands
+over to the model. A failed replay quarantines the procedure. See
+[PROCEDURES.md](PROCEDURES.md).
+
 **Zoomed crop.** After a grid click that changed nothing, the next request
 carries a 2x crop around the clicked cell with its own numbered sub-grid.
 

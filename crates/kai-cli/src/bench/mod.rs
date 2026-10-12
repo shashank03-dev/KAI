@@ -187,8 +187,10 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         .map(|j| j as &dyn kai_core::executor::Decider);
 
     let store = args.memory.then(kai_core::MemoryStore::in_memory);
+    let procs = config.procedures.then(kai_core::ProcedureStore::in_memory);
     let mem = runner::MemoryOpts {
         store: store.as_ref(),
+        procedures: procs.as_ref(),
         repeat: args.repeat.clamp(1, 5),
     };
     let runs = match b {

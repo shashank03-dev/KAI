@@ -337,6 +337,7 @@ mod tests {
                 call: Default::default(),
                 executor: None,
                 effect: None,
+                target: None,
             });
         }
         let (spans, end) = spans(&t);

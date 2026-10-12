@@ -42,6 +42,10 @@ pub struct Ab {
     /// dropping them (macro-action history).
     #[arg(long)]
     pub macro_history: bool,
+    /// Replay remembered procedures for known tasks and record new ones
+    /// (docs/PROCEDURES.md).
+    #[arg(long)]
+    pub procedures: bool,
 }
 
 impl Ab {
@@ -70,6 +74,9 @@ impl Ab {
         if self.macro_history {
             v.push("--macro-history");
         }
+        if self.procedures {
+            v.push("--procedures");
+        }
         v
     }
 }
@@ -88,6 +95,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.executor = ab.executor;
     config.outcomes = ab.outcomes;
     config.macro_history = ab.macro_history;
+    config.procedures = ab.procedures;
     Ok(true)
 }
 

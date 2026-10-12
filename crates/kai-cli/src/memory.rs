@@ -33,6 +33,12 @@ pub enum MemoryCmd {
     },
     /// Skill drafts suggested by proven lessons (never installed for you).
     Suggest,
+    /// List remembered procedures (docs/PROCEDURES.md), or forget one by
+    /// its number in the list.
+    Procedures {
+        #[arg(long)]
+        forget: Option<usize>,
+    },
 }
 
 fn store() -> anyhow::Result<MemoryStore> {
@@ -111,6 +117,30 @@ pub fn run(cmd: MemoryCmd) -> anyhow::Result<ExitCode> {
             };
             let l = s.add_user(kind, &text, scope)?;
             println!("{}", row(&l));
+        }
+        MemoryCmd::Procedures { forget } => {
+            let p = kai_core::ProcedureStore::load(Settings::dir().join("procedures"))?;
+            let list = p.list();
+            if let Some(n) = forget {
+                let one = list
+                    .get(n.wrapping_sub(1))
+                    .ok_or_else(|| anyhow::anyhow!("no procedure {n}"))?;
+                p.forget(&one.shape)?;
+                println!("Forgot \"{}\".", one.task);
+            } else if list.is_empty() {
+                println!("No procedures yet (they are recorded with --procedures).");
+            }
+            for (i, pr) in list.iter().enumerate().filter(|_| forget.is_none()) {
+                println!(
+                    "{:>2}  {:<11} {} steps  ok {} / failed {}  {}",
+                    i + 1,
+                    format!("{:?}", pr.status).to_lowercase(),
+                    pr.steps.len(),
+                    pr.successes,
+                    pr.failures,
+                    pr.task
+                );
+            }
         }
         MemoryCmd::Suggest => {
             let plans = kai_core::PlanCache::load(Settings::dir().join("plans"))?.plans();

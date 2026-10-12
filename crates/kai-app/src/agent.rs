@@ -230,6 +230,7 @@ async fn drive(
         executor: settings.use_executor,
         outcomes: settings.verify_outcomes,
         macro_history: settings.macro_history,
+        procedures: settings.use_procedures,
         learn: settings.learn,
         reflect: settings.reflect,
         ..Config::default()
@@ -333,6 +334,7 @@ async fn drive(
         let executor = settings.use_executor.then(|| settings.executor_client());
         let cache =
             kai_core::PlanCache::load(kai_core::settings::Settings::dir().join("plans")).ok();
+        let procs = kai_core::ProcedureStore::load(Settings::dir().join("procedures")).ok();
         // Experience memory (docs/MEMORY.md): lessons from earlier runs on
         // this computer as hints; this run is learned from when
         // Settings › Privacy › "Learn from mistakes" is on.
@@ -349,6 +351,7 @@ async fn drive(
                     memory: memory.as_ref(),
                     learn_later: false,
                     probe: Some(&kai_os::DesktopProbe),
+                    procedures: procs.as_ref(),
                 },
             )
             .await;

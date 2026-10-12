@@ -251,6 +251,10 @@ pub struct Config {
     /// Fold steps older than the last 2 into a short running summary
     /// (`macro_history.rs`). Off until measured on a live model.
     pub macro_history: bool,
+    /// Replay stored procedures for known tasks and record verified runs
+    /// (needs `RunOptions::procedures`; `docs/PROCEDURES.md`). Off until
+    /// measured on repeated live tasks.
+    pub procedures: bool,
 }
 
 impl Default for Config {
@@ -273,6 +277,7 @@ impl Default for Config {
             outcomes: false,
             probe_timeout: Duration::from_secs(2),
             macro_history: false,
+            procedures: false,
         }
     }
 }

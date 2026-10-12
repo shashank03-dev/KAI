@@ -203,8 +203,13 @@ fn similarity(a: &str, b: &str) -> f32 {
     if union == 0.0 { 0.0 } else { inter / union }
 }
 
+/// Whether a lowercase word is filler that task matching ignores.
+pub(crate) fn is_stopword(w: &str) -> bool {
+    STOPWORDS.contains(&w)
+}
+
 /// Stable 64-bit FNV-1a, for file names that survive Rust upgrades.
-fn fnv1a(s: &str) -> u64 {
+pub(crate) fn fnv1a(s: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
         h ^= u64::from(b);

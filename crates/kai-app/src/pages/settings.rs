@@ -81,6 +81,7 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         .row(Switch::new("use-executor", app.settings.use_executor).label("Fast executor: a local decision model (jevos) carries out Gemma's plan — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_executor = v; a.save_settings(cx); }) }))
         .row(Switch::new("verify-outcomes", app.settings.verify_outcomes).label("Check the result before \"done\": Kai probes the outcomes Gemma named (files, window title, address bar) — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.verify_outcomes = v; a.save_settings(cx); }) }))
         .row(Switch::new("macro-history", app.settings.macro_history).label("Remember older steps as a short summary instead of only the last three — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.macro_history = v; a.save_settings(cx); }) }))
+        .row(Switch::new("procedures", app.settings.use_procedures).label("Replay remembered procedures for tasks Kai has done before, with no model calls — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_procedures = v; a.save_settings(cx); }) }))
         .row(Switch::new("team-default", app.settings.team_mode).label("Use sub-agents by default").on_change(move |v, _, cx| team.update(cx, |a, cx| { a.settings.team_mode = v; a.team = v; a.save_settings(cx); })))
 }
 

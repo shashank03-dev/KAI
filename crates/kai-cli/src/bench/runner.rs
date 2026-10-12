@@ -90,6 +90,9 @@ pub struct Run {
 #[derive(Clone, Copy, Default)]
 pub struct MemoryOpts<'a> {
     pub store: Option<&'a kai_core::MemoryStore>,
+    /// With `--procedures`: a fresh procedure store for this bench, so
+    /// repeats of a task can replay what its earlier passes did.
+    pub procedures: Option<&'a kai_core::ProcedureStore>,
     /// Runs per task, back to back (at least 1).
     pub repeat: u32,
 }
@@ -256,6 +259,7 @@ pub async fn run_mock_with(
             recorder: recorder.as_ref(),
             executor,
             memory: mem.store,
+            procedures: mem.procedures,
             ..Default::default()
         };
         let trace = engine.run_with(&t.prompt, opts).await;
@@ -369,6 +373,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             // Learn after the check, which knows whether `done` was true.
             learn_later: true,
             probe: Some(&kai_os::DesktopProbe),
+            procedures: live.memory.procedures,
             ..Default::default()
         };
         let started = Instant::now();
