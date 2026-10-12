@@ -7,6 +7,8 @@ members = [
     "crates/kai-app",
 ]
 default-members = ["crates/kai-core", "crates/kai-os", "crates/kai-cli"]
+# The vendored Ely is a dependency, not ours to lint or test.
+exclude = ["vendor/ely-gpui-component"]
 
 [workspace.package]
 version = "0.1.0"
@@ -38,7 +40,10 @@ rand = "0.8"
 # These two are the Ely/GPUI snapshot. Pinned exactly; see DECISIONS.md.
 gpui = { package = "gpui-pre", version = "=0.3.8", default-features = false, features = ["stacker"] }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit"] }
-ely-gpui-component = { git = "https://github.com/ZacharyZhang-NY/Ely-GPUI-Components", rev = "b0dbfd429c17819f6c143fd365852244d497514a" }
+# Vendored at the pinned rev b0dbfd4 (MIT): the upstream repository can no
+# longer be cloned, so CI and fresh checkouts build from this copy. See
+# vendor/README.md.
+ely-gpui-component = { path = "vendor/ely-gpui-component" }
 
 [profile.release]
 opt-level = 3

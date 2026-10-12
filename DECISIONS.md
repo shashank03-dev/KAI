@@ -489,3 +489,18 @@ Review of this branch against its own CI screenshots and code:
   skipped (a manual run there still works).
 - `describe`'s doc comment had slid onto `outcome_text`; moved back.
 
+## Ely vendored (2026-10-12)
+
+- `ZacharyZhang-NY/Ely-GPUI-Components` stopped being cloneable: GitHub
+  refuses it, and the API reports the owner/repo as not visible. Every build
+  without a warm cargo cache failed, including the default branch's Ubuntu
+  CI and any fresh checkout.
+- With the owner's approval, the pinned revision `b0dbfd4` (MIT) was
+  recovered from CI's cargo cache and committed unedited to
+  `vendor/ely-gpui-component`. `Cargo.toml` now uses it as a path dependency
+  and excludes it from the workspace. Provenance and how to go back to
+  upstream: `vendor/README.md`.
+- First full local build of the workspace, `kai-app` included: clippy `-D
+  warnings` is clean. The lockfile change is only Ely's `source` line, so
+  every other dependency version is unchanged.
+
