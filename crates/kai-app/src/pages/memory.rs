@@ -77,6 +77,19 @@ fn lesson_row(l: &Lesson, cx: &mut Context<KaiApp>) -> impl IntoElement {
     let theme = cx.theme();
     let me = cx.entity();
     let id = l.id.clone();
+    // Proposed by consolidation: not shown to the model until accepted.
+    let accept = l.pending.then(|| {
+        let (me, id) = (me.clone(), id.clone());
+        Button::new(SharedString::from(format!("accept-{id}")), "Accept")
+            .variant(ButtonVariant::Ghost)
+            .on_click(move |_, _, cx| {
+                me.update(cx, |a, cx| {
+                    let _ = store().map(|s| s.accept(&id));
+                    a.pages.reload_memory();
+                    cx.notify();
+                })
+            })
+    });
     div()
         .py_2()
         .flex()
@@ -85,6 +98,7 @@ fn lesson_row(l: &Lesson, cx: &mut Context<KaiApp>) -> impl IntoElement {
         .border_b_1()
         .border_color(theme.colors.border)
         .child(Badge::new(l.kind.as_str()).tone(tone(l.kind)))
+        .children(l.pending.then(|| Badge::new("pending").tone(Tone::Warning)))
         .child(
             div()
                 .flex_1()
@@ -100,6 +114,7 @@ fn lesson_row(l: &Lesson, cx: &mut Context<KaiApp>) -> impl IntoElement {
                         .child(meta(l)),
                 ),
         )
+        .children(accept)
         .child(
             Button::new(SharedString::from(format!("forget-{id}")), "Delete")
                 .variant(ButtonVariant::Ghost)

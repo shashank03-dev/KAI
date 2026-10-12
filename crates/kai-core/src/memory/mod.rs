@@ -15,6 +15,8 @@
 //! - [`MemoryStore`]: the local JSONL store with merging, caps and credit;
 //! - [`promote`]: skill-draft suggestions from proven lessons.
 
+pub mod consolidate;
+pub mod exam;
 pub mod facts;
 pub mod learn;
 pub mod promote;
@@ -81,6 +83,8 @@ pub enum Source {
     Reflection,
     /// Typed by the user (`kai memory add`, the app, or a mid-run message).
     User,
+    /// Found recurring across saved runs by `kai memory consolidate`.
+    Consolidated,
 }
 
 /// Where a lesson applies. All lowercase.
@@ -153,6 +157,10 @@ pub struct Lesson {
     /// it fails this same way).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targets: Option<Category>,
+    /// Proposed by consolidation and not yet accepted: never shown to the
+    /// model until it passes the exam or the user accepts it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 /// Runs a lesson must have been shown in before it can be retired.
@@ -178,6 +186,7 @@ impl Lesson {
             hurt: 0,
             source,
             targets: None,
+            pending: false,
         }
     }
 

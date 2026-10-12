@@ -202,6 +202,50 @@ impl MemoryStore {
         Ok(true)
     }
 
+    /// A store that is never written, holding `lessons` (the exam's paired
+    /// bench runs).
+    pub fn from_lessons(lessons: Vec<Lesson>) -> Self {
+        let s = Self::in_memory();
+        s.lock().lessons = lessons;
+        s
+    }
+
+    /// Lessons consolidation proposed that nobody accepted yet.
+    pub fn pending(&self) -> Vec<Lesson> {
+        self.lock()
+            .lessons
+            .iter()
+            .filter(|l| l.pending)
+            .cloned()
+            .collect()
+    }
+
+    /// Store consolidation's proposals (pending). Returns them as stored.
+    pub fn propose(&self, proposals: Vec<Lesson>) -> std::io::Result<Vec<Lesson>> {
+        proposals.into_iter().map(|l| self.add(l)).collect()
+    }
+
+    /// Make a pending lesson live, by id (or a unique id prefix), or every
+    /// pending lesson with `"all"`. Returns how many were accepted.
+    pub fn accept(&self, id: &str) -> std::io::Result<usize> {
+        let id = id.trim();
+        let mut g = self.lock();
+        let hits: Vec<usize> = (0..g.lessons.len())
+            .filter(|&i| g.lessons[i].pending)
+            .filter(|&i| id == "all" || (!id.is_empty() && g.lessons[i].id.starts_with(id)))
+            .collect();
+        if id != "all" && hits.len() != 1 {
+            return Ok(0);
+        }
+        for &i in &hits {
+            g.lessons[i].pending = false;
+        }
+        let changed: Vec<Lesson> = hits.iter().map(|&i| g.lessons[i].clone()).collect();
+        drop(g);
+        self.append(&changed, &[])?;
+        Ok(changed.len())
+    }
+
     /// Delete every lesson (the file is emptied).
     pub fn clear(&self) -> std::io::Result<()> {
         self.lock().lessons.clear();

@@ -132,6 +132,34 @@ cannot plant a persistent instruction through the reflection call.
 - **Age.** Ranking weight halves for every 90 days a lesson goes unused;
   lessons untouched for a year are dropped (yours are kept).
 
+## Consolidation and the exam
+
+Live learning sees one run at a time. `kai memory consolidate` sees all the
+saved runs (`kai run` and the app both save them). It re-applies the fixed
+rules to each run, groups lessons that say the same thing, and proposes
+those that recur in **2+ different runs** and that memory does not already
+know (at most 10 at a time, no model call). Proposals are stored as
+**pending**: they are listed and kept, but recall never shows them to the
+model.
+
+A pending lesson goes live in one of two ways:
+
+- **You accept it**: `kai memory accept <id>` (or `all`), or *Accept* in
+  Settings › Memory. `kai memory reject <id>`, or *Delete*, drops it.
+- **It passes the exam.** Run the same tasks twice, once with your live
+  lessons and once with live plus pending:
+
+  ```
+  kai bench --backend gemini --lessons current   --out a
+  kai bench --backend gemini --lessons candidate --out b
+  kai memory exam a/<file>.json b/<file>.json --accept
+  ```
+
+  The candidate passes when it wins at least 4 more tasks than it loses
+  (`--margin`) and false done does not go up. With `--accept`, a pass makes
+  every pending lesson live, and the command exits 1 on a fail. Both bench
+  runs use in-memory copies of your lessons; nothing is written back.
+
 ## Promotion to a skill
 
 When an app or site has a remembered successful opening (the plan cache) and
@@ -167,6 +195,10 @@ installed for you.
   kai memory clear
   kai memory add "Save notes to ~/Notes" --app mousepad [--kind preference]
   kai memory suggest
+  kai memory consolidate              # propose recurring lessons (pending)
+  kai memory pending | accept <id|all> | reject <id>
+  kai memory exam <current.json> <candidate.json> [--accept]
+  kai memory procedures [--forget N]
   kai run --no-memory "…"     # neither use nor add lessons for this run
   ```
 

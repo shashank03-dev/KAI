@@ -70,6 +70,11 @@ pub struct BenchArgs {
     /// runs can use the first run's lessons); prints first vs repeat.
     #[arg(long, default_value = "1")]
     pub repeat: u32,
+    /// For the memory exam: run with a copy of your own lessons, either
+    /// `current` (live ones) or `candidate` (live plus pending). Never
+    /// written back. See `kai memory exam`.
+    #[arg(long, value_parser = ["current", "candidate"])]
+    pub lessons: Option<String>,
 }
 
 impl clap::ValueEnum for Kind {
@@ -192,7 +197,23 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         .as_ref()
         .map(|j| j as &dyn kai_core::executor::Decider);
 
-    let store = args.memory.then(kai_core::MemoryStore::in_memory);
+    let store = match args.lessons.as_deref() {
+        Some(which) => {
+            let mine =
+                kai_core::MemoryStore::load(kai_core::settings::Settings::memory_dir())?.lessons();
+            let set: Vec<_> = mine
+                .into_iter()
+                .filter(|l| which == "candidate" || !l.pending)
+                .map(|mut l| {
+                    l.pending = false;
+                    l
+                })
+                .collect();
+            eprintln!("lessons: {} ({which})", set.len());
+            Some(kai_core::MemoryStore::from_lessons(set))
+        }
+        None => args.memory.then(kai_core::MemoryStore::in_memory),
+    };
     let procs = config.procedures.then(kai_core::ProcedureStore::in_memory);
     let mem = runner::MemoryOpts {
         store: store.as_ref(),

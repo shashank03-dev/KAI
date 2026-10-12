@@ -65,7 +65,7 @@ impl Context {
 
 /// How well a lesson fits, or `None` when it does not apply.
 pub fn score(l: &Lesson, cx: &Context, now: i64) -> Option<f32> {
-    if l.retired() {
+    if l.retired() || l.pending {
         return None;
     }
     let app_hit = l.scope.apps.iter().any(|a| cx.apps.contains(a));
