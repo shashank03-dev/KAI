@@ -177,13 +177,14 @@ impl Render for MiniView {
                             .child(step),
                     ),
             )
-            .child(crate::ui::progress(
+            .child(crate::anim::progress(
                 r.current_step().max(1) as f32 / r.max_steps.max(1) as f32,
                 if waiting {
                     theme.colors.warning
                 } else {
                     g.ember
                 },
+                "mini-progress",
                 &g,
             ))
             .child(

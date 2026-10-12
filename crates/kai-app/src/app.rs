@@ -23,7 +23,23 @@ use std::path::PathBuf;
 
 actions!(
     kai,
-    [OpenPalette, ShowShortcuts, StopRun, NewTask, ToggleTheme]
+    [
+        OpenPalette,
+        ShowShortcuts,
+        StopRun,
+        NewTask,
+        ToggleTheme,
+        GoRun,
+        GoModels,
+        GoSkills,
+        GoHistory,
+        GoBench,
+        GoSettings,
+        NextTask,
+        PrevTask,
+        TogglePause,
+        RetryRun
+    ]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -34,6 +50,18 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-.", StopRun, Some("KaiRoot")),
         KeyBinding::new("ctrl-n", NewTask, Some("KaiRoot")),
         KeyBinding::new("ctrl-shift-l", ToggleTheme, Some("KaiRoot")),
+        // Keyboard-first, like Linear and Superhuman: every page one chord
+        // away, tasks walkable without the mouse.
+        KeyBinding::new("ctrl-1", GoRun, Some("KaiRoot")),
+        KeyBinding::new("ctrl-2", GoModels, Some("KaiRoot")),
+        KeyBinding::new("ctrl-3", GoSkills, Some("KaiRoot")),
+        KeyBinding::new("ctrl-4", GoHistory, Some("KaiRoot")),
+        KeyBinding::new("ctrl-5", GoBench, Some("KaiRoot")),
+        KeyBinding::new("ctrl-,", GoSettings, Some("KaiRoot")),
+        KeyBinding::new("alt-down", NextTask, Some("KaiRoot")),
+        KeyBinding::new("alt-up", PrevTask, Some("KaiRoot")),
+        KeyBinding::new("ctrl-p", TogglePause, Some("KaiRoot")),
+        KeyBinding::new("ctrl-r", RetryRun, Some("KaiRoot")),
     ]);
 }
 
@@ -234,6 +262,42 @@ impl KaiApp {
             .collect()
     }
 
+    /// Walk the task list: the next (or previous) run, wrapping at neither end.
+    pub fn step_task(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let Some(last) = self.runs.len().checked_sub(1) else {
+            return;
+        };
+        let at = self
+            .selected
+            .and_then(|id| self.runs.iter().position(|r| r.id == id));
+        let next = match at {
+            None if delta > 0 => 0,
+            None => last,
+            Some(i) => (i as i64 + delta as i64).clamp(0, last as i64) as usize,
+        };
+        let id = self.runs[next].id;
+        self.select(Some(id), cx);
+    }
+
+    /// Pause or resume the run that has the screen.
+    pub fn toggle_pause(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.active {
+            let paused = self.entry(id).is_some_and(|e| e.state.read(cx).paused);
+            self.set_paused(id, !paused, cx);
+        }
+    }
+
+    /// Run the selected finished task again.
+    pub fn retry_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let done = self
+            .selected
+            .and_then(|id| self.entry(id))
+            .is_some_and(|e| e.state.read(cx).phase == crate::state::Phase::Done);
+        if let (true, Some(id)) = (done, self.selected) {
+            self.retry(id, window, cx);
+        }
+    }
+
     pub fn go(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
         self.palette = false;
@@ -409,6 +473,16 @@ impl Render for KaiApp {
             .on_action(move |_: &ToggleTheme, _, cx| {
                 on_theme.update(cx, |a, cx| a.toggle_theme(cx))
             })
+            .on_action(cx.listener(|a, _: &GoRun, _, cx| a.go(Page::Run, cx)))
+            .on_action(cx.listener(|a, _: &GoModels, _, cx| a.go(Page::Models, cx)))
+            .on_action(cx.listener(|a, _: &GoSkills, _, cx| a.go(Page::Skills, cx)))
+            .on_action(cx.listener(|a, _: &GoHistory, _, cx| a.go(Page::History, cx)))
+            .on_action(cx.listener(|a, _: &GoBench, _, cx| a.go(Page::Bench, cx)))
+            .on_action(cx.listener(|a, _: &GoSettings, _, cx| a.go(Page::Settings, cx)))
+            .on_action(cx.listener(|a, _: &NextTask, _, cx| a.step_task(1, cx)))
+            .on_action(cx.listener(|a, _: &PrevTask, _, cx| a.step_task(-1, cx)))
+            .on_action(cx.listener(|a, _: &TogglePause, _, cx| a.toggle_pause(cx)))
+            .on_action(cx.listener(|a, _: &RetryRun, window, cx| a.retry_selected(window, cx)))
             .child(
                 FocusScope::new(&self.focus)
                     .root()
@@ -422,7 +496,16 @@ impl Render for KaiApp {
                                 .title_bar(title)
                                 .sidebar(activity)
                                 .status_bar(status)
-                                .child(div().size_full().min_h_0().child(body)),
+                                // Each page (and each run) fades in as it
+                                // replaces the last.
+                                .child(crate::anim::view(
+                                    div().size_full().min_h_0().child(body),
+                                    gpui::SharedString::from(format!(
+                                        "view-{}-{:?}",
+                                        self.page.key(),
+                                        self.selected
+                                    )),
+                                )),
                         ),
                     )
                     .children(palette)

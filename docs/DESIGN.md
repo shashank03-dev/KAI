@@ -95,6 +95,23 @@ respect a solid fallback), and dark product UIs in the Raycast/Linear family
   carries a 2 px progress line (amber when paused or waiting); results open
   with a lit orb and mono stat tiles.
 
+### Kai Glass — UX and motion, borrowed from the best desktop apps
+
+| From | What it taught | In Kai |
+| --- | --- | --- |
+| Raycast | Shortcuts shown beside the action, never buried; recents; empty states with one action | Hint rows on Home, the run view and results; "Recent" under the composer (click to edit and run); History's empty state offers "Give Kai a task" |
+| Linear | Keyboard-first, every view a chord away; neutral palette, one restrained accent | Ctrl+1–5 pages, Ctrl+, settings; ink primary, ember only for what is alive |
+| Superhuman | Speed is the product; keep hands on the keyboard | Alt+↑/↓ walks tasks, Ctrl+P pause/resume, Ctrl+R run again |
+| Warp | Output as blocks with actions; blocks enter in ~150 ms with a small rise | Steps and terminal commands are glass blocks that fade and rise in once; each terminal block has Copy |
+| Agent UX research (Sidekick, CUA studies) | Ambient status for background work; progress that means something | Breathing live dots while a run goes, a spring-driven progress line, the mini window's ember edge |
+
+**Motion tokens** (`anim.rs`): entrances 200 ms quint ease-out with a 6 px
+rise, siblings staggered 35 ms (capped at 10), views fade in over 180 ms, the
+progress line rides a spring (stiffness 170, damping 26), results pop in on an
+underdamped spring. Nothing loops while idle: the only repeating animation is
+the live dot's 1.6 s breath during a run. gpui renders every animation in its
+end state when the OS asks to reduce motion.
+
 ## Screens, components and states
 
 Each screen lists its Ely components and every state. All screens exist in

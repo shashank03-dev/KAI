@@ -40,13 +40,13 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .collect();
     let has_own = app.skills.iter().any(|s| !s.builtin);
 
-    let cards = shown.iter().map(|s| {
+    let cards = shown.iter().enumerate().map(|(ix, s)| {
         let name = s.front.name.clone();
         let on = !app.pages.disabled.contains(&name);
         let (toggle, open) = (cx.entity(), cx.entity());
         let (n1, n2) = (name.clone(), name.clone());
         let (hover, strong) = (g.card_hover, g.line_strong);
-        ui::card(&g)
+        let card = ui::card(&g)
             .id(gpui::SharedString::from(format!("skill-{name}")))
             .p(px(18.))
             .flex()
@@ -115,7 +115,8 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                                 })
                             }),
                     ),
-            )
+            );
+        crate::anim::enter(card, ("skill-in", ix), ix)
     });
 
     let importer = cx.entity();

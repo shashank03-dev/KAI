@@ -95,9 +95,19 @@ impl KaiApp {
                 Some("ctrl-."),
             ));
             kai.push(if paused {
-                cmd("resume", "Resume the running task", IconName::Play, None)
+                cmd(
+                    "resume",
+                    "Resume the running task",
+                    IconName::Play,
+                    Some("ctrl-p"),
+                )
             } else {
-                cmd("pause", "Pause the running task", IconName::Pause, None)
+                cmd(
+                    "pause",
+                    "Pause the running task",
+                    IconName::Pause,
+                    Some("ctrl-p"),
+                )
             });
         }
         kai.extend([
@@ -124,17 +134,27 @@ impl KaiApp {
         .group(
             "Go to",
             [
-                cmd("go:run", "Run", IconName::Play, None),
+                cmd("go:run", "Run", IconName::Play, Some("ctrl-1")),
                 cmd(
                     "go:models",
                     "Models (run on this computer)",
                     IconName::Cpu,
-                    None,
+                    Some("ctrl-2"),
                 ),
-                cmd("go:skills", "Skills", IconName::Puzzle, None),
-                cmd("go:history", "History", IconName::History, None),
-                cmd("go:bench", "Benchmarks", IconName::ChartColumn, None),
-                cmd("go:settings", "Settings", IconName::Settings, None),
+                cmd("go:skills", "Skills", IconName::Puzzle, Some("ctrl-3")),
+                cmd("go:history", "History", IconName::History, Some("ctrl-4")),
+                cmd(
+                    "go:bench",
+                    "Benchmarks",
+                    IconName::ChartColumn,
+                    Some("ctrl-5"),
+                ),
+                cmd(
+                    "go:settings",
+                    "Settings",
+                    IconName::Settings,
+                    Some("ctrl-,"),
+                ),
             ],
         )
         .group(

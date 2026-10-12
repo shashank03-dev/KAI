@@ -159,9 +159,13 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     let in_use =
         (app.settings.backend == BackendChoice::Local).then(|| app.settings.local_model.clone());
     let none_fit = l.hardware.is_some() && l.ranked.iter().all(|r| r.fit == Fit::TooBig);
-    let cards = l.ranked.iter().map(|r| {
+    let cards = l.ranked.iter().enumerate().map(|(ix, r)| {
         let used = in_use.as_deref() == Some(r.entry.id.as_str());
-        models_card::card(r, l, used, cx)
+        crate::anim::enter(
+            div().child(models_card::card(r, l, used, cx)),
+            ("model-in", ix),
+            ix,
+        )
     });
     let theme = cx.theme();
     let note = div()

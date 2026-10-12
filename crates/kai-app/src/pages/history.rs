@@ -8,7 +8,7 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     chat::{Conversation, ConversationList},
     debug::{Span, TimelineProfiler},
-    feedback::{EmptyState, Toast},
+    feedback::Toast,
     forms::SearchInput,
     layout::ScrollArea,
     primitives::{IconName, Severity},
@@ -240,9 +240,17 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     });
 
     let body = if app.pages.history.is_empty() {
-        EmptyState::new("no-history", IconName::History, "No runs yet")
-            .body("Every run is saved here, on this computer only.")
-            .into_any_element()
+        let starter = cx.entity();
+        ui::empty(
+            "No runs yet",
+            "Every run is saved here with its timeline and the frames Kai saw, on this computer only.",
+            Button::new("history-first-task", "Give Kai a task")
+                .variant(ButtonVariant::Primary)
+                .icon(IconName::Play)
+                .on_click(move |_, _, cx| starter.update(cx, |a, cx| a.select(None, cx))),
+            cx,
+        )
+        .into_any_element()
     } else {
         div()
             .flex()

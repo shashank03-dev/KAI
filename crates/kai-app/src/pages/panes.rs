@@ -6,14 +6,15 @@ use crate::state::{RunState, StepView};
 use crate::team::{SubState, SubView};
 use ely_gpui_component::{
     agent::ToolCallCard,
+    buttons::{Button, ButtonVariant},
     chat::{MessageBubble, MessageFooter, Role},
     data_display::{Badge, Sparkline, Tone},
     lists::{Tree, TreeNode},
     primitives::IconName,
     terminal::AnsiText,
-    theme::{ActiveTheme, Radius, TextSize},
+    theme::{ActiveTheme, ControlSize, TextSize},
 };
-use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, div, px};
+use gpui::{AnyElement, App, ClipboardItem, IntoElement, ParentElement, Styled, div, px};
 use kai_core::Outcome;
 use kai_core::orchestrator::Kind;
 use std::time::Duration;
@@ -66,7 +67,8 @@ pub fn transcript(r: &RunState) -> Vec<AnyElement> {
         while let Some(m) = steers.next_if(|m| m.sent_at as usize <= i) {
             out.push(steer_bubble(&m.text, m.read_at));
         }
-        out.push(card(i, s).into_any_element());
+        // Each step arrives like a block: a short fade and rise, once.
+        out.push(crate::anim::enter(div().child(card(i, s)), ("step-in", i), 0).into_any_element());
     }
     for m in steers {
         out.push(steer_bubble(&m.text, m.read_at));
@@ -94,7 +96,7 @@ pub fn terminal(r: &RunState, cx: &App) -> AnyElement {
         .flex()
         .flex_col()
         .gap_2()
-        .children(r.outputs.iter().map(|o| {
+        .children(r.outputs.iter().enumerate().map(|(ix, o)| {
             let (label, tone) = match exit_code(&o.output) {
                 Some(0) => ("exit 0".to_string(), Tone::Success),
                 Some(c) => (format!("exit {c}"), Tone::Danger),
@@ -110,15 +112,12 @@ pub fn terminal(r: &RunState, cx: &App) -> AnyElement {
                 .and_then(|s| s.timings)
                 .map(|t| format!("{} ms", t.act_ms))
                 .unwrap_or_default();
-            div()
+            let copy_text = format!("$ {}\n{}", o.command, o.output);
+            let block = crate::ui::card(&crate::ui::Glass::of(cx))
                 .p_3()
                 .flex()
                 .flex_col()
                 .gap_2()
-                .rounded(theme.radius(Radius::Md))
-                .border_1()
-                .border_color(theme.colors.border)
-                .bg(theme.colors.surface)
                 .text_size(theme.text_size(TextSize::Sm))
                 .child(
                     div()
@@ -138,13 +137,24 @@ pub fn terminal(r: &RunState, cx: &App) -> AnyElement {
                                 .child(format!("$ {}", o.command)),
                         )
                         .child(div().text_color(theme.colors.fg_muted).child(act))
-                        .child(Badge::new(label).tone(tone)),
+                        .child(Badge::new(label).tone(tone))
+                        .child(
+                            Button::new(("copy-out", ix), "Copy")
+                                .variant(ButtonVariant::Ghost)
+                                .size(ControlSize::Sm)
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        copy_text.clone(),
+                                    ))
+                                }),
+                        ),
                 )
                 .child(
                     div()
                         .font_family(theme.mono_family.clone())
                         .child(AnsiText::new(o.output.clone())),
-                )
+                );
+            crate::anim::enter(block, ("term-in", ix), 0)
         }))
         .into_any_element()
 }

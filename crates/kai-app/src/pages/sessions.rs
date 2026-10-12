@@ -109,46 +109,52 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
                 row.border_color(gpui::transparent_black())
                     .hover(move |s| s.bg(hover))
             };
-            row.child(div().pt(px(2.)).flex_none().child(if live {
-                div()
-                    .pt(px(4.))
-                    .child(ui::dot(color, true, &g))
-                    .into_any_element()
-            } else {
-                Icon::new(icon)
-                    .size(IconSize::Sm)
-                    .color(color)
-                    .into_any_element()
-            }))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .text_size(px(13.))
-                            .text_color(if selected { g.text } else { g.dim })
-                            .truncate()
-                            .child(r.task.clone()),
-                    )
-                    .child(
-                        ui::mono(
-                            if r.team {
-                                format!("{line} · team")
-                            } else {
-                                line
-                            },
-                            if live { ember } else { g.faint },
-                            cx,
+            let row = row
+                .child(div().pt(px(2.)).flex_none().child(if live {
+                    div()
+                        .pt(px(4.))
+                        .child(crate::anim::live_dot(
+                            color,
+                            ("session-dot", id as usize),
+                            &g,
+                        ))
+                        .into_any_element()
+                } else {
+                    Icon::new(icon)
+                        .size(IconSize::Sm)
+                        .color(color)
+                        .into_any_element()
+                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .text_color(if selected { g.text } else { g.dim })
+                                .truncate()
+                                .child(r.task.clone()),
                         )
-                        .text_size(px(11.))
-                        .truncate(),
-                    ),
-            )
-            .into_any_element()
+                        .child(
+                            ui::mono(
+                                if r.team {
+                                    format!("{line} · team")
+                                } else {
+                                    line
+                                },
+                                if live { ember } else { g.faint },
+                                cx,
+                            )
+                            .text_size(px(11.))
+                            .truncate(),
+                        ),
+                );
+            // New tasks slide in; existing rows keep their finished state.
+            crate::anim::enter(row, ("session-in", id as usize), 0).into_any_element()
         })
         .collect();
     let any_done = app

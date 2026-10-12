@@ -12,7 +12,7 @@ use crate::brand;
 use ely_gpui_component::theme::ActiveTheme;
 use gpui::{
     AnyElement, App, BoxShadow, Div, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
-    Styled, div, hsla, linear_color_stop, linear_gradient, px, relative, rgb,
+    Styled, div, hsla, linear_color_stop, linear_gradient, px, rgb,
 };
 
 /// Corner radii, smallest to largest.
@@ -183,18 +183,6 @@ pub fn dot(color: Hsla, live: bool, g: &Glass) -> Div {
     }
 }
 
-/// A thin progress line, `done` in 0..=1.
-pub fn progress(done: f32, color: Hsla, g: &Glass) -> Div {
-    div().w_full().h(px(2.)).rounded_full().bg(g.line).child(
-        div()
-            .h_full()
-            .w(relative(done.clamp(0., 1.)))
-            .rounded_full()
-            .bg(color)
-            .shadow(vec![g.glow(color, 6.)]),
-    )
-}
-
 /// Kai's mark: the hand in a glass orb with an ember halo.
 pub fn orb(size: f32, g: &Glass) -> Div {
     div()
@@ -288,4 +276,59 @@ pub fn body(max: f32, content: impl IntoElement) -> Div {
         .pt(px(36.))
         .pb(px(48.))
         .child(div().w_full().max_w(px(max)).child(content))
+}
+
+/// A row of shortcut hints, shown where the action is (Raycast-style), so
+/// keys are learned by seeing them: `[(&["Ctrl", "R"], "run again")]`.
+pub fn hints(items: &[(&[&str], &str)], cx: &App) -> Div {
+    let g = Glass::of(cx);
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_4()
+        .children(items.iter().map(|(caps, what)| {
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .children(caps.iter().map(|c| kbd(c.to_string(), cx)))
+                .child(
+                    div()
+                        .pl_1()
+                        .text_size(px(12.))
+                        .text_color(g.faint)
+                        .child(what.to_string()),
+                )
+        }))
+}
+
+/// An empty state that points somewhere: the mark, what is missing, why it
+/// will fill, and the one action that fills it.
+pub fn empty(title: &str, body: &str, action: impl IntoElement, cx: &App) -> Div {
+    let g = Glass::of(cx);
+    div()
+        .w_full()
+        .py(px(56.))
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(px(14.))
+        .child(orb(48., &g))
+        .child(
+            div()
+                .text_size(px(16.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(g.text)
+                .child(title.to_string()),
+        )
+        .child(
+            div()
+                .max_w(px(420.))
+                .text_center()
+                .text_size(px(13.))
+                .text_color(g.dim)
+                .child(body.to_string()),
+        )
+        .child(div().pt_2().child(action))
 }

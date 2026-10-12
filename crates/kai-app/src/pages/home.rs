@@ -1,6 +1,7 @@
 //! Idle: Kai's mark, a greeting, the composer as the one raised glass layer,
 //! the keys that matter, and starters drawn from installed skills as cards.
 
+use crate::anim;
 use crate::app::{Conn, KaiApp, Page};
 use crate::i18n::t;
 use crate::ui::{self, Glass, R_LG, R_SM};
@@ -50,6 +51,17 @@ const STARTERS: &[(&str, &str, IconName)] = &[
         IconName::Music,
     ),
 ];
+
+/// "just now", "12m ago", "3h ago", "2d ago".
+fn ago(at: jiff::Timestamp) -> String {
+    let s = jiff::Timestamp::now().as_second() - at.as_second();
+    match s {
+        ..=59 => "just now".into(),
+        60..=3599 => format!("{}m ago", s / 60),
+        3600..=86_399 => format!("{}h ago", s / 3600),
+        _ => format!("{}d ago", s / 86_400),
+    }
+}
 
 fn greeting(hour: u8) -> &'static str {
     match hour {
@@ -110,7 +122,11 @@ fn status_line(app: &KaiApp, g: &Glass, cx: &App) -> AnyElement {
         .bg(g.card)
         .border_1()
         .border_color(g.line)
-        .child(ui::dot(color, live, g))
+        .child(if live {
+            anim::live_dot(color, "status-dot", g)
+        } else {
+            ui::dot(color, false, g)
+        })
         .child(ui::eyebrow(
             format!("{word} · {}", crate::runs::model_label(&app.settings)),
             cx,
@@ -159,7 +175,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .flex()
             .items_center()
             .gap_2()
-            .child(ui::dot(g.ember, true, &g))
+            .child(anim::live_dot(g.ember, "busy-dot", &g))
             .child(
                 div()
                     .text_size(px(12.))
@@ -199,7 +215,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .map(|(ix, (skill, task, icon))| {
             let pick = cx.entity();
             let (hover, strong) = (g.card_hover, g.line_strong);
-            div()
+            let card = div()
                 .id(("starter", ix))
                 .p(px(14.))
                 .flex()
@@ -244,8 +260,72 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         )
                         .child(ui::mono(skill, g.faint, cx).text_size(px(11.))),
                 )
-                .child(div().text_color(g.faint).child("→"))
+                .child(div().text_color(g.faint).child("→"));
+            anim::enter(card, ("starter-in", ix), 6 + ix)
         });
+
+    // Raycast-style recents: the last few distinct tasks, one click back into
+    // the composer to edit and run again.
+    let mut seen = std::collections::HashSet::new();
+    let recents: Vec<AnyElement> = app
+        .pages
+        .history
+        .iter()
+        .filter(|e| seen.insert(e.task.clone()))
+        .take(3)
+        .enumerate()
+        .map(|(ix, e)| {
+            let filler = cx.entity();
+            let task = e.task.clone();
+            let hover = g.card_hover;
+            div()
+                .id(("recent", ix))
+                .px(px(12.))
+                .py(px(9.))
+                .flex()
+                .items_center()
+                .gap_3()
+                .cursor_pointer()
+                .rounded(px(R_SM + 2.))
+                .hover(move |s| s.bg(hover))
+                .on_click(move |_, _, cx| {
+                    let task = task.clone();
+                    filler.update(cx, |a, cx| {
+                        a.draft.update(cx, |d, cx| d.set_text(task, cx));
+                        cx.notify();
+                    })
+                })
+                .child(
+                    Icon::new(IconName::History)
+                        .size(IconSize::Sm)
+                        .color(g.faint),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(13.))
+                        .text_color(g.dim)
+                        .truncate()
+                        .child(e.task.clone()),
+                )
+                .child(ui::mono(ago(e.at), g.faint, cx).text_size(px(11.)))
+                .into_any_element()
+        })
+        .collect();
+    let recent = (!recents.is_empty()).then(|| {
+        anim::enter(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(ui::eyebrow("Recent · click to edit and run", cx))
+                .child(ui::card(&g).p(px(4.)).flex().flex_col().children(recents)),
+            "home-recent",
+            12,
+        )
+    });
 
     let column = div()
         .w_full()
@@ -254,9 +334,13 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .flex_col()
         .items_center()
         .gap(px(22.))
-        .child(ui::orb(60., &g))
-        .child(status_line(app, &g, cx))
-        .child(
+        .child(anim::enter(div().child(ui::orb(60., &g)), "home-orb", 0))
+        .child(anim::enter(
+            div().child(status_line(app, &g, cx)),
+            "home-status",
+            1,
+        ))
+        .child(anim::enter(
             div()
                 .flex()
                 .flex_col()
@@ -275,10 +359,12 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         .text_color(g.dim)
                         .child(t(cx, "home.ask", &[])),
                 ),
-        )
+            "home-greeting",
+            2,
+        ))
         .child(div().h(px(4.)))
-        .child(composer)
-        .child(
+        .child(anim::enter(composer, "home-composer", 3))
+        .child(anim::enter(
             div()
                 .w_full()
                 .flex()
@@ -288,7 +374,9 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .gap_3()
                 .child(div().flex().flex_wrap().gap_4().children(hints))
                 .children(busy),
-        )
+            "home-hints",
+            4,
+        ))
         .child(div().h(px(18.)))
         .child(
             div()
@@ -305,7 +393,8 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         .gap(px(10.))
                         .children(cards),
                 ),
-        );
+        )
+        .children(recent);
 
     div()
         .size_full()

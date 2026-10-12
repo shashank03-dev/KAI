@@ -47,6 +47,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     let task = r.task.clone();
 
     let g = Glass::of(cx);
+    let run_key = app.selected.unwrap_or_default();
     let colors = &cx.theme().colors;
     let stopped = outcome == Some(Outcome::Stopped) && r.error.is_none();
     let (tone, icon) = if ok {
@@ -63,7 +64,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .flex()
         .items_center()
         .gap(px(20.))
-        .child(
+        .child(crate::anim::pop(
             div()
                 .size(px(64.))
                 .flex_none()
@@ -76,7 +77,9 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .border_color(tone)
                 .shadow(vec![g.sheen_shadow(), g.glow(tone, 28.)])
                 .child(Icon::new(icon).size(IconSize::Lg).color(tone)),
-        )
+            64.,
+            gpui::SharedString::from(format!("result-pop-{}", app.selected.unwrap_or_default())),
+        ))
         .child(
             div()
                 .flex()
@@ -284,9 +287,25 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .child(hero)
             .children(result)
             .children(ask)
-            .child(stats)
+            .child(crate::anim::enter(
+                stats,
+                gpui::SharedString::from(format!("done-stats-{run_key}")),
+                2,
+            ))
             .children(report)
-            .child(actions)
+            .child(crate::anim::enter(
+                actions,
+                gpui::SharedString::from(format!("done-actions-{run_key}")),
+                3,
+            ))
+            .child(ui::hints(
+                &[
+                    (&["Ctrl", "R"], "run again"),
+                    (&["Ctrl", "N"], "new task"),
+                    (&["Alt", "↑↓"], "other tasks"),
+                ],
+                cx,
+            ))
             .children(follow_ups)
             .children(failed)
             .children((!r.outputs.is_empty()).then(|| {

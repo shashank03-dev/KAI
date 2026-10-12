@@ -297,7 +297,12 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 )
                 .child(controls(id, r, cx)),
         )
-        .child(ui::progress(done, line_color, &g));
+        .child(crate::anim::progress(
+            done,
+            line_color,
+            gpui::SharedString::from(format!("run-progress-{id}")),
+            &g,
+        ));
 
     let left = div()
         .size_full()
@@ -316,7 +321,18 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .border_t_1()
                 .border_color(g.line)
                 .bg(g.pane)
-                .child(steer_box(id, app, r, cx)),
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(steer_box(id, app, r, cx))
+                .child(ui::hints(
+                    &[
+                        (&["↵"], "send to Kai"),
+                        (&["Ctrl", "P"], if r.paused { "resume" } else { "pause" }),
+                        (&["Ctrl", "."], "stop"),
+                    ],
+                    cx,
+                )),
         );
     let right = ScrollArea::new("seen").vertical().child(seen(app, r, cx));
 
