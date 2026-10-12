@@ -30,6 +30,11 @@ pixels.*
 - **Sub-agents:** turn on *Team* and Kai splits a task into parallel
   sub-agents — terminal subtasks run at the same time, screen subtasks take
   turns — then writes one report.
+- **Web tasks in Kai's own browser (experimental, Linux):** `kai run
+  --browser` drives a Chromium-family browser over the DevTools Protocol
+  instead of the desktop: the page's own accessibility tree, input that never
+  moves your pointer or takes focus, and the real page address for checks.
+  Same marks, same actions, same safety rules ([docs/BROWSER.md](docs/BROWSER.md)).
 - **Skills:** reusable know-how in the Agent Skill Open Standard. Finish a run,
   press **Save as skill**, and the next run of that task skips steps the model
   no longer needs to think about.
@@ -208,6 +213,8 @@ optional deterministic steps in `metadata.kai`. Validate with
 - [docs/DESIGN.md](docs/DESIGN.md) — screens, states and components
 - [docs/VERIFICATION.md](docs/VERIFICATION.md) — the outcome ledger and DONE gate (experimental, off by default)
 - [docs/SKILLS.md](docs/SKILLS.md) — the skill format and Kai's extension
+- [docs/BROWSER.md](docs/BROWSER.md) — the browser lane (`kai run --browser`)
+- [docs/RESEARCH_2026_10_VENDORS.md](docs/RESEARCH_2026_10_VENDORS.md) — how Anthropic and OpenAI do computer use, and where Kai differs
 - [docs/DEMO.md](docs/DEMO.md) — the 3-minute demo
 - [DECISIONS.md](DECISIONS.md) — every assumption and deviation, and what was not run here
 

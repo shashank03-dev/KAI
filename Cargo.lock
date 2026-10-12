@@ -4003,6 +4003,7 @@ dependencies = [
  "arboard",
  "async-trait",
  "atspi 0.30.0",
+ "base64 0.22.1",
  "enigo",
  "env_logger",
  "fast_image_resize",

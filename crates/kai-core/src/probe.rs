@@ -145,11 +145,13 @@ impl ProbeSpec {
                 Some(t) => ProbeVerdict::fail(format!("title is \"{}\"", clip(t, 60))),
                 None => ProbeVerdict::fail("window title unknown"),
             },
-            Self::UrlIs { pattern } => match address_bar(&obs.grounding) {
-                Some(u) if pattern.is_match(&u) => ProbeVerdict::pass("address matches"),
-                Some(u) => ProbeVerdict::fail(format!("address is \"{}\"", clip(&u, 80))),
-                None => ProbeVerdict::fail("no address bar visible"),
-            },
+            Self::UrlIs { pattern } => {
+                match obs.url.clone().or_else(|| address_bar(&obs.grounding)) {
+                    Some(u) if pattern.is_match(&u) => ProbeVerdict::pass("address matches"),
+                    Some(u) => ProbeVerdict::fail(format!("address is \"{}\"", clip(&u, 80))),
+                    None => ProbeVerdict::fail("no address bar visible"),
+                }
+            }
             _ => return None,
         })
     }
@@ -249,6 +251,7 @@ mod tests {
             timing: Default::default(),
             screen: None,
             window_title: title.map(Into::into),
+            url: None,
         }
     }
 
@@ -293,6 +296,12 @@ mod tests {
         assert_eq!(f.reason, "title is \"Thank you — Mozilla Firefox\"");
         assert!(p(r#"{"kind":"url_is","pattern":"/thanks$"}"#).ok);
         assert!(!p(r#"{"kind":"url_is","pattern":"/contact"}"#).ok);
+        // The browser lane knows the real address; it wins over the bar.
+        let mut lane = obs(vec![], None);
+        lane.url = Some("https://shop.test/order/done".into());
+        let u = |j: &str| ProbeSpec::parse(&raw(j)).unwrap().on_screen(&lane).unwrap();
+        assert!(u(r#"{"kind":"url_is","pattern":"/order/done$"}"#).ok);
+        assert!(!u(r#"{"kind":"url_is","pattern":"/cart"}"#).ok);
         let none = obs(vec![], None);
         let t = ProbeSpec::parse(&raw(r#"{"kind":"window_title","pattern":"x"}"#)).unwrap();
         assert_eq!(t.on_screen(&none).unwrap().reason, "window title unknown");

@@ -32,6 +32,7 @@ impl Perceptor for Screen {
             // The display is 2x the screenshot, offset by a monitor.
             screen: Some(Rect::new(100.0, 0.0, 2560.0, 1440.0)),
             window_title: None,
+            url: None,
         })
     }
 }

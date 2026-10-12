@@ -22,6 +22,10 @@ pub struct Observation {
     /// The active window's title, from the same tree read (no extra OS
     /// call); `None` when unknown. Read by the `window_title` probe.
     pub window_title: Option<String>,
+    /// The page address, when the backend knows it for certain (the browser
+    /// lane reads it from the page itself). `None` on the desktop, where the
+    /// `url_is` probe reads the address bar from the tree instead.
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

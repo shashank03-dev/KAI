@@ -194,6 +194,7 @@ impl Perceptor for CodePage {
             timing: Default::default(),
             screen: None,
             window_title: Some("Sign in".into()),
+            url: None,
         })
     }
 }

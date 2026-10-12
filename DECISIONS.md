@@ -604,3 +604,32 @@ procedure step when its accessibility signature fails. If that turns out to
 matter, normalised cross-correlation on Kai's own capture, searched near the
 element's old position, is about 100 lines. It is not built, because it would
 only back up procedures, which are off by default.
+
+## Browser lane (2026-10-12)
+
+- **Research first:** [docs/RESEARCH_2026_10_VENDORS.md](docs/RESEARCH_2026_10_VENDORS.md).
+  Both frontier vendors now have a separate web surface (Anthropic's
+  `browser_toolset_20260801` with accessibility refs and page text; OpenAI's
+  Playwright code mode), and ComponentBench measured 83.1% (tree) vs 48.9%
+  (pixels) for the same model. Kai had only the desktop path into web pages.
+- **Built:** `kai run --browser [--headless]`, a `Perceptor` + `Actuator`
+  over CDP (`crates/kai-os/src/web/`). The model's prompt and schema do not
+  change; the harness picks the lane. Design and numbers: [docs/BROWSER.md](docs/BROWSER.md).
+- **Pipe, not port:** `--remote-debugging-pipe`, so no other local process can
+  drive the browser. Kai's own profile folder (Chrome 136+ ignores debugging
+  flags on the default profile, and the user's everyday profile should not be
+  remote-controlled anyway).
+- **Address policy in `kai-core`** (`web::normalise_url`): http/https only.
+- **`Observation::url`** (new, `None` on the desktop): the `url_is` probe
+  prefers it over the address-bar text.
+- **Rejected:** Playwright or a Node sidecar (a large runtime for a handful of
+  protocol calls); a new action or tool surface for the model (keeps a small
+  model's choices small); attaching to the user's running Chrome (needs a
+  manual `chrome://inspect` toggle and a prompt per connection).
+- **Measured** (headless Chromium 141, this container): tree-only observe
+  3 ms (4 marks) and 23 ms (150 marks); full observe 115–127 ms p50.
+  A same-page desktop comparison was attempted under Xvfb, but the desktop path
+  read no page elements there (environment), so no head-to-head is claimed.
+  **No live model run:** no key in this session.
+- `kai-cli/src/main.rs` reached 500 lines; `run_recorder` moved to
+  `runs.rs` with the lane switch.

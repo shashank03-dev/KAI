@@ -85,5 +85,10 @@ For **each** item below, in order:
    searched near the element's old position. `rustautogui` was evaluated and
    rejected; see `DECISIONS.md`.
 
+6. **Browser lane follow-ups** (`docs/BROWSER.md`, built 2026-10-12, off
+   unless `--browser`): measure the bench's web tasks with and without
+   `--browser` on a live model; page text for reading tasks
+   (`docs/RESEARCH_2026_10_VENDORS.md` §5.2); a switch in the app.
+
 **When done:** tell me plainly what you researched, what you built, what you
 measured (with numbers), what you didn't, and what I need to do next.

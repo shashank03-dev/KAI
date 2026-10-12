@@ -181,6 +181,7 @@ impl DesktopPerceptor {
             },
             screen: Some(at),
             window_title: a11y::active::title(),
+            url: None,
         })
     }
 }
@@ -218,6 +219,7 @@ impl Perceptor for DesktopPerceptor {
             },
             screen: Some(screen),
             window_title: a11y::active::title(),
+            url: None,
         })
     }
 

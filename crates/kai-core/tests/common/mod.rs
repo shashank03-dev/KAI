@@ -135,6 +135,7 @@ impl Screen {
             timing: Default::default(),
             screen: None,
             window_title: None,
+            url: None,
         }
     }
 }

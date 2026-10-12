@@ -22,6 +22,7 @@ fn obs(title: &str) -> Observation {
         timing: Default::default(),
         screen: None,
         window_title: Some(title.into()),
+        url: None,
     }
 }
 

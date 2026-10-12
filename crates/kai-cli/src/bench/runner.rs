@@ -152,6 +152,7 @@ impl Perceptor for ScriptedScreen {
             timing: Default::default(),
             screen: None,
             window_title: None,
+            url: None,
         })
     }
 }

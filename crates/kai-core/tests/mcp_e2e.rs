@@ -196,6 +196,7 @@ impl engine::Perceptor for Injected {
             timing: Default::default(),
             screen: None,
             window_title: None,
+            url: None,
         })
     }
     async fn observe_tree_only(&self) -> anyhow::Result<engine::Observation> {

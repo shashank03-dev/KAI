@@ -45,6 +45,7 @@ impl Perceptor for Inbox {
             timing: Default::default(),
             screen: None,
             window_title: Some("Inbox - Mail".into()),
+            url: None,
         })
     }
 }

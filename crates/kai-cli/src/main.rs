@@ -9,6 +9,7 @@ mod data;
 mod mcp;
 mod memory;
 mod models;
+mod runs;
 
 use backend::{BackendArg, BackendOpts};
 use clap::{Parser, Subcommand};
@@ -46,6 +47,8 @@ enum Cmd {
         /// Neither use nor add to what Kai learned on this computer.
         #[arg(long)]
         no_memory: bool,
+        #[command(flatten)]
+        lane: runs::LaneArgs,
     },
     /// What Kai learned from earlier runs on this computer (docs/MEMORY.md).
     Memory {
@@ -196,7 +199,19 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             yes,
             record,
             no_memory,
-        } => run_task(&backend, &task, team, yes, record.as_deref(), !no_memory).await,
+            lane,
+        } => {
+            run_task(
+                &backend,
+                &task,
+                team,
+                yes,
+                record.as_deref(),
+                !no_memory,
+                &lane,
+            )
+            .await
+        }
         Cmd::Memory { cmd } => memory::run(cmd),
         Cmd::Data { cmd } => data::run(cmd),
         Cmd::Bench {
@@ -317,6 +332,7 @@ async fn run_task(
     yes: bool,
     record: Option<&Path>,
     use_memory: bool,
+    lane: &runs::LaneArgs,
 ) -> anyhow::Result<ExitCode> {
     let (b, mut s, keys) = live_settings(o)?;
     let _local = local_server(b, &mut s).await?;
@@ -326,7 +342,7 @@ async fn run_task(
             let _ = root;
             None
         }
-        Some(root) => Some(run_recorder(root, task, b, &s)?),
+        Some(root) => Some(runs::run_recorder(root, task, b, &s)?),
         None => None,
     };
     let (config, _) = backend::config(&s, &o.ab)?;
@@ -351,14 +367,27 @@ async fn run_task(
             )
         })
         .map_err(|e| log::warn!("no global stop hotkey: {e}"));
-    let screen = kai_os::DesktopPerceptor::new();
-    let hands = kai_os::DesktopActuator::new(kill.clone())?;
+    // `--browser`: Kai's own browser is both the eyes and the hands.
+    let web = lane.open(&kill).await?;
+    let desktop = match web {
+        Some(_) => None,
+        None => Some(kai_os::DesktopActuator::new(kill.clone())?),
+    };
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    tokio::spawn(kai_os::kill::watch_corner(
-        kill.clone(),
-        hands.input.clone(),
-        running.clone(),
-    ));
+    if let Some(h) = &desktop {
+        tokio::spawn(kai_os::kill::watch_corner(
+            kill.clone(),
+            h.input.clone(),
+            running.clone(),
+        ));
+    }
+    let desktop_eyes = kai_os::DesktopPerceptor::new();
+    let (screen, hands): (&dyn kai_core::Perceptor, &dyn kai_core::Actuator) =
+        match (&web, &desktop) {
+            (Some(l), _) => (l, l),
+            (None, Some(h)) => (&desktop_eyes, h),
+            (None, None) => unreachable!("desktop hands exist when there is no lane"),
+        };
     let approver = TerminalApprover { auto_yes: yes };
     // CAPTCHAs, one-time codes and questions reach whoever is at this
     // terminal; piped input means nobody is, so those end the run instead.
@@ -367,8 +396,8 @@ async fn run_task(
     let ok = if let Some(cfg) = native {
         let runner = kai_core::cua::CuaRunner {
             config: cfg,
-            perceptor: &screen,
-            actuator: &hands,
+            perceptor: screen,
+            actuator: hands,
             interrupt: &kill,
             sink: &Printer,
         };
@@ -385,8 +414,8 @@ async fn run_task(
         let orch = kai_core::orchestrator::Orchestrator {
             client: fast.as_ref(),
             careful: careful.as_deref(),
-            screen: &screen,
-            actuator: &hands,
+            screen,
+            actuator: hands,
             approver: &approver,
             interrupt: &kill,
             sink: &Printer,
@@ -409,8 +438,8 @@ async fn run_task(
         let engine = Engine {
             client: fast.as_ref(),
             careful: careful.as_deref(),
-            perceptor: &screen,
-            actuator: &hands,
+            perceptor: screen,
+            actuator: hands,
             approver: &approver,
             interrupt: &kill,
             sink: &Printer,
@@ -468,27 +497,4 @@ async fn run_task(
     } else {
         ExitCode::FAILURE
     })
-}
-
-/// A recorder for `kai run --record <root>`: `<root>/<time>-<task slug>/`.
-fn run_recorder(
-    root: &Path,
-    task: &str,
-    b: BackendArg,
-    s: &Settings,
-) -> anyhow::Result<kai_core::TraceRecorder> {
-    let stamp = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string();
-    let slug: String = bench::report::slug(task).chars().take(40).collect();
-    let run_id = format!("{stamp}-{}", slug.trim_end_matches('-'));
-    let backend = match b {
-        BackendArg::Auto => format!("{:?}", s.backend).to_lowercase(),
-        _ => b.name().to_string(),
-    };
-    let mut meta = kai_core::RunMeta::new(&run_id, task, "run", backend, &s.fast_model);
-    meta.kai_version = bench::record::kai_version();
-    let mut rec = kai_core::TraceRecorder::new(root.join(&run_id), meta)?;
-    if s.careful_model != s.fast_model && !s.careful_model.is_empty() {
-        rec = rec.with_careful_model(&s.careful_model);
-    }
-    Ok(rec)
 }

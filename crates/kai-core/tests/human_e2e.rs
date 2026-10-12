@@ -83,6 +83,7 @@ impl Perceptor for Page {
             timing: Default::default(),
             screen: None,
             window_title: None,
+            url: None,
         })
     }
 }

@@ -131,19 +131,20 @@ async fn platform_act(_: NodeRef, _: live::Plan, _: Role) -> anyhow::Result<bool
 
 /// Turn raw nodes into numbered marks, or a grid if there is nothing useful.
 pub fn ground(nodes: &[RawNode], screen: Rect) -> Grounding {
-    ground_picked(nodes, screen).0
+    ground_indexed(nodes, screen).0
 }
 
 /// Like [`ground`], and remember which live object each mark is, so a later
 /// [`act`] on this grounding can reach it.
 pub fn ground_live(nodes: &[RawNode], screen: Rect) -> Grounding {
-    let (g, picked) = ground_picked(nodes, screen);
+    let (g, picked) = ground_indexed(nodes, screen);
     live::remember(&g, nodes, &picked);
     g
 }
 
-/// The grounding plus, for each mark in order, the index of its raw node.
-fn ground_picked(nodes: &[RawNode], screen: Rect) -> (Grounding, Vec<usize>) {
+/// The grounding plus, for each mark in order, the index of its raw node
+/// (the browser lane maps that back to a DOM node).
+pub fn ground_indexed(nodes: &[RawNode], screen: Rect) -> (Grounding, Vec<usize>) {
     let keep: Vec<(usize, &RawNode)> = nodes
         .iter()
         .enumerate()
@@ -267,10 +268,10 @@ mod tests {
             node(Role::Image, "logo", 10.0, 90.0),
             node(Role::Button, "A", 10.0, 12.0),
         ];
-        let (g, picked) = ground_picked(&nodes, SCREEN);
+        let (g, picked) = ground_indexed(&nodes, SCREEN);
         assert!(matches!(g, Grounding::Marks(_)));
         assert_eq!(picked, [2, 0]);
-        assert!(ground_picked(&[], SCREEN).1.is_empty());
+        assert!(ground_indexed(&[], SCREEN).1.is_empty());
     }
 
     #[test]

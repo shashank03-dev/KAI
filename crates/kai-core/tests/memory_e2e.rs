@@ -142,6 +142,7 @@ impl Perceptor for Desk {
             timing: Default::default(),
             screen: None,
             window_title: None,
+            url: None,
         })
     }
 }
