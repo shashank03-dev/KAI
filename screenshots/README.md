@@ -6,6 +6,10 @@ Captured with the app's own harness (made-up run data, no model):
 KAI_CAPTURE=screenshots cargo run --release -p kai-app
 ```
 
+In CI: run the **Screenshots** workflow (Actions tab, or any push that
+changes `.github/workflows/screenshots.yml`); it builds the app, captures on
+Xvfb with Mesa's software Vulkan, and commits the PNGs to the branch.
+
 It writes `NN-<screen>-<light|dark>.png` for all 29 screens and states and
 quits. `KAI_CAPTURE_ONLY=models,onboarding-local` limits it to the shots whose
 names contain one of those words. The local-model shots (06, 90–92) use
