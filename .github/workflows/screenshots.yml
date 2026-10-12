@@ -14,6 +14,12 @@ on:
       - .github/workflows/screenshots.yml
       - crates/kai-app/**
 
+# A newer push to the same branch cancels the older run instead of paying
+# for both (private-repo Actions minutes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 

@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# A newer push to the same branch cancels the older run instead of paying
+# for both (private-repo Actions minutes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
