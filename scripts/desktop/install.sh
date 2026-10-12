@@ -17,7 +17,7 @@ $SUDO apt-get install -y -q --no-install-recommends \
   xvfb openbox xdotool wmctrl x11-utils imagemagick tigervnc-standalone-server \
   dbus-x11 at-spi2-core libatk-bridge2.0-0t64 libgtk-3-0t64 \
   mousepad pcmanfm libreoffice-calc libreoffice-gtk3 gtk-3-examples zenity \
-  xz-utils curl ca-certificates \
+  xz-utils curl ca-certificates p11-kit-modules xdg-utils \
   libasound2t64 libx11-xcb1 libdbus-glib-1-2 libpci3 || {
     # Package names differ slightly between releases; retry the essentials.
     $SUDO apt-get install -y -q --no-install-recommends \

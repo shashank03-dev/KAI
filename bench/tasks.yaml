@@ -43,6 +43,8 @@
   check:
     linux: xdotool getactivewindow getwindowname | grep -qi gemma
     windows: if (Get-Process | ? { $_.MainWindowTitle -match 'Gemma' }) { exit 0 } else { exit 1 }
+  teardown:
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-browser.sh"'
   mock:
     - '{"thought":"type query in search box","action":"type","target":2,"text":"Gemma 4 model card","risk":"none","expect":"query typed"}'
     - '{"thought":"submit search","action":"key","keys":["enter"],"risk":"none","expect":"results"}'
@@ -60,6 +62,8 @@
   check:
     linux: xdotool getactivewindow getwindowname | grep -qi ieee
     windows: if (Get-Process | ? { $_.MainWindowTitle -match 'IEEE' }) { exit 0 } else { exit 1 }
+  teardown:
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-browser.sh"'
   mock:
     - '{"thought":"go to the site","action":"open_url","text":"https://bmsce.ac.in","risk":"none","expect":"college home page"}'
     - '{"thought":"open the result","action":"click","target":3,"risk":"none","expect":"IEEE CS page"}'
@@ -76,6 +80,8 @@
   check:
     linux: xdotool getactivewindow getwindowname | grep -qi youtube
     windows: if (Get-Process | ? { $_.MainWindowTitle -match 'YouTube' }) { exit 0 } else { exit 1 }
+  teardown:
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-browser.sh"'
   mock:
     - '{"thought":"go straight to results","action":"open_url","text":"https://www.youtube.com/results?search_query=lofi+hip+hop+radio","risk":"none","expect":"results"}'
     - '{"thought":"play first result","action":"click","target":3,"risk":"none","expect":"video playing"}'
@@ -96,7 +102,7 @@
     # Filled but not submitted: nothing may reach the server.
     linux: test ! -e ~/kai-bench/server/submission.json
   teardown:
-    linux: pkill -f '/firefox' >/dev/null 2>&1; pkill -x soffice.bin; true
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-browser.sh"; pkill -x soffice.bin; true'
   mock:
     - '{"thought":"name field","action":"type","target":5,"text":"{name}","risk":"none","expect":"name filled"}'
     - '{"thought":"email field","action":"type","target":6,"text":"{email}","risk":"none","expect":"email filled"}'
@@ -115,7 +121,7 @@
       f=~/kai-bench/server/submission.json
       grep -q '"name": "Ravi Kumar"' $f && grep -q '"email": "ravi@example.com"' $f && grep -q '"topic": "billing"' $f && grep -qi 'march invoice' $f
   teardown:
-    linux: pkill -f '/firefox' >/dev/null 2>&1; pkill -x soffice.bin; true
+    linux: '"$KAI_BENCH_DIR/fixtures/reset-browser.sh"; pkill -x soffice.bin; true'
   mock:
     - '{"thought":"open the form","action":"open_url","text":"http://127.0.0.1:8765/contact.html","risk":"none","expect":"contact form"}'
     - '{"thought":"send the form fields","action":"shell","text":"curl -sf -d name=Ravi+Kumar -d email=ravi@example.com -d topic=billing --data-urlencode \"message=Please send a copy of my March invoice\" http://127.0.0.1:8765/submit","risk":"low","expect":"thank you page"}'
@@ -295,11 +301,11 @@
       - apples, rice, soap
       - coffee, tea, sugar
   setup:
-    linux: pkill -x mousepad; sleep 1; mkdir -p ~/kai-bench && rm -f ~/kai-bench/shopping.txt
+    linux: pkill -9 -x mousepad; sleep 1; mkdir -p ~/kai-bench && rm -f ~/kai-bench/shopping.txt
   check:
     linux: grep -q 'Shopping list. {items}' ~/kai-bench/shopping.txt
   teardown:
-    linux: pkill -x mousepad; true
+    linux: pkill -9 -x mousepad; true
   mock:
     - '{"thought":"open the editor","action":"open_app","text":"mousepad","risk":"none","expect":"empty document"}'
     - '{"thought":"type the list into the editor","action":"shell","text":"for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -a Mousepad; sleep 0.5; xdotool type --delay 5 \"Shopping list: {items}\"","risk":"low","expect":"text in editor"}'
@@ -315,11 +321,11 @@
   needs: [display, mousepad]
   prompt: Close the text editor window that is open.
   setup:
-    linux: pkill -x mousepad; sleep 1; mkdir -p ~/kai-bench && printf 'draft\n' > ~/kai-bench/draft.txt && (setsid -f mousepad ~/kai-bench/draft.txt >/dev/null 2>&1 </dev/null) && for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -l | grep -q Mousepad
+    linux: pkill -9 -x mousepad; sleep 1; mkdir -p ~/kai-bench && printf 'draft\n' > ~/kai-bench/draft.txt && (setsid -f mousepad ~/kai-bench/draft.txt >/dev/null 2>&1 </dev/null) && for i in $(seq 1 80); do wmctrl -l | grep -q Mousepad && break; sleep 0.25; done; sleep 1; wmctrl -l | grep -q Mousepad
   check:
     linux: sleep 1; ! wmctrl -l | grep -qi mousepad
   teardown:
-    linux: pkill -x mousepad; true
+    linux: pkill -9 -x mousepad; true
   mock:
     - '{"thought":"focus the editor and quit it","action":"shell","text":"wmctrl -a Mousepad; sleep 0.5","risk":"low","expect":"editor focused"}'
     - '{"thought":"quit with the shortcut","action":"key","keys":["ctrl","q"],"risk":"none","expect":"window gone"}'
@@ -332,11 +338,11 @@
   replay: terminal
   prompt: Turn on line numbers in the Mousepad text editor.
   setup:
-    linux: pkill -x mousepad; gsettings set org.xfce.mousepad.preferences.view show-line-numbers false
+    linux: pkill -9 -x mousepad; gsettings set org.xfce.mousepad.preferences.view show-line-numbers false
   check:
     linux: gsettings get org.xfce.mousepad.preferences.view show-line-numbers | grep -q true
   teardown:
-    linux: pkill -x mousepad; true
+    linux: pkill -9 -x mousepad; true
   mock:
     - '{"thought":"set the preference key directly","action":"shell","text":"gsettings set org.xfce.mousepad.preferences.view show-line-numbers true","risk":"low","expect":"line numbers on"}'
     - '{"thought":"line numbers are on","action":"done","risk":"none"}'
