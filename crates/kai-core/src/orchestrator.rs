@@ -47,6 +47,36 @@ pub struct Plan {
 const MAX_SUBTASKS: usize = 8;
 
 impl Plan {
+    /// The whole task as one screen sub-agent.
+    pub fn single(task: &str) -> Plan {
+        Plan {
+            subtasks: vec![Subtask {
+                id: "1".into(),
+                goal: task.into(),
+                kind: Kind::Gui,
+                depends_on: vec![],
+            }],
+        }
+    }
+
+    /// Keep a split only when it can save time: two or more terminal
+    /// subtasks to run side by side. Screen subtasks take turns anyway, so
+    /// splitting them only adds hand-offs; seen live, Gemma split "open
+    /// Mousepad and type a sentence" into a terminal and a screen subtask,
+    /// and both opened the editor and typed.
+    pub fn worth_splitting(self, task: &str) -> Plan {
+        let shells = self
+            .subtasks
+            .iter()
+            .filter(|s| s.kind == Kind::Shell)
+            .count();
+        if self.subtasks.len() > 1 && shells < 2 {
+            Plan::single(task)
+        } else {
+            self
+        }
+    }
+
     pub fn json_schema() -> serde_json::Value {
         serde_json::json!({
             "type": "object", "additionalProperties": false, "required": ["subtasks"],
@@ -241,20 +271,14 @@ impl Orchestrator<'_> {
             max_tokens: 768,
             temperature: 0.0,
         };
-        Plan::parse(&self.client.decide(&req).await?.raw)
+        let plan = Plan::parse(&self.client.decide(&req).await?.raw)?;
+        Ok(plan.worth_splitting(task))
     }
 
     pub async fn run(&self, task: &str) -> anyhow::Result<Report> {
         let plan = self.plan(task).await.unwrap_or_else(|e| {
             log::warn!("planner failed ({e}); running as one GUI task");
-            Plan {
-                subtasks: vec![Subtask {
-                    id: "1".into(),
-                    goal: task.into(),
-                    kind: Kind::Gui,
-                    depends_on: vec![],
-                }],
-            }
+            Plan::single(task)
         });
         self.run_plan(task, plan).await
     }
@@ -431,5 +455,36 @@ mod tests {
             .collect();
         let raw = format!(r#"{{"subtasks":[{}]}}"#, many.join(","));
         assert_eq!(Plan::parse(&raw).unwrap().subtasks.len(), MAX_SUBTASKS);
+    }
+
+    #[test]
+    fn a_split_is_kept_only_for_parallel_terminal_work() {
+        let task = "open Mousepad and type a sentence";
+        // Seen live: one terminal + one screen subtask both did the work.
+        let mixed = Plan::parse(
+            r#"{"subtasks":[{"id":"1","goal":"open Mousepad","kind":"shell"},
+                            {"id":"2","goal":"type the sentence","kind":"gui"}]}"#,
+        )
+        .unwrap()
+        .worth_splitting(task);
+        assert_eq!(mixed.subtasks.len(), 1);
+        assert_eq!(mixed.subtasks[0].goal, task);
+        assert_eq!(mixed.subtasks[0].kind, Kind::Gui);
+        let checks = Plan::parse(
+            r#"{"subtasks":[{"id":"1","goal":"firewall","kind":"shell"},
+                            {"id":"2","goal":"updates","kind":"shell"},
+                            {"id":"3","goal":"report","kind":"gui","depends_on":["1","2"]}]}"#,
+        )
+        .unwrap()
+        .worth_splitting(task);
+        assert_eq!(checks.subtasks.len(), 3);
+        let one = Plan::parse(r#"{"subtasks":[{"id":"1","goal":"ls","kind":"shell"}]}"#)
+            .unwrap()
+            .worth_splitting(task);
+        assert_eq!(
+            one.subtasks[0].kind,
+            Kind::Shell,
+            "one subtask is left alone"
+        );
     }
 }

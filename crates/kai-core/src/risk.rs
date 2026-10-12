@@ -23,25 +23,27 @@ pub enum ApprovalLevel {
 }
 
 /// Keywords that mark an action as high risk by its effect: sending, buying,
-/// deleting, submitting, changing system settings. Matched against the target
-/// element name and the decision's text/thought.
+/// deleting, submitting, changing system settings. Matched where a word in
+/// the target element's name or the decision's text/thought starts with one,
+/// so stems (`delet`, `remov`) cover every inflection.
 const HIGH_RISK_WORDS: &[&str] = &[
     "send",
     "buy",
-    "purchase",
+    "purchas",
     "pay",
     "payment",
     "checkout",
     "order",
-    "delete",
-    "remove",
-    "erase",
+    "delet",
+    "remov",
+    "eras",
     "submit",
     "confirm",
     "transfer",
     "wire",
-    "subscribe",
-    "deactivate",
+    "subscrib",
+    "unsubscrib",
+    "deactivat",
     "uninstall",
     "format",
     "shutdown",
@@ -114,9 +116,16 @@ pub fn classify(decision: &Decision, grounding: &Grounding) -> Risk {
         return Risk::High;
     }
 
-    // Effect keywords escalate to high.
+    // Effect keywords escalate to high where a word starts with them
+    // ("deleting", "payments"; not "display" or "information"), and only for
+    // a step that does something: waiting, finishing or asking cannot send
+    // or delete.
+    let inert = matches!(
+        decision.action,
+        Action::Wait | Action::Done | Action::AskUser
+    );
     let haystack = effect_haystack(decision, grounding).to_ascii_lowercase();
-    if HIGH_RISK_WORDS.iter().any(|w| haystack.contains(w)) {
+    if !inert && HIGH_RISK_WORDS.iter().any(|w| starts_word(&haystack, w)) {
         return Risk::High.max(decision.risk);
     }
 
@@ -203,6 +212,16 @@ pub fn explain(d: &Decision, g: &Grounding) -> Option<String> {
          site owns that field. It is typed there once and nowhere else; Kai's lessons, \
          procedures and traces blank it out."
     ))
+}
+
+/// A word in `hay` starts with `prefix` (suffixes allowed: "deleting").
+fn starts_word(hay: &str, prefix: &str) -> bool {
+    hay.match_indices(prefix).any(|(i, _)| {
+        !hay[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric())
+    })
 }
 
 /// `phrase` appears in `hay` on word boundaries.
@@ -415,6 +434,48 @@ mod tests {
         }]);
         let d = decision(Action::Click, Some(1), Risk::None);
         assert_eq!(classify(&d, &g), Risk::High);
+    }
+
+    #[test]
+    fn effect_words_start_words_and_need_an_action_that_does_something() {
+        let g = Grounding::Marks(vec![Element {
+            mark: 1,
+            role: Role::Button,
+            name: "Display settings".into(),
+            bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
+            enabled: true,
+            secure: false,
+            focused: false,
+            value: None,
+        }]);
+        let with = |action: Action, thought: &str| {
+            let mut d = decision(
+                action,
+                if action == Action::Click {
+                    Some(1)
+                } else {
+                    None
+                },
+                Risk::None,
+            );
+            d.thought = thought.into();
+            classify(&d, &g)
+        };
+        // Seen live: a wait to "confirm Mousepad is open" asked for approval.
+        assert_eq!(
+            with(Action::Wait, "wait to confirm Mousepad is open"),
+            Risk::None
+        );
+        assert_eq!(with(Action::Done, "the order was sent"), Risk::None);
+        // Inside other words: not an effect.
+        assert_eq!(
+            with(Action::Click, "open the information border"),
+            Risk::None
+        );
+        // Inflected effect words still escalate a step that acts.
+        assert_eq!(with(Action::Click, "deleting the draft"), Risk::High);
+        assert_eq!(with(Action::Click, "Payments page, confirm"), Risk::High);
+        assert_eq!(with(Action::Click, "unsubscribe from the list"), Risk::High);
     }
 
     #[test]

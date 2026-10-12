@@ -96,7 +96,7 @@ impl MiniView {
         if let Some(p) = run.update(cx, |r, cx| {
             r.phase = Phase::Running;
             cx.notify();
-            r.approval.take()
+            r.take_approval()
         }) {
             let _ = p.reply.send(choice);
         }
@@ -107,7 +107,7 @@ impl MiniView {
         if let Some(h) = run.update(cx, |r, cx| {
             r.phase = Phase::Running;
             cx.notify();
-            r.human.take()
+            r.take_human()
         }) {
             let _ = h.reply.send(reply);
         }
@@ -246,6 +246,13 @@ impl Render for MiniView {
                     .line_clamp(2)
                     .child(if r.held {
                         "Paused. Kai waits before its next step.".to_string()
+                    } else if let Some(p) = &r.approval {
+                        // Team: another sub-agent's events can change the
+                        // caption while this approval waits.
+                        format!(
+                            "Waiting for you: {}",
+                            crate::state::describe(&p.decision, p.element.as_deref())
+                        )
                     } else {
                         r.caption.clone()
                     }),

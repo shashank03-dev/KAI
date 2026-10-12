@@ -286,10 +286,10 @@ impl KaiApp {
                 entry.control.stop();
                 // Also interrupt typing or a click in progress.
                 cx.global::<AgentHandle>().0.stop();
-                if let Some(p) = state.update(cx, |r, _| r.approval.take()) {
+                if let Some(p) = state.update(cx, |r, _| r.take_approval()) {
                     let _ = p.reply.send(ApprovalChoice::Stop);
                 }
-                if let Some(h) = state.update(cx, |r, _| r.human.take()) {
+                if let Some(h) = state.update(cx, |r, _| r.take_human()) {
                     let _ = h.reply.send(HumanReply::Stop);
                 }
             }
@@ -378,7 +378,7 @@ impl KaiApp {
                 r.phase = Phase::Running;
             }
             cx.notify();
-            r.human.take()
+            r.take_human()
         }) {
             let _ = h.reply.send(reply);
         }
@@ -420,7 +420,7 @@ impl KaiApp {
                 r.phase = Phase::Running;
             }
             cx.notify();
-            r.approval.take()
+            r.take_approval()
         }) {
             let _ = p.reply.send(choice);
         }
