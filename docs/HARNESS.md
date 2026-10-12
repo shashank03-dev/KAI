@@ -154,6 +154,14 @@ status, never the model. Each action is also labelled `confirmed`,
 `unverifiable` or `no_op` from the tree diff, AT-SPI events and the screen
 hash; `no_op` is the no-progress signal. See [VERIFICATION.md](VERIFICATION.md).
 
+**Macro-action history (off by default, `--macro-history`).** Instead of
+only the last 3 raw steps, the model sees the last 2 raw steps plus one line
+of at most 60 words summing up everything older: verified outcomes first,
+then each older step in a few words, with element names instead of stale
+mark numbers, shell exit codes kept, and repeats merged ("scroll down ×3").
+It is built in code, with no model call (`macro_history.rs`). Off until a
+live A/B shows fewer steps per task.
+
 **Zoomed crop.** After a grid click that changed nothing, the next request
 carries a 2x crop around the clicked cell with its own numbered sub-grid.
 
@@ -179,7 +187,7 @@ backend. See [MEMORY.md](MEMORY.md).
 | --- | --- |
 | MoE `gemma-4-26b-a4b-it` (~4B active) by default; `gemma-4-31b-it` only for the one step after a failure, then back | `Engine.careful`, `engine.rs` |
 | Stable system prompt and schema first, changing parts last → vLLM prefix-cache hits every step | `prompt.rs` |
-| Only the last 3 steps as text history; never old screenshots | `prompt::user_turn` |
+| Only the last 3 steps as text history (or 2 plus a summary with `--macro-history`); never old screenshots | `prompt::build_turn` |
 | `thought` ≤ 25 words, `max_tokens` 192, temperature 0 | `Config`, `schema.rs` |
 | One keep-alive HTTP/2 connection (ALPN), warmed when the app opens | `VllmClient`, `KaiApp::after_open` |
 | Fast paths that skip the model: `open_app`, `open_url`, and a skill's deterministic `steps` | `engine.rs`, `skill.rs` |

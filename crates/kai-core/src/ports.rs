@@ -248,6 +248,9 @@ pub struct Config {
     pub outcomes: bool,
     /// Longest one outcome probe may run; a timeout counts as failed.
     pub probe_timeout: Duration,
+    /// Fold steps older than the last 2 into a short running summary
+    /// (`macro_history.rs`). Off until measured on a live model.
+    pub macro_history: bool,
 }
 
 impl Default for Config {
@@ -269,6 +272,7 @@ impl Default for Config {
             human_wait: Duration::from_secs(600),
             outcomes: false,
             probe_timeout: Duration::from_secs(2),
+            macro_history: false,
         }
     }
 }

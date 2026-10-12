@@ -289,7 +289,7 @@ impl Engine<'_> {
             rec.verified = false; // confirmed by the next request
             r.trace.push(rec);
             let idx = r.trace.steps.len() - 1;
-            let mut item = HistoryItem::from_decision(&decision);
+            let mut item = HistoryItem::from_step(&decision, &obs.grounding);
             item.summary.push_str(" (executor)");
             if let Some(o) = &output {
                 item.push_output(o);

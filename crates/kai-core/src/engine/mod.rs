@@ -311,6 +311,7 @@ impl Engine<'_> {
         let mut notes = std::mem::take(&mut r.notes);
         let first = self.outcome_request(r, &mut notes, schema);
         let lessons = self.lessons_for(r, &obs.grounding);
+        let verified = self.config.macro_history.then(|| self.verified_outcomes(r));
         let user_text = prompt::build_turn(&TurnInput {
             lessons: lessons.as_deref(),
             task: r.task,
@@ -320,6 +321,7 @@ impl Engine<'_> {
             no_progress: r.no_progress_streak >= 1,
             notes: &notes,
             has_screenshot: !obs.images.screenshot_jpeg.is_empty(),
+            macro_history: verified.as_deref(),
         });
         let escalate = r.failure_streak > 0 || r.no_progress_streak > 0 || r.careful_next;
         r.careful_next = false;
@@ -454,7 +456,7 @@ impl Engine<'_> {
             popup: observe::opens_popup(&decision, &obs.grounding),
             records: vec![r.trace.steps.len() - 1],
         };
-        let mut item = HistoryItem::from_decision(&decision);
+        let mut item = HistoryItem::from_step(&decision, &obs.grounding);
         let acted_ok = path != "error";
         if let Some(out) = &output {
             item.push_output(out);

@@ -226,6 +226,18 @@ impl Engine<'_> {
         }
     }
 
+    /// Descriptions of the outcomes verified so far, redacted, for the
+    /// macro-history summary.
+    pub(super) fn verified_outcomes(&self, r: &Run<'_>) -> Vec<String> {
+        r.ledger
+            .ledger
+            .records(&r.human.codes)
+            .into_iter()
+            .filter(|o| o.status == crate::ledger::Status::Verified)
+            .map(|o| o.description)
+            .collect()
+    }
+
     /// At the end of the run: the outcome records and every gate record,
     /// with any one-time code Kai typed blanked out.
     pub(super) fn finish_ledger(&self, r: &mut Run<'_>) {

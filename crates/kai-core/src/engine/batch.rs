@@ -113,7 +113,7 @@ impl Engine<'_> {
             // Confirmed by the next observation (or the verifier).
             rec.verified = false;
             r.trace.push(rec);
-            let mut item = HistoryItem::from_decision(d);
+            let mut item = HistoryItem::from_step(d, &grounding);
             item.summary.push_str(" (batched)");
             if let Some(o) = &output {
                 item.push_output(o);

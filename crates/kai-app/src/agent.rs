@@ -229,6 +229,7 @@ async fn drive(
         approval: settings.approval,
         executor: settings.use_executor,
         outcomes: settings.verify_outcomes,
+        macro_history: settings.macro_history,
         learn: settings.learn,
         reflect: settings.reflect,
         ..Config::default()

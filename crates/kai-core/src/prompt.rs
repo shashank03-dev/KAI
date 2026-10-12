@@ -91,6 +91,10 @@ pub struct TurnInput<'a> {
     /// changes when the apps or sites in play change, so it rides in the
     /// cached prefix. Hints for the model only.
     pub lessons: Option<&'a str>,
+    /// With `Config::macro_history`: the verified outcomes (redacted). The
+    /// turn then shows a summary of older steps plus the last 2 raw ones
+    /// ([`crate::macro_history`]); `None` keeps the last-3 window.
+    pub macro_history: Option<&'a [String]>,
 }
 
 /// Build the changing user turn: skill body (if one is active), the compact
@@ -112,6 +116,7 @@ pub fn user_turn(
         notes: &[],
         has_screenshot: true,
         lessons: None,
+        macro_history: None,
     })
 }
 
@@ -141,7 +146,18 @@ pub fn build_turn(t: &TurnInput) -> String {
     s.push_str(&t.grounding.as_compact_text());
     s.push_str("\n\n");
 
-    let recent: Vec<&HistoryItem> = t.history.iter().rev().take(3).rev().collect();
+    let window = match t.macro_history {
+        Some(_) => crate::macro_history::RAW_STEPS,
+        None => 3,
+    };
+    let split = t.history.len().saturating_sub(window);
+    if let Some(verified) = t.macro_history
+        && let Some(line) = crate::macro_history::summary(&t.history[..split], verified)
+    {
+        s.push_str(&line);
+        s.push_str("\n\n");
+    }
+    let recent: Vec<&HistoryItem> = t.history[split..].iter().collect();
     if !recent.is_empty() {
         s.push_str("Your last steps:\n");
         let last = recent.len() - 1;
@@ -201,14 +217,27 @@ pub struct HistoryItem {
     pub summary: String,
     /// Command output of a `shell` step, shown under the summary.
     pub output: Option<String>,
+    /// The name of the element the step acted on, for the macro summary
+    /// (mark numbers change every frame).
+    pub target_name: Option<String>,
 }
 
 impl HistoryItem {
     pub fn note(summary: impl Into<String>) -> Self {
         Self {
             summary: summary.into(),
-            output: None,
+            ..Default::default()
         }
+    }
+
+    /// [`Self::from_decision`] plus the target element's name.
+    pub fn from_step(d: &Decision, grounding: &Grounding) -> Self {
+        let mut h = Self::from_decision(d);
+        h.target_name = d
+            .target
+            .and_then(|t| grounding.element(t))
+            .map(|e| e.name.clone());
+        h
     }
 
     /// Attach command output so the model sees what a shell step did.

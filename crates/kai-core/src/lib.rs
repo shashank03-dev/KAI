@@ -14,6 +14,7 @@ pub mod executor;
 pub mod failure;
 pub mod human;
 pub mod ledger;
+pub mod macro_history;
 pub mod memory;
 pub mod models;
 pub mod orchestrator;

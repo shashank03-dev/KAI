@@ -38,6 +38,10 @@ pub struct Ab {
     /// when they hold (docs/VERIFICATION.md).
     #[arg(long)]
     pub outcomes: bool,
+    /// Summarise steps older than the last 2 for the model instead of
+    /// dropping them (macro-action history).
+    #[arg(long)]
+    pub macro_history: bool,
 }
 
 impl Ab {
@@ -63,6 +67,9 @@ impl Ab {
         if self.outcomes {
             v.push("--outcomes");
         }
+        if self.macro_history {
+            v.push("--macro-history");
+        }
         v
     }
 }
@@ -80,6 +87,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.a11y_actions = !ab.no_a11y;
     config.executor = ab.executor;
     config.outcomes = ab.outcomes;
+    config.macro_history = ab.macro_history;
     Ok(true)
 }
 
@@ -117,5 +125,13 @@ mod tests {
         apply_ab(&mut c, &ab).unwrap();
         assert!(c.executor);
         assert_eq!(ab.changed(), vec!["--executor"]);
+        assert!(!c.macro_history, "macro history off unless asked for");
+        let ab = Ab {
+            macro_history: true,
+            ..Default::default()
+        };
+        apply_ab(&mut c, &ab).unwrap();
+        assert!(c.macro_history);
+        assert_eq!(ab.changed(), vec!["--macro-history"]);
     }
 }
