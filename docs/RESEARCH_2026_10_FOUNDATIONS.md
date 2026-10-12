@@ -337,6 +337,18 @@ need. It's also a poor engineering bet:
 Order matters: #1 is the prerequisite for #4 (only verified runs become
 procedures) and for honest memory credit (#6).
 
+**Status (2026-10-12).** A first version of every item is in, each off by
+default until a live A/B shows a gain:
+#1–#2 [VERIFICATION.md](VERIFICATION.md) (`--outcomes`),
+#3 [HUMAN_CHECKS.md](HUMAN_CHECKS.md),
+#4 [PROCEDURES.md](PROCEDURES.md) (`--procedures`),
+#5–#6 [MEMORY.md](MEMORY.md) (screens, app facts, `kai memory consolidate`
+and `exam`),
+#7 `--macro-history`, #9 `--best-of 3`, §2.5 `--recover` (HARNESS.md),
+and #8's MCP part as [MCP.md](MCP.md) (`kai mcp`). Not done: background
+window-scoped driving, crop re-aiming for procedures, and any live
+measurement ([bench/results/2026-10-12-batch.md](../bench/results/2026-10-12-batch.md)).
+
 ---
 
 ## 8. Sources (accessed 2026-10-12)

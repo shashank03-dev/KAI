@@ -5,7 +5,11 @@
 You are continuing work on **Kai**, in the repo `shashank03-dev/KAI`, branch
 `main`. Read these first, in this order, before doing anything:
 `README.md`, `DECISIONS.md`, `docs/HARNESS.md`, `docs/DESIGN.md`,
-`docs/SKILLS.md`, then skim `crates/*/src`. They describe what already exists
+`docs/SKILLS.md`, `docs/VERIFICATION.md`, `docs/PROCEDURES.md`,
+`docs/MEMORY.md`, `docs/MCP.md`, then skim `crates/*/src`. The status of the
+ranked plan is at the end of `docs/RESEARCH_2026_10_FOUNDATIONS.md` §7:
+every item has a first version, off by default. The next job is measuring
+them on a live model (`kai bench --backend gemini` with and without each flag). They describe what already exists
 and what was not finished. Do not redo work that is done and tested.
 
 **What Kai is:** an open-source desktop app (Rust, GPUI + Ely GPUI Components,
