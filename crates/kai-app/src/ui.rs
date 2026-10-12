@@ -246,6 +246,9 @@ pub fn page(
                     .flex()
                     .flex_col()
                     .gap(px(6.))
+                    // Grow as well as shrink: inside a scroll area a
+                    // shrink-only column collapses to zero width.
+                    .flex_1()
                     .min_w_0()
                     .child(eyebrow(section.to_string(), cx))
                     .child(

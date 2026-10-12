@@ -85,6 +85,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .flex()
                 .flex_col()
                 .gap(px(6.))
+                .flex_1()
                 .min_w_0()
                 .child(ui::eyebrow(
                     if ok {

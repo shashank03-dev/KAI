@@ -41,6 +41,7 @@ fn fact(icon: IconName, label: &str, value: String, cx: &Context<KaiApp>) -> imp
             div()
                 .flex()
                 .flex_col()
+                .flex_1()
                 .min_w_0()
                 .child(
                     div()
