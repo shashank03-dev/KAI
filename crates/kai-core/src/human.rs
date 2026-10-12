@@ -1,14 +1,12 @@
-//! Human checks: the moments only the person at the computer can get past —
-//! a CAPTCHA, a one-time code, a "approve the sign-in on your phone" screen,
-//! or a question the model needs answered. Kai never tries to solve these
-//! itself. The harness (not the model) spots them, pauses the run, tells the
-//! user, waits for their answer and then carries on. See
+//! Human checks: the moments only the person at the computer can get past — a CAPTCHA, a
+//! one-time code, a "approve the sign-in on your phone" screen, or a question the model needs
+//! answered. Kai never tries to solve these itself. The harness (not the model) spots them,
+//! pauses the run, tells the user, waits for their answer and then carries on. See
 //! `docs/HUMAN_CHECKS.md`.
 //!
-//! Everything here is OS-free and pure: detection reads the element list,
-//! the answer comes back through the [`HumanHelper`] port, and a one-time
-//! code lives in a [`OneTimeCode`] that never prints, serialises or reaches
-//! the model.
+//! Everything here is OS-free and pure: detection reads the element list, the answer comes
+//! back through the [`HumanHelper`] port, and a one-time code lives in a [`OneTimeCode`]
+//! that never prints, serialises or reaches the model.
 
 use crate::element::{Element, Grounding, Role};
 use crate::schema::{Action, Decision};
@@ -28,8 +26,7 @@ pub enum CheckKind {
     DeviceApproval,
     /// The model asked the user something (`ask_user`).
     Question,
-    /// Text on screen that looks like a prompt injection, phishing or a fake
-    /// warning (`crate::untrusted`): the user decides whether Kai goes on.
+    /// Screen text that looks like an injection or phishing (`crate::untrusted`).
     Suspicious,
 }
 
@@ -80,9 +77,8 @@ pub struct HumanCheck {
 }
 
 impl HumanCheck {
-    /// The same challenge seen again hashes the same; a new one (another
-    /// puzzle, another field) does not. Used so a check the user already
-    /// handled is not raised again while it is still on screen.
+    /// The same challenge seen again hashes the same; a new one (another puzzle, another
+    /// field) does not, so a handled check is not raised again while still on screen.
     pub fn signature(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         self.kind.hash(&mut h);
@@ -116,10 +112,9 @@ impl HumanCheck {
     }
 }
 
-/// A one-time code the user gave Kai. It never prints (`Debug` shows
-/// `[one-time code]`), never serialises, and is only ever handed to the
-/// actuator to type into the field the user saw. Built only through
-/// [`OneTimeCode::parse`], so it is always a plausible code.
+/// A one-time code the user gave Kai. It never prints (`Debug` shows `[one-time code]`), never
+/// serialises, and is only ever handed to the actuator to type into the field the user saw.
+/// Built only through [`OneTimeCode::parse`], so it is always a plausible code.
 #[derive(Clone, PartialEq, Eq)]
 pub struct OneTimeCode(String);
 

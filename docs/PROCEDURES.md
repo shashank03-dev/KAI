@@ -59,8 +59,11 @@ secure element).
 3. **Act.** For a targeted step, Kai reads the tree (no screenshot) and
    looks for exactly one enabled element with the same role and name. The
    step goes through the same approval check and human-check guard as a model
-   step. Missing, ambiguous, approval needed, a CAPTCHA or code on screen, a
-   failed action, or a message from you: the replay stops there.
+   step. Missing, ambiguous, approval needed, a CAPTCHA, code or suspicious
+   text on screen, a failed action, or a message from you: the replay stops
+   there. Untargeted steps (open an app or URL, keys, a shell command) need
+   no tree read, so the screen check only happens on targeted steps; the
+   approval check runs on every step.
 4. **Hand over.** The model gets a full frame and a note: either "all N
    steps ran, check the screen and reply done", or "k of N ran, it stopped
    because …, the remaining steps were …", as a guide, not as orders. `done`

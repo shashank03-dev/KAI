@@ -20,7 +20,7 @@ impl Engine<'_> {
                 return;
             }
         };
-        crate::human::redact(&mut obs.grounding, &r.human.codes);
+        r.redact(&mut obs.grounding);
         let text = best_of::user_text(r.task, &obs.grounding.as_compact_text());
         let schema = best_of::schema();
         let images = Images {

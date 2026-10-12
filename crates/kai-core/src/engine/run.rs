@@ -76,6 +76,13 @@ pub(super) struct Run<'t> {
 }
 
 impl<'t> Run<'t> {
+    /// Blank what Kai typed for the user from a fresh read: one-time codes
+    /// and sensitive data (`docs/SAFETY.md`).
+    pub(super) fn redact(&self, g: &mut crate::element::Grounding) {
+        crate::human::redact(g, &self.human.codes);
+        self.trace.typed_secrets.redact(g);
+    }
+
     /// A fresh run of `task`. `decider`: the executor, when it is on.
     pub(super) fn new(
         task: &'t str,

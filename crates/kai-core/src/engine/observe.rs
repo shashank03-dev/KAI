@@ -134,16 +134,16 @@ fn text_hash(s: &str) -> u64 {
 }
 
 impl Engine<'_> {
-    /// One observation, full or tree-only, with any one-time code Kai typed
-    /// for the user blanked out of the element list before anything (model,
-    /// verifier, trace, UI) reads it.
+    /// One observation, full or tree-only, with any one-time code or
+    /// sensitive data Kai typed blanked out of the element list before
+    /// anything (model, verifier, trace, UI) reads it.
     pub(super) async fn look(&self, r: &Run<'_>, tree_only: bool) -> anyhow::Result<Observation> {
         let mut obs = if tree_only {
             self.perceptor.observe_tree_only().await?
         } else {
             self.perceptor.observe().await?
         };
-        crate::human::redact(&mut obs.grounding, &r.human.codes);
+        r.redact(&mut obs.grounding);
         Ok(obs)
     }
 

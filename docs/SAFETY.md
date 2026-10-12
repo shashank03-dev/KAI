@@ -54,9 +54,12 @@ the data is used, for example:
 > there once and nowhere else; Kai's lessons, procedures and traces blank it
 > out.
 
-That is true by construction: the saved trace and the model's later turns
-show `[card number]`, a step that needed approval never becomes a procedure,
-and lessons are learned from the redacted trace.
+That is true by construction: the saved trace (the step and the raw model
+reply it came from) and the model's later turns show `[card number]`. A
+field that shows the typed value again on a later screen is blanked to
+`[sensitive data]` before the model, the trace or a lesson reads it. A step
+that needed approval never becomes a procedure, and lessons are learned from
+the redacted trace.
 
 ## Tests
 
@@ -76,3 +79,9 @@ and lessons are learned from the redacted trace.
   approval.
 - A screen with no accessibility tree (a grid) has no text to scan, so only
   the prompt rule applies there.
+- Phrases match whole words ("to any airline" is not "to any AI"), but a
+  legitimate page can still use one ("do not close this window" during a
+  payment). Kai then asks once; continuing is one click.
+- Screenshots sent to the model, and the frames saved when recording is on,
+  show the screen as it is: a field that displays a typed card number shows
+  it there.

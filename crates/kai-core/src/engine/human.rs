@@ -56,9 +56,11 @@ enum Waited {
 impl Engine<'_> {
     /// A check on screen the user has not handled yet this run.
     pub(super) fn unhandled_check(&self, r: &Run<'_>, g: &Grounding) -> Option<HumanCheck> {
+        // A handled CAPTCHA still on screen must not hide new suspicious text.
+        let open = |c: &HumanCheck| !r.human.acked.contains(&c.signature());
         human::detect(g)
-            .or_else(|| crate::untrusted::suspicious(g))
-            .filter(|c| !r.human.acked.contains(&c.signature()))
+            .filter(open)
+            .or_else(|| crate::untrusted::suspicious(g).filter(open))
     }
 
     /// The model's decision would work a CAPTCHA or type a one-time code.

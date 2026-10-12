@@ -48,7 +48,26 @@ pub fn open_app(name: &str) -> anyhow::Result<()> {
     if name.is_empty() {
         anyhow::bail!("no app name");
     }
+    // The name reaches `sh -c` (Linux fallback) or `cmd /C start`
+    // (Windows): it comes from the model or an MCP client, so it must not
+    // carry shell syntax (`open_app` is not the shell and is not approved
+    // like one).
+    if !plain_app_name(name) {
+        anyhow::bail!("{name:?} is not an app name (no shell syntax in open_app)");
+    }
     platform_open_app(name)
+}
+
+/// No character `sh` or `cmd.exe` reads as syntax (chaining, pipes,
+/// redirection, variables, quotes, substitution).
+fn plain_app_name(name: &str) -> bool {
+    const SPECIAL: &[char] = &[
+        '&', '|', ';', '<', '>', '^', '$', '`', '"', '\'', '%', '!', '\n', '\r',
+    ];
+    // `Program Files (x86)` is a normal Windows path; in `sh` a parenthesis
+    // opens a subshell.
+    let parens = !cfg!(windows) && name.contains(['(', ')']);
+    !parens && !name.contains(SPECIAL)
 }
 
 #[cfg(target_os = "windows")]
@@ -68,7 +87,13 @@ fn platform_open_app(name: &str) -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn platform_open_app(name: &str) -> anyhow::Result<()> {
-    Command::new("open").args(["-a", name]).spawn()?;
+    // Quiet: stdout is the protocol channel under `kai mcp`.
+    Command::new("open")
+        .args(["-a", name])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
     Ok(())
 }
 
@@ -325,5 +350,25 @@ mod tests {
         assert!(normalise_url("ftp://x").is_err());
         assert!(normalise_url("two words").is_err());
         assert!(normalise_url("").is_err());
+    }
+
+    #[test]
+    fn app_names_carry_no_shell_syntax() {
+        for ok in ["firefox", "LibreOffice Writer", "gnome-terminal", "code"] {
+            assert!(plain_app_name(ok), "{ok}");
+        }
+        for bad in [
+            "x; rm -rf ~",
+            "notepad & del x",
+            "a | sh",
+            "a $(id)",
+            "a `id`",
+            "a > f",
+            "a\nrm x",
+            "%COMSPEC%",
+        ] {
+            assert!(!plain_app_name(bad), "{bad}");
+            assert!(open_app(bad).is_err(), "{bad}");
+        }
     }
 }

@@ -257,6 +257,10 @@ pub struct Trace {
     /// Diagnosed recoveries (`Config::recover`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recoveries: Vec<crate::engine::RecoveryRecord>,
+    /// Sensitive text typed this run, in memory only: later screens blank
+    /// it (`crate::untrusted::TypedSecrets`).
+    #[serde(skip)]
+    pub typed_secrets: crate::untrusted::TypedSecrets,
 }
 
 impl Trace {
@@ -276,14 +280,25 @@ impl Trace {
             gate: Vec::new(),
             best_of: None,
             recoveries: Vec::new(),
+            typed_secrets: Default::default(),
         }
     }
 
     pub fn push(&mut self, mut step: StepRecord) {
         self.total_ms += step.timings.total_ms();
-        // Sensitive data Kai typed never reaches the saved trace.
+        // Sensitive data Kai typed never reaches the saved trace: not in the
+        // decision, and not in any raw reply it came from (a batched step's
+        // text sits in the reply of the step before it).
         if let Some(kind) = crate::risk::sensitive_typed(&step.decision) {
-            step.decision.text = Some(format!("[{kind}]"));
+            let label = format!("[{kind}]");
+            if let Some(raw) = step.decision.text.replace(label.clone()) {
+                for s in self.steps.iter_mut().chain(std::iter::once(&mut step)) {
+                    if let Some(reply) = &mut s.call.reply_raw {
+                        *reply = crate::untrusted::blank(reply, &raw, &label);
+                    }
+                }
+                self.typed_secrets.add(&raw);
+            }
         }
         self.steps.push(step);
     }

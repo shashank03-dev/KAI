@@ -29,8 +29,12 @@ const XDOTOOL_WORDS: &[&str] = &[
 ];
 /// Characters that would chain, redirect or substitute in any shell.
 const FORBIDDEN: &[char] = &[';', '&', '>', '<', '`', '$', '(', ')', '{', '}', '\n', '\r'];
-/// Extra PowerShell syntax: splatting/arrays, type literals, static calls.
-const PS_FORBIDDEN: &[&str] = &["@", "[", "]", "::"];
+/// Extra PowerShell syntax: splatting/arrays, type literals, static calls,
+/// and the typographic quotes PowerShell also reads as `'` (they would end
+/// the single-quoted words [`ReadOnlyCmd::powershell_line`] builds).
+const PS_FORBIDDEN: &[&str] = &[
+    "@", "[", "]", "::", "\u{2018}", "\u{2019}", "\u{201A}", "\u{201B}",
+];
 
 /// How the stages run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,6 +316,7 @@ mod tests {
             "Invoke-Expression ls",
             "Get-",
             "Get-Item;Remove-Item x",
+            "Get-Item 'a\u{2019} -Force \u{2019}b'",
             // Mixed flavours, shape limits, bad quoting.
             "Get-Content f | grep x",
             "ls | ls | ls | ls",

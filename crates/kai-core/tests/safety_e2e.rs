@@ -119,6 +119,29 @@ async fn the_user_decides_and_the_model_is_told_screen_text_is_data() {
     );
 }
 
+/// The fake screen, where the search field shows the card number once
+/// anything was typed (a form echoing what Kai entered).
+struct Echo<'a>(&'a Screen);
+impl Echo<'_> {
+    fn echo(&self, mut o: Observation) -> Observation {
+        if self.0.frame.load(std::sync::atomic::Ordering::SeqCst) > 0
+            && let Grounding::Marks(els) = &mut o.grounding
+        {
+            els[3].value = Some("4111-1111-1111-1111".into());
+        }
+        o
+    }
+}
+#[async_trait]
+impl Perceptor for Echo<'_> {
+    async fn observe(&self) -> anyhow::Result<Observation> {
+        Ok(self.echo(self.0.observe().await?))
+    }
+    async fn observe_tree_only(&self) -> anyhow::Result<Observation> {
+        Ok(self.echo(self.0.observe_tree_only().await?))
+    }
+}
+
 #[tokio::test]
 async fn a_card_number_is_confirmed_even_on_autopilot_and_never_saved() {
     let typ = r#"{"thought":"enter card","action":"type","target":4,"text":"4111 1111 1111 1111","risk":"low","expect":"typed"}"#;
@@ -126,7 +149,9 @@ async fn a_card_number_is_confirmed_even_on_autopilot_and_never_saved() {
     let hands = Hands::new(&screen);
     let model = Counting::new(&[typ, DONE]);
     let (approver, stop) = (Recording::default(), flag());
+    let echo = Echo(&screen);
     let mut e = engine(&model, &screen, &hands, &approver, &stop);
+    e.perceptor = &echo;
     e.config.approval = ApprovalLevel::Autopilot;
     e.config.tree_only = false;
     let t = e.run("pay the invoice").await;
@@ -138,11 +163,14 @@ async fn a_card_number_is_confirmed_even_on_autopilot_and_never_saved() {
     let saved = serde_json::to_string(&t).unwrap();
     assert!(!saved.contains("4111 1111"), "the trace holds the number");
     assert!(saved.contains("[card number]"));
+    // Nor does the field that shows it again on the next screen.
+    assert!(!saved.contains("4111"), "the trace holds the number");
     let later = &model.seen()[1].text;
     assert!(
         !later.contains("4111") && later.contains("[card number]"),
         "{later}"
     );
+    assert!(later.contains("[sensitive data]"), "{later}");
     // The explanation names the action, the risk and how it is used.
     let g = Grounding::Marks(vec![]);
     let why = risk::explain(&asked[0], &g).unwrap();

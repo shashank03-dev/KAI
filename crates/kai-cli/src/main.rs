@@ -68,8 +68,10 @@ enum Cmd {
     Bench {
         #[command(subcommand)]
         cmd: Option<bench::BenchCmd>,
+        /// Boxed: far larger than the other variants (`large_enum_variant`
+        /// on Windows, where `PathBuf` is bigger).
         #[command(flatten)]
-        args: bench::BenchArgs,
+        args: Box<bench::BenchArgs>,
     },
     /// Send one real screenshot to the model and report the latency.
     Smoke {
@@ -205,7 +207,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             cmd: Some(bench::BenchCmd::Variants { tasks, out, n }),
             ..
         } => bench::variants::write(&tasks, &out, n),
-        Cmd::Bench { cmd: None, args } => bench::run(args, &all_skills()).await,
+        Cmd::Bench { cmd: None, args } => bench::run(*args, &all_skills()).await,
     }
 }
 

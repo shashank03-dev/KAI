@@ -122,4 +122,18 @@ mod tests {
         assert_eq!(store.recall_in(&cx).len(), 1);
         assert!(store.pending().is_empty());
     }
+
+    #[test]
+    fn a_live_lesson_merged_into_a_pending_twin_is_live() {
+        let store = crate::memory::MemoryStore::in_memory();
+        let p = store
+            .propose(propose(&[dead_end("a"), dead_end("b")], &[]))
+            .unwrap();
+        let mut live = p[0].clone();
+        live.pending = false;
+        store.add(live).unwrap();
+        let cx = crate::memory::recall::Context::new("save it", &["mousepad".into()], &[]);
+        assert_eq!(store.recall_in(&cx).len(), 1);
+        assert!(store.pending().is_empty());
+    }
 }

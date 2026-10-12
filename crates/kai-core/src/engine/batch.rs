@@ -56,7 +56,7 @@ impl Engine<'_> {
                 let t_obs = Instant::now();
                 let now = match self.perceptor.observe_tree_only().await {
                     Ok(mut o) => {
-                        crate::human::redact(&mut o.grounding, &r.human.codes);
+                        r.redact(&mut o.grounding);
                         o.grounding
                     }
                     Err(e) => {
@@ -76,7 +76,11 @@ impl Engine<'_> {
                 log::info!("batch stopped: {:?} needs approval", d.action);
                 break;
             }
-            if crate::human::guard(d, &grounding).is_some() {
+            // A check (CAPTCHA, suspicious text) that appeared since the
+            // reply: the next model step raises it.
+            if crate::human::guard(d, &grounding).is_some()
+                || self.unhandled_check(r, &grounding).is_some()
+            {
                 log::info!("batch stopped: {:?} is the user's to do", d.action);
                 break;
             }

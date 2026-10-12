@@ -81,7 +81,8 @@ pub fn suspicious(g: &Grounding) -> Option<HumanCheck> {
     for list in [INJECTION, PHISHING] {
         for e in els {
             let text = format!("{} {}", e.name, e.value.as_deref().unwrap_or("")).to_lowercase();
-            if let Some(p) = list.iter().find(|p| text.contains(**p)) {
+            // Whole words only: "to any airline" is not "to any ai".
+            if let Some(p) = list.iter().find(|p| crate::risk::has_phrase(&text, p)) {
                 let shown: String = e.name.chars().take(120).collect();
                 return Some(HumanCheck {
                     kind: CheckKind::Suspicious,
@@ -125,6 +126,74 @@ pub fn sensitive(text: &str) -> Option<&'static str> {
         return Some("API key");
     }
     None
+}
+
+/// Sensitive text Kai typed this run ([`sensitive`]), kept in memory only:
+/// never serialised and never printed, so a field that shows it again on a
+/// later screen is blanked before the model, the trace or a lesson sees it.
+#[derive(Clone, Default)]
+pub struct TypedSecrets(Vec<String>);
+
+impl std::fmt::Debug for TypedSecrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} typed secret(s)]", self.0.len())
+    }
+}
+
+/// What a blanked field shows instead.
+pub const REDACTED_SENSITIVE: &str = "[sensitive data]";
+
+/// `s` without spaces and dashes, which do not hide a number.
+fn compact(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect()
+}
+
+impl TypedSecrets {
+    pub fn add(&mut self, raw: &str) {
+        let c = compact(raw);
+        if c.chars().count() >= 4 && !self.0.contains(&c) {
+            self.0.push(c);
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Blank every element name or value that holds a typed secret.
+    pub fn redact(&self, g: &mut Grounding) {
+        let Grounding::Marks(els) = g else { return };
+        if self.0.is_empty() {
+            return;
+        }
+        let holds = |s: &str| {
+            let c = compact(s);
+            self.0.iter().any(|x| c.contains(x.as_str()))
+        };
+        for e in els {
+            if holds(&e.name) {
+                e.name = REDACTED_SENSITIVE.into();
+            }
+            if e.value.as_deref().is_some_and(holds) {
+                e.value = Some(REDACTED_SENSITIVE.into());
+            }
+        }
+    }
+}
+
+/// `text` with `raw` (as written, or JSON-escaped inside a raw reply)
+/// replaced by `label`.
+pub fn blank(text: &str, raw: &str, label: &str) -> String {
+    let escaped = serde_json::to_string(raw).unwrap_or_default();
+    let escaped = escaped.trim_matches('"');
+    let out = text.replace(raw, label);
+    if escaped.is_empty() {
+        out
+    } else {
+        out.replace(escaped, label)
+    }
 }
 
 /// The Luhn checksum card numbers carry.
@@ -247,6 +316,8 @@ mod tests {
             "Password",
             "Verify your email address",
             "System settings",
+            "Fly to any airport",
+            "You have wonderful taste",
         ]);
         assert!(suspicious(&g).is_none());
     }
@@ -261,6 +332,25 @@ mod tests {
         assert_eq!(
             sensitive("-----BEGIN OPENSSH PRIVATE KEY-----"),
             Some("private key")
+        );
+    }
+
+    #[test]
+    fn typed_secrets_are_blanked_wherever_they_show_again() {
+        let mut t = TypedSecrets::default();
+        t.add("4111 1111 1111 1111");
+        let mut g = screen(&["Card number", "Pay"]);
+        if let Grounding::Marks(els) = &mut g {
+            els[0].value = Some("4111-1111-1111-1111".into());
+        }
+        t.redact(&mut g);
+        assert!(!g.as_text().contains("4111"), "{}", g.as_text());
+        assert!(g.as_text().contains(REDACTED_SENSITIVE));
+        assert_eq!(format!("{t:?}"), "[1 typed secret(s)]");
+        let raw = r#"{"action":"type","text":"line1\nline2"}"#;
+        assert_eq!(
+            blank(raw, "line1\nline2", "[private key]"),
+            r#"{"action":"type","text":"[private key]"}"#
         );
     }
 

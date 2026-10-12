@@ -26,6 +26,16 @@ pub(crate) fn set(title: Option<String>, bus: Option<String>) {
     }
 }
 
+/// Forget the title before a new read, so a read that fails or times out
+/// before it sees a window never leaves the previous window's title behind
+/// (a stale title could pass a `window_title` probe). The bus name stays:
+/// events keep counting while the read runs.
+pub(crate) fn clear_title() {
+    if let Ok(mut a) = ACTIVE.lock() {
+        a.title = None;
+    }
+}
+
 /// The active window's title from the last tree read.
 pub fn title() -> Option<String> {
     ACTIVE.lock().ok().and_then(|a| a.title.clone())
@@ -46,5 +56,9 @@ mod tests {
         assert_eq!(super::bus().as_deref(), Some(":1.42"));
         super::set(Some("   ".into()), None);
         assert_eq!(super::title(), None);
+        super::set(Some("Mousepad".into()), Some(":1.7".into()));
+        super::clear_title();
+        assert_eq!(super::title(), None);
+        assert_eq!(super::bus().as_deref(), Some(":1.7"));
     }
 }

@@ -110,7 +110,8 @@ OS. Rules:
   `getactivewindow`, `getwindowfocus`, `getwindowname`, `%1`, `%@`, or a
   window id. `search`, `key`, `type`, `windowkill` and the rest are refused.
 - PowerShell: `Get-<Noun>` cmdlets and `Test-Path`. `@`, `[`, `]` and `::`
-  are also refused (splatting, type literals, static calls). Parameters
+  are also refused (splatting, type literals, static calls), and so are the
+  typographic quotes `‘ ’ ‚ ‛`, which PowerShell reads as `'`. Parameters
   (`-Path`) stay bare, and every other argument is passed single-quoted.
 - Quotes group words, and nothing is expanded. A leading `~/` is replaced by
   the home folder, which is the only expansion.
@@ -243,8 +244,9 @@ Run them: `cargo test -p kai-core --test verify_e2e`,
 - `shell_ro` can read any file the user can read (`grep -q` on a private
   file, for example). Only the exit status and a short reason are kept, never
   the output.
-- No milestone verifier, recovery diagnosis or replanning (StructAgent's
-  other parts). Kai still recovers the way it always has.
+- No milestone verifier or replanning (StructAgent's other parts). A
+  simple recovery diagnosis exists separately and is off by default
+  (`--recover`, [HARNESS.md](HARNESS.md)); it does not touch the ledger.
 - The OpenAI native computer-use loop (`cua.rs`) and Team sub-agents do not
   use the ledger.
 - Windows has no UI Automation events yet (above).

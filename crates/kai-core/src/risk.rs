@@ -207,7 +207,7 @@ pub fn explain(d: &Decision, g: &Grounding) -> Option<String> {
 }
 
 /// `phrase` appears in `hay` on word boundaries.
-fn has_phrase(hay: &str, phrase: &str) -> bool {
+pub(crate) fn has_phrase(hay: &str, phrase: &str) -> bool {
     hay.match_indices(phrase).any(|(i, _)| {
         let before = hay[..i].chars().next_back();
         let after = hay[i + phrase.len()..].chars().next();

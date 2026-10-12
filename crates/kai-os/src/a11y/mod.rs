@@ -52,6 +52,7 @@ pub const MIN_USEFUL: usize = 2;
 
 /// Read the focused window's tree plus the taskbar/panel, within the budget.
 pub async fn read_tree() -> Vec<RawNode> {
+    active::clear_title();
     let fut = platform_read();
     match tokio::time::timeout(READ_BUDGET, fut).await {
         Ok(Ok(nodes)) => nodes,

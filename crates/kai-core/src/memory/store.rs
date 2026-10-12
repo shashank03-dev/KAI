@@ -396,6 +396,11 @@ impl Inner {
                 if x.targets.is_none() {
                     x.targets = l.targets;
                 }
+                // A run learned it live: it is no longer only a proposal
+                // (else a pending twin would hide the live lesson).
+                if !l.pending {
+                    x.pending = false;
+                }
                 x.clone()
             }
             None => {

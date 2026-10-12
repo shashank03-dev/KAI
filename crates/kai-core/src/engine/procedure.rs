@@ -145,7 +145,7 @@ impl Engine<'_> {
             .observe_tree_only()
             .await
             .map_err(|e| format!("reading the screen failed: {e}"))?;
-        crate::human::redact(&mut obs.grounding, &r.human.codes);
+        r.redact(&mut obs.grounding);
         let Grounding::Marks(els) = &obs.grounding else {
             return Err("no accessibility tree on this screen".into());
         };

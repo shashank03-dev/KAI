@@ -6,7 +6,7 @@ use crate::backend::{self, BackendOpts};
 use async_trait::async_trait;
 use kai_core::engine::{ApprovalChoice, Approver, Engine, NoSteering, NullSink};
 use kai_core::mcp::{Server, TaskRunner};
-use kai_core::{Decision, Grounding, RunOptions, Trace};
+use kai_core::{ApprovalLevel, Decision, Grounding, RunOptions, Trace};
 use serde_json::{Value, json};
 use std::process::ExitCode;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -49,7 +49,14 @@ pub async fn serve(o: &BackendOpts) -> anyhow::Result<ExitCode> {
         Ok((b, mut s, keys)) => {
             _local = crate::local_server(b, &mut s).await.ok().flatten();
             match (backend::config(&s, &o.ab), s.clients(&keys)) {
-                (Ok((config, _)), Ok(clients)) => model = Some((config, clients)),
+                (Ok((mut config, _)), Ok(clients)) => {
+                    // Nobody can approve here, so autopilot would let high-risk
+                    // steps run unasked: they are skipped instead.
+                    if config.approval == ApprovalLevel::Autopilot {
+                        config.approval = ApprovalLevel::HighRiskOnly;
+                    }
+                    model = Some((config, clients));
+                }
                 (Err(e), _) | (_, Err(e)) => eprintln!("kai mcp: no kai_run_task: {e}"),
             }
         }
