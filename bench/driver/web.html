@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- Driver-matrix fixture, web (Firefox): the same three widgets, with the
+     state in the page title (Firefox puts it in the window title). -->
+<html><head><meta charset="utf-8"><title>kai-fixture web</title></head>
+<body style="font: 16px sans-serif; padding: 24px">
+<p><button id="apply">Apply</button></p>
+<p><label><input type="checkbox" id="remember"> Remember me</label></p>
+<p><input type="text" id="name" aria-label="Name"></p>
+<script>
+let clicks = 0;
+const show = () => {
+  document.title = `kai-fixture web | clicks=${clicks} checked=${+remember.checked} name=${name.value}`;
+};
+apply.onclick = () => { clicks++; show(); };
+remember.onchange = show;
+name.oninput = show;
+show();
+</script>
+</body></html>
