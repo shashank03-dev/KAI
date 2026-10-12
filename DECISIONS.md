@@ -388,3 +388,41 @@ statistically solid; docs/ROADMAP.md requires a 100+ task held-out set with
   through the Gemini API*; OpenAI's terms likewise. So the default training
   data is Gemma's own runs on the owner's Droplet; GPT/Gemini-API runs stay
   evaluation-only. Not legal advice — the owner should confirm.
+
+## App UI/UX audit (2026-10-12)
+
+Audit of every screen against `screenshots/` and the page code; fixes:
+
+- Raw enum names reached the UI (`StepLimit` in the task list, "Run ended:
+  StepLimit", `Gui`/`Shell` in the team plan, History's outcome line). All go
+  through `state::outcome_text` now; a stopped run is amber, not red.
+- Skill details: the YAML frontmatter rendered as one giant setext heading
+  (Markdown reads the closing `---` as an underline), and `FileTree` showed only
+  an empty search box. The sheet now shows the description, a plain file list
+  and the SKILL.md body without frontmatter.
+- Approval dialog said "This step is high risk" even under "Every action";
+  it now says "Allow this step? Clicking “Send”", gives Kai's reason, and
+  mentions high risk only when the step is marked so.
+- Theme: the title-bar toggle, Ctrl+Shift+L and the palette didn't save the
+  choice (Settings › Appearance and the next start disagreed with the screen);
+  Appearance › System didn't follow the OS. Both fixed.
+- Skill on/off switches were lost on restart: kept in
+  `Settings::disabled_skills`.
+- Settings content ran into the window's right edge: a 46 rem column with
+  right/bottom padding.
+- Model & server: Save gave no feedback (toast now, unless a key failed); a
+  test of "This computer" had nowhere to show its result.
+- Confirm before destructive actions: Memory › Clear all and removing a
+  downloaded model (with the space it frees).
+- History shows a hint instead of a blank pane when no run is picked; the
+  queued view says "starts next" / "n tasks ahead" / "queue paused"; the
+  status bar's offline tooltip gives the reason; the palette offers only the
+  run controls that apply; Safety shows the registered stop shortcut as keys
+  (or that none is registered); onboarding copy ("Your DigitalOcean server",
+  local models mentioned).
+
+Not verified by a build here: this container can't fetch the pinned Ely GPUI
+Components commit (GitHub 401, codeload 403), so `kai-app` was not compiled or
+re-captured. gpui calls were checked against the `gpui-pre 0.3.8` source and
+Ely calls follow existing usages in the crate; kai-core builds, passes its
+tests and clippy. Screenshots in `screenshots/` predate these fixes.

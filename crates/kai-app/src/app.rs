@@ -240,13 +240,17 @@ impl KaiApp {
         cx.notify();
     }
 
-    pub(crate) fn toggle_theme(cx: &mut App) {
-        let next = if cx.theme().is_dark() {
-            Mode::Light
+    /// Flip light/dark and remember it, so Settings › Appearance and the
+    /// next start agree with what is on screen.
+    pub(crate) fn toggle_theme(&mut self, cx: &mut Context<Self>) {
+        let (next, name) = if cx.theme().is_dark() {
+            (Mode::Light, "light")
         } else {
-            Mode::Dark
+            (Mode::Dark, "dark")
         };
         Theme::set_mode(next, cx);
+        self.settings.theme = name.into();
+        self.save_settings(cx);
     }
 }
 
@@ -294,6 +298,7 @@ impl Render for KaiApp {
 
         let nav = cx.entity();
         let palette_btn = cx.entity();
+        let theme_toggler = cx.entity();
         let theme_btn = IconButton::new(
             "theme",
             if cx.theme().is_dark() {
@@ -303,7 +308,7 @@ impl Render for KaiApp {
             },
         )
         .size(ControlSize::Sm)
-        .on_click(|_, _, cx| Self::toggle_theme(cx));
+        .on_click(move |_, _, cx| theme_toggler.update(cx, |a, cx| a.toggle_theme(cx)));
         let title = TitleBar::new("title")
             .title(t(cx, "app.name", &[]))
             .action(
@@ -377,8 +382,13 @@ impl Render for KaiApp {
         let palette = self.palette.then(|| self.palette(cx).into_any_element());
         let status = self.status_bar(cx).into_any_element();
 
-        let (on_palette, on_stop, on_new, on_short) =
-            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let (on_palette, on_stop, on_new, on_short, on_theme) = (
+            cx.entity(),
+            cx.entity(),
+            cx.entity(),
+            cx.entity(),
+            cx.entity(),
+        );
         div()
             .key_context("KaiRoot")
             .size_full()
@@ -396,7 +406,9 @@ impl Render for KaiApp {
                     cx.notify();
                 })
             })
-            .on_action(|_: &ToggleTheme, _, cx| Self::toggle_theme(cx))
+            .on_action(move |_: &ToggleTheme, _, cx| {
+                on_theme.update(cx, |a, cx| a.toggle_theme(cx))
+            })
             .child(
                 FocusScope::new(&self.focus)
                     .root()

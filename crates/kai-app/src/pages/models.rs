@@ -11,6 +11,7 @@ use ely_gpui_component::{
     feedback::Callout,
     layout::{Card, CardHeader, Page, ScrollArea},
     motion::Spinner,
+    overlays::ConfirmDialog,
     primitives::{Icon, IconName, Severity},
     theme::{ActiveTheme, ControlSize, TextSize},
 };
@@ -169,7 +170,35 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             "Kai downloads only when you press a button. The runtime is llama.cpp; models and runtime are kept in {}. The server listens on 127.0.0.1 only.",
             l.manager.root.display()
         ));
-    ScrollArea::new("models").vertical().child(
+    let confirm = app.pages.confirm_remove_model.clone().map(|id| {
+        let (closer, doer) = (cx.entity(), cx.entity());
+        let size = l
+            .ranked
+            .iter()
+            .find(|r| r.entry.id == id)
+            .map(|r| format!(" and frees about {:.1} GB", r.entry.download_gb))
+            .unwrap_or_default();
+        ConfirmDialog::new(
+            "confirm-remove-model",
+            format!("Remove {}?", l.label(&id)),
+            format!("This deletes the downloaded model from this computer{size}. You can download it again later."),
+            move |_, cx| {
+                closer.update(cx, |a, cx| {
+                    a.pages.confirm_remove_model = None;
+                    cx.notify();
+                })
+            },
+        )
+        .confirm("Remove")
+        .destructive()
+        .on_confirm(move |_, cx| {
+            doer.update(cx, |a, cx| {
+                a.pages.confirm_remove_model = None;
+                a.local_remove(&id, cx);
+            })
+        })
+    });
+    let page = ScrollArea::new("models").vertical().child(
         Page::new("Models")
             .subtitle("Run an open model on this computer: free, private, no key. Your screen never leaves this machine.")
             .child(hardware(l, cx))
@@ -181,7 +210,8 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             }))
             .child(div().flex().flex_col().gap_3().children(cards))
             .child(note),
-    )
+    );
+    div().size_full().child(page).children(confirm)
 }
 
 #[cfg(test)]

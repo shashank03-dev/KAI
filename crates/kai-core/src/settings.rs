@@ -123,6 +123,8 @@ pub struct Settings {
     /// After a failed run, ask the model once for up to two lessons (one
     /// extra model call per such run).
     pub reflect: bool,
+    /// Skills the user switched off on the Skills page, by name.
+    pub disabled_skills: Vec<String>,
 }
 
 impl Default for Settings {
@@ -149,6 +151,7 @@ impl Default for Settings {
             local_port: crate::models::DEFAULT_PORT,
             learn: true,
             reflect: false,
+            disabled_skills: Vec::new(),
         }
     }
 }

@@ -113,7 +113,8 @@ fn main() {
         });
 }
 
-fn system_mode(cx: &App) -> Mode {
+/// Light or dark, as the OS currently asks.
+pub(crate) fn system_mode(cx: &App) -> Mode {
     match cx.window_appearance() {
         gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark => Mode::Dark,
         _ => Mode::Light,

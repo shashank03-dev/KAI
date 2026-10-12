@@ -21,6 +21,13 @@ impl KaiApp {
             Conn::Fallback(s) => (Connectivity::Reconnecting, format!("Gemini fallback · {s}")),
             Conn::Offline(_) => (Connectivity::Offline, "No model reachable".to_string()),
         };
+        // The reason stays one hover away instead of a bare "No model reachable".
+        let tip = match &self.conn {
+            Conn::Offline(reason) => {
+                format!("{}. Click to test again.", reason.trim_end_matches('.'))
+            }
+            _ => "Model connection. Click to test again.".to_string(),
+        };
         let run = self.active_state().unwrap_or_else(|| self.run.clone());
         let latency = run
             .read(cx)
@@ -39,7 +46,7 @@ impl KaiApp {
             .left(
                 StatusBarItem::new("conn-label")
                     .label(label)
-                    .tooltip("Model connection. Click to test again.")
+                    .tooltip(tip)
                     .on_click(move |_, window, cx| {
                         this.update(cx, |app, cx| app.check_connection(window, cx))
                     }),
@@ -77,33 +84,43 @@ impl KaiApp {
             }
             c
         };
+        // Run controls only while a run has the screen, and only the one that applies.
+        let paused = self.active_state().map(|s| s.read(cx).paused);
+        let mut kai = vec![cmd("new", "New task", IconName::Plus, Some("ctrl-n"))];
+        if let Some(paused) = paused {
+            kai.push(cmd(
+                "stop",
+                "Stop Kai",
+                IconName::CircleStop,
+                Some("ctrl-."),
+            ));
+            kai.push(if paused {
+                cmd("resume", "Resume the running task", IconName::Play, None)
+            } else {
+                cmd("pause", "Pause the running task", IconName::Pause, None)
+            });
+        }
+        kai.extend([
+            cmd(
+                "theme",
+                "Toggle light / dark",
+                IconName::Moon,
+                Some("ctrl-shift-l"),
+            ),
+            cmd(
+                "shortcuts",
+                "Keyboard shortcuts",
+                IconName::Keyboard,
+                Some("ctrl-/"),
+            ),
+        ]);
         CommandPalette::new("palette", move |_, cx| {
             closer.update(cx, |app, cx| {
                 app.palette = false;
                 cx.notify();
             })
         })
-        .group(
-            "Kai",
-            [
-                cmd("new", "New task", IconName::Plus, Some("ctrl-n")),
-                cmd("stop", "Stop Kai", IconName::CircleStop, Some("ctrl-.")),
-                cmd("pause", "Pause the running task", IconName::Pause, None),
-                cmd("resume", "Resume the running task", IconName::Play, None),
-                cmd(
-                    "theme",
-                    "Toggle light / dark",
-                    IconName::Moon,
-                    Some("ctrl-shift-l"),
-                ),
-                cmd(
-                    "shortcuts",
-                    "Keyboard shortcuts",
-                    IconName::Keyboard,
-                    Some("ctrl-/"),
-                ),
-            ],
-        )
+        .group("Kai", kai)
         .group(
             "Go to",
             [
@@ -187,7 +204,7 @@ impl KaiApp {
                         app.check_connection(window, cx);
                     }
                     "stop" => app.stop(cx),
-                    "theme" => Self::toggle_theme(cx),
+                    "theme" => app.toggle_theme(cx),
                     "shortcuts" => app.shortcuts = true,
                     v if v.starts_with("go:") => {
                         if let Some(p) = Page::from_key(&v[3..]) {

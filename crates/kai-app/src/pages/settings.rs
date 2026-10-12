@@ -3,13 +3,14 @@
 use crate::app::KaiApp;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, SegmentedControl},
-    feedback::Toast,
+    feedback::{InlineMessage, Toast},
     forms::Switch,
     layout::ScrollArea,
     overlays::ConfirmDialog,
     primitives::{IconName, Severity},
     settings::{Appearance, KeyboardShortcutsList, SettingsLayout, SettingsSection, ThemeSelector},
     theme::{ActiveTheme, Mode, TextSize, Theme},
+    typography::KbdCombo,
 };
 use gpui::{Context, IntoElement, ParentElement, Styled, Window, div};
 use kai_core::risk::ApprovalLevel;
@@ -37,6 +38,27 @@ pub(crate) fn row(
         .child(control)
 }
 
+/// The stop shortcut actually registered (it can differ from the chosen one
+/// when another app holds it), or why there is none.
+fn stop_row(cx: &Context<KaiApp>) -> impl IntoElement {
+    match crate::StopHotkey::label(cx) {
+        Some(keys) => row(
+            "Stop shortcut",
+            "Works from any app. Pushing the pointer into the top-left corner of the screen also stops Kai.",
+            div().flex().child(KbdCombo::new(&keys)),
+            cx,
+        )
+        .into_any_element(),
+        None => row(
+            "Stop shortcut",
+            "Another app holds the shortcut, so it isn't registered. Stop Kai with the top-left corner, Ctrl+. in Kai, or Stop in the mini window.",
+            InlineMessage::new(Severity::Warning, "No global stop shortcut this session."),
+            cx,
+        )
+        .into_any_element(),
+    }
+}
+
 fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
     let (level, steps, team) = (cx.entity(), cx.entity(), cx.entity());
     let sel = match app.settings.approval {
@@ -55,7 +77,7 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         .row(row("Limits", &format!("At most {} steps and {} minutes per task.", app.settings.max_steps, app.settings.max_minutes), SegmentedControl::new("limits", app.settings.max_steps.to_string())
             .segment("20", "20 steps", None).segment("40", "40 steps", None).segment("80", "80 steps", None)
             .on_change(move |v, _, cx| steps.update(cx, |a, cx| { a.settings.max_steps = v.parse().unwrap_or(40); a.save_settings(cx); })), cx))
-        .row(row("Stop shortcut", &format!("{} from any app, or the pointer in the top-left corner.", app.settings.kill_hotkey), div(), cx))
+        .row(stop_row(cx))
         .row(Switch::new("use-executor", app.settings.use_executor).label("Fast executor: a local decision model (jevos) carries out Gemma's plan — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_executor = v; a.save_settings(cx); }) }))
         .row(Switch::new("team-default", app.settings.team_mode).label("Use sub-agents by default").on_change(move |v, _, cx| team.update(cx, |a, cx| { a.settings.team_mode = v; a.team = v; a.save_settings(cx); })))
 }
@@ -72,13 +94,11 @@ fn appearance(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         current,
         move |a, _, cx| {
             let mode = match a {
-                Appearance::Dark => Some(Mode::Dark),
-                Appearance::Light => Some(Mode::Light),
-                Appearance::System => None,
+                Appearance::Dark => Mode::Dark,
+                Appearance::Light => Mode::Light,
+                Appearance::System => crate::system_mode(cx),
             };
-            if let Some(m) = mode {
-                Theme::set_mode(m, cx);
-            }
+            Theme::set_mode(mode, cx);
             me.update(cx, |app, cx| {
                 app.settings.theme = match a {
                     Appearance::Dark => "dark",
@@ -175,6 +195,28 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         _ => crate::pages::model_settings::model(app, cx).into_any_element(),
     };
     let picker = cx.entity();
+    let confirm_memory = app.pages.confirm_clear_memory.then(|| {
+        let (closer, doer) = (cx.entity(), cx.entity());
+        ConfirmDialog::new(
+            "confirm-clear-memory",
+            "Forget everything Kai learned?",
+            "Every lesson on this computer is deleted. Kai will have to learn them again. This can't be undone.",
+            move |_, cx| {
+                closer.update(cx, |a, cx| {
+                    a.pages.confirm_clear_memory = false;
+                    cx.notify();
+                })
+            },
+        )
+        .confirm("Clear all")
+        .destructive()
+        .on_confirm(move |_, cx| {
+            doer.update(cx, |a, cx| {
+                a.pages.confirm_clear_memory = false;
+                crate::pages::memory::clear_all(a, cx);
+            })
+        })
+    });
     let confirm = app.pages.confirm_delete.then(|| {
         let (closer, doer) = (cx.entity(), cx.entity());
         ConfirmDialog::new("confirm-delete", "Delete all history?", "Every saved run and its screenshots are removed from this computer. This can't be undone.", move |_, cx| {
@@ -219,7 +261,20 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     })
                 },
             )
-            .page(ScrollArea::new("settings-page").vertical().child(page)),
+            // A readable column with room on the right and at the end, so
+            // fields don't run into the window edge on wide windows.
+            .page(
+                ScrollArea::new("settings-page").vertical().child(
+                    div()
+                        .w_full()
+                        .max_w(gpui::rems(46.))
+                        .pt_2()
+                        .pr_6()
+                        .pb_8()
+                        .child(page),
+                ),
+            ),
         )
         .children(confirm)
+        .children(confirm_memory)
 }

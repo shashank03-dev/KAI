@@ -8,7 +8,6 @@ use ely_gpui_component::{
     feedback::{EmptyState, InlineMessage, Toast},
     forms::{DropZone, SearchInput, Switch},
     layout::{Page, ScrollArea, Sheet},
-    lists::FileTree,
     primitives::{IconName, Place, Severity},
     theme::{ActiveTheme, TextSize},
 };
@@ -94,7 +93,10 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                                     } else {
                                         a.pages.disabled.insert(n1.clone());
                                     }
-                                    cx.notify();
+                                    // Kept across restarts.
+                                    a.settings.disabled_skills =
+                                        a.pages.disabled.iter().cloned().collect();
+                                    a.save_settings(cx);
                                 })
                             }),
                     )
@@ -146,6 +148,30 @@ fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
         Err(e) => InlineMessage::new(Severity::Danger, e.to_string()),
     };
     let md = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
+    // The frontmatter is already shown above (name, description); left in,
+    // Markdown reads its closing `---` as a heading underline.
+    let md = body_of(&md).to_string();
+    let theme = cx.theme();
+    let file_list = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_size(theme.text_size(TextSize::Sm))
+                .text_color(theme.colors.fg_muted)
+                .child(format!("Files ({})", files.len())),
+        )
+        .children(files.into_iter().map(|f| {
+            div()
+                .text_size(theme.text_size(TextSize::Sm))
+                .font_family(theme.mono_family.clone())
+                .child(f)
+        }));
+    let description = div()
+        .text_size(theme.text_size(TextSize::Sm))
+        .text_color(theme.colors.fg_muted)
+        .child(s.front.description.clone());
     Sheet::new(
         "skill-sheet",
         Place::Right,
@@ -163,6 +189,7 @@ fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
                 .flex()
                 .flex_col()
                 .gap_3()
+                .child(description)
                 .child(valid)
                 .children((!s.steps.is_empty()).then(|| {
                     InlineMessage::new(
@@ -173,11 +200,30 @@ fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
                         ),
                     )
                 }))
-                .child(div().h_40().child(FileTree::new("skill-files", files)))
+                .child(file_list)
                 .child(MarkdownRenderer::new("skill-md", md)),
         ),
     )
     .into_any_element()
+}
+
+/// SKILL.md without its `---` frontmatter block.
+pub fn body_of(md: &str) -> &str {
+    let Some(rest) = md.strip_prefix("---") else {
+        return md;
+    };
+    // The closing fence is a line of its own.
+    match rest.find("\n---") {
+        Some(end) => {
+            let after = &rest[end + 4..];
+            after
+                .find('\n')
+                .map(|nl| &after[nl + 1..])
+                .unwrap_or("")
+                .trim_start_matches(['\r', '\n'])
+        }
+        None => md,
+    }
 }
 
 /// Draft a SKILL.md from the finished run and open the editor.
@@ -419,6 +465,14 @@ mod tests {
         let s = kai_core::skill::load_from_str(&md, Path::new(&name)).unwrap();
         assert_eq!(s.steps.len(), 1);
         assert_eq!(s.front.name, "open-bmsce-ac-in-and-find");
+    }
+
+    #[test]
+    fn frontmatter_is_left_out_of_the_body() {
+        let md = "---\nname: x\ndescription: y\n---\n# Title\n\nBody\n";
+        assert_eq!(body_of(md), "# Title\n\nBody\n");
+        assert_eq!(body_of("# No frontmatter"), "# No frontmatter");
+        assert_eq!(body_of("---\nunclosed"), "---\nunclosed");
     }
 
     #[test]

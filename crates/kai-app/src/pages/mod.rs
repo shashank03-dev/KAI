@@ -55,6 +55,10 @@ pub struct PageState {
     pub testing: String,
     pub test_results: Vec<(String, Result<String, String>)>,
     pub confirm_delete: bool,
+    /// Settings › Memory › Clear all, waiting for a yes.
+    pub confirm_clear_memory: bool,
+    /// Models: the downloaded model waiting for a yes before it is deleted.
+    pub confirm_remove_model: Option<String>,
     /// Settings › Memory: the "Add a lesson" field, the lessons, and skill
     /// suggestions from proven lessons.
     pub lesson_draft: Entity<TextInput>,
@@ -90,7 +94,7 @@ impl PageState {
             openai_key: masked("OpenAI API key (stored in the OS keychain)", window, cx),
             skill_draft: cx.new(|cx| TextInput::new(window, cx).multi_line(12, 40)),
             answer: field("Type your answer", window, cx),
-            disabled: BTreeSet::new(),
+            disabled: settings.disabled_skills.iter().cloned().collect(),
             open_skill: None,
             drafting: false,
             settings_section: "model".into(),
@@ -103,6 +107,8 @@ impl PageState {
             testing: String::new(),
             test_results: Vec::new(),
             confirm_delete: false,
+            confirm_clear_memory: false,
+            confirm_remove_model: None,
             lesson_draft: field("e.g. Save notes to ~/Notes", window, cx),
             lessons: Vec::new(),
             memory_suggestions: Vec::new(),

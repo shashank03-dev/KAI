@@ -36,13 +36,29 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
         v
     });
 
-    Dialog::new("approval", format!("Kai wants to: {what}"), move |_, cx| {
-        let choice = on_close.get();
-        app.update(cx, |a, cx| a.answer(choice, cx));
-    })
+    // Asked for because of the approval level, the model's risk or a
+    // payment/password rule: say only what is known.
+    let why = if p.decision.risk == kai_core::schema::Risk::High {
+        "Kai marked this step high risk. "
+    } else {
+        ""
+    };
+    let reason = p.decision.thought.trim().trim_end_matches('.');
+    let reason = if reason.is_empty() {
+        String::new()
+    } else {
+        format!("Kai's reason: {reason}. ")
+    };
+    Dialog::new(
+        "approval",
+        format!("Allow this step? {what}"),
+        move |_, cx| {
+            let choice = on_close.get();
+            app.update(cx, |a, cx| a.answer(choice, cx));
+        },
+    )
     .detail(format!(
-        "This step is high risk ({}). Nothing happens until you choose. Escape stops the run.",
-        p.decision.thought
+        "{reason}{why}Nothing happens until you choose. Escape stops the run."
     ))
     .children(frame)
     .child(

@@ -156,7 +156,7 @@ fn sub_node(s: &SubView) -> TreeNode {
         SubState::Finished => ("finished".to_string(), Tone::Neutral),
         SubState::Ended(Outcome::Success) => ("done".to_string(), Tone::Success),
         SubState::Ended(Outcome::Stopped) => ("stopped".to_string(), Tone::Warning),
-        SubState::Ended(o) => (format!("{o:?}").to_lowercase(), Tone::Danger),
+        SubState::Ended(o) => (crate::state::outcome_text(o).to_lowercase(), Tone::Danger),
     };
     let note = match s.steps {
         Some(n) => format!("{note} · {n} steps"),

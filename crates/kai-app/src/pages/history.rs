@@ -187,8 +187,11 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         .text_size(theme.text_size(TextSize::Sm))
                         .text_color(theme.colors.fg_muted)
                         .child(format!(
-                            "{:?} · {} steps · step p50 {p50} ms · p95 {p95} ms",
-                            trace.outcome.unwrap_or(kai_core::Outcome::Failed),
+                            "{} · {} steps · step p50 {p50} ms · p95 {p95} ms",
+                            trace
+                                .outcome
+                                .map(crate::state::outcome_text)
+                                .unwrap_or("Ended without a result"),
                             trace.steps.len()
                         )),
                 )
@@ -258,9 +261,18 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     .child(div().flex_1().min_h_0().child(list)),
             )
             .child(
-                ScrollArea::new("trace-detail")
-                    .vertical()
-                    .child(div().flex_1().min_w_0().children(detail)),
+                div().flex_1().min_w_0().h_full().child(
+                    ScrollArea::new("trace-detail")
+                        .vertical()
+                        .child(div().w_full().child(detail.unwrap_or_else(|| {
+                            div()
+                                .pt_8()
+                                .w_full()
+                                .text_center()
+                                .text_color(theme.colors.fg_muted)
+                                .child("Pick a run on the left to see where its time went and the frames Kai saw.")
+                        }))),
+                ),
             )
             .into_any_element()
     };

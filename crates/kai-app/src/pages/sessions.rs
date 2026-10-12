@@ -45,7 +45,16 @@ fn status(r: &RunState, place: usize, cx: &Context<KaiApp>) -> (IconName, Hsla, 
                 c.success,
                 format!("Done · {} steps", r.steps.len()),
             ),
-            Some(o) => (IconName::CircleStop, c.danger, format!("{o:?}")),
+            Some(o @ (kai_core::Outcome::Stopped | kai_core::Outcome::AskedUser)) => (
+                IconName::CircleStop,
+                c.warning,
+                crate::state::outcome_text(o).to_string(),
+            ),
+            Some(o) => (
+                IconName::CircleX,
+                c.danger,
+                crate::state::outcome_text(o).to_string(),
+            ),
             None => (IconName::CircleStop, c.fg_muted, "Ended".into()),
         },
     }
@@ -177,7 +186,13 @@ pub fn queued(app: &KaiApp, cx: &Context<KaiApp>) -> AnyElement {
         .child(InlineMessage::new(
             Severity::Info,
             format!(
-                "Queued. Kai runs one task at a time because tasks share your mouse and keyboard; {ahead} ahead of this one."
+                "Queued. Kai runs one task at a time because tasks share your mouse and keyboard. {}",
+                match (ahead, app.queue_held) {
+                    (_, true) => "The queue is paused after a stop; resume it in the task list.".to_string(),
+                    (0, _) => "This one starts next.".to_string(),
+                    (1, _) => "1 task is ahead of it.".to_string(),
+                    (n, _) => format!("{n} tasks are ahead of it."),
+                }
             ),
         ))
         .child(

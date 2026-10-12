@@ -199,7 +199,10 @@ fn actions(r: &Ranked, l: &LocalState, in_use: bool, me: &Entity<KaiApp>) -> Any
                 .icon(IconName::Trash2)
                 .variant(ButtonVariant::Ghost)
                 .disabled(busy || running)
-                .on_click(click(|a, m, cx| a.local_remove(m, cx))),
+                .on_click(click(|a, m, cx| {
+                    a.pages.confirm_remove_model = Some(m.to_string());
+                    cx.notify();
+                })),
         )
         .into_any_element()
 }

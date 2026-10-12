@@ -77,7 +77,11 @@ fn plan(r: &RunState) -> Option<AgentPlan> {
                         crate::team::SubState::Ended(_) => StepState::Failed,
                     })
                     .unwrap_or(StepState::Waiting);
-                (format!("{} · {:?}", s.goal, s.kind), state)
+                let kind = match s.kind {
+                    kai_core::orchestrator::Kind::Gui => "screen",
+                    kai_core::orchestrator::Kind::Shell => "terminal",
+                };
+                (format!("{} · {kind}", s.goal), state)
             }),
         )
     })
