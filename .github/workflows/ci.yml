@@ -6,6 +6,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Full debug info for every dependency (GPUI, Ely, wgpu…) fills the
+  # Ubuntu runner's disk during `cargo test`; tests don't need it.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   check:
@@ -23,6 +27,8 @@ jobs:
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: |
+          # Free ~20 GB of preinstalled tools this build never uses.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \
