@@ -23,6 +23,11 @@ jobs:
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: |
+          # Free ~20 GB of preinstalled tools this build never uses: the test
+          # build of the GPUI/Ely stack filled the runner's disk. (Not done
+          # with CARGO_PROFILE_* env vars: those change rust-cache's key, and
+          # the pinned Ely git dependency currently cannot be cloned fresh.)
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \

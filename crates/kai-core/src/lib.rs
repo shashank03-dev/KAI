@@ -12,6 +12,7 @@ pub mod element;
 pub mod engine;
 pub mod executor;
 pub mod failure;
+pub mod human;
 pub mod memory;
 pub mod models;
 pub mod orchestrator;
@@ -36,6 +37,7 @@ pub use engine::{
     Observation, ObserveTiming, Perceptor, RunOptions,
 };
 pub use failure::{Category, Failure};
+pub use human::{CheckKind, HumanCheck, HumanHelper, HumanReply, OneTimeCode};
 pub use memory::{Lesson, MemoryStore};
 pub use plan_cache::PlanCache;
 pub use recorder::{RunMeta, TraceRecorder};

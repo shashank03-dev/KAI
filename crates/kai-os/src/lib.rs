@@ -12,6 +12,7 @@ pub mod kill;
 pub mod launch;
 pub mod local;
 pub mod marks;
+pub mod notify;
 pub mod perceive;
 pub mod permissions;
 pub mod secrets;

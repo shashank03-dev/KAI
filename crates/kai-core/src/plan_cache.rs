@@ -151,13 +151,15 @@ pub fn is_replayable(d: &Decision) -> bool {
 }
 
 /// The leading run of replayable steps that executed without an approval
-/// pause or an error.
+/// pause, a human check (`docs/HUMAN_CHECKS.md`: never replayed blind) or an
+/// error.
 pub fn deterministic_prefix(trace: &Trace) -> Vec<Decision> {
     trace
         .steps
         .iter()
         .take_while(|s| {
             s.approval.is_none()
+                && s.path.as_deref() != Some("human")
                 && is_replayable(&s.decision)
                 && !s.output.as_deref().is_some_and(|o| o.starts_with("ERROR"))
         })
@@ -245,6 +247,15 @@ mod tests {
         let p = deterministic_prefix(&t);
         assert_eq!(p.len(), 2);
         assert_eq!(p[0].action, Action::OpenUrl);
+    }
+
+    #[test]
+    fn prefix_stops_at_a_human_check() {
+        // A keyboard step the user settled (e.g. a code typed for them) is
+        // replayable on its own, but never after a pause for the user.
+        let mut t = trace("x", &sample()[..2], Outcome::Success);
+        t.steps[1].path = Some("human".into());
+        assert_eq!(deterministic_prefix(&t).len(), 1);
     }
 
     #[test]

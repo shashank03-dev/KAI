@@ -1,12 +1,14 @@
 //! The bridge between the agent and the UI. The engine runs on a small tokio
 //! runtime; it reports through a channel the UI drains, and asks for approval
-//! through a one-shot the UI answers. The UI thread never waits on the
-//! network, the screen or the model.
+//! (or for the user's help at a CAPTCHA, one-time code or question) through a
+//! one-shot the UI answers. The UI thread never waits on the network, the
+//! screen or the model.
 
 use crate::control::RunControl;
 use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
 use kai_core::engine::{ApprovalChoice, Approver, EngineEvent, EventSink};
+use kai_core::human::{HumanCheck, HumanHelper, HumanReply};
 use kai_core::orchestrator::{Orchestrator, Plan};
 use kai_core::settings::{Keys, Settings};
 use kai_core::{Config, Decision, Engine, Grounding, Images, Rect, Skill, Trace};
@@ -25,6 +27,8 @@ pub enum Ui {
         path: PathBuf,
     },
     Approval(Pending),
+    /// The run is paused until the user gets past a human check.
+    Human(HumanPending),
     Plan(Plan),
     /// Team mode's final report: the plan that ran and each sub-agent's end.
     Report {
@@ -52,6 +56,13 @@ pub struct Pending {
     /// The element's name, when the step targets one.
     pub element: Option<String>,
     pub reply: oneshot::Sender<ApprovalChoice>,
+}
+
+/// A CAPTCHA, one-time code, sign-in approval or question waiting on the
+/// user. Dropping `reply` (window closed, run stopped) counts as Stop.
+pub struct HumanPending {
+    pub check: HumanCheck,
+    pub reply: oneshot::Sender<HumanReply>,
 }
 
 /// Lives for the app: the runtime, the hands (one input thread) and the stop flag.
@@ -228,6 +239,7 @@ async fn drive(
         dir: dir.clone(),
     };
     let approver = UiApprover { tx: tx.clone() };
+    let human = UiHuman { tx: tx.clone() };
 
     if team {
         let orch = Orchestrator {
@@ -239,6 +251,7 @@ async fn drive(
             interrupt: control,
             sink: &sink,
             steering: control,
+            human: Some(&human),
             skills: &skills,
             config,
             parallelism: settings.parallelism,
@@ -286,6 +299,7 @@ async fn drive(
             sink: &sink,
             steering: control,
             verifier: None,
+            human: Some(&human),
             skills: &skills,
             config,
         };
@@ -408,6 +422,33 @@ impl Approver for UiApprover {
         }
         // A closed window or dropped dialog counts as Stop.
         answer.await.unwrap_or(ApprovalChoice::Stop)
+    }
+}
+
+/// Asks the user through the app: a desktop notification, then the mini
+/// window and the main window's dialog (see `human.rs`).
+struct UiHuman {
+    tx: mpsc::UnboundedSender<Ui>,
+}
+
+#[async_trait]
+impl HumanHelper for UiHuman {
+    async fn ask(&self, check: &HumanCheck) -> HumanReply {
+        let (reply, answer) = oneshot::channel();
+        if self
+            .tx
+            .unbounded_send(Ui::Human(HumanPending {
+                check: check.clone(),
+                reply,
+            }))
+            .is_err()
+        {
+            return HumanReply::Stop;
+        }
+        // The dialog is up; now the notification (bounded, best effort).
+        kai_os::notify::desktop(check.kind.title(), &check.prompt).await;
+        // A closed window or dropped dialog counts as Stop.
+        answer.await.unwrap_or(HumanReply::Stop)
     }
 }
 

@@ -1,8 +1,10 @@
-//! Headless runs in a terminal: print each step as it happens, and ask on
-//! stdin before a risky action.
+//! Headless runs in a terminal: print each step as it happens, ask on stdin
+//! before a risky action, and ask the person at a CAPTCHA, one-time code,
+//! sign-in approval or question (`docs/HUMAN_CHECKS.md`).
 
 use async_trait::async_trait;
 use kai_core::engine::{ApprovalChoice, Approver, EngineEvent, EventSink};
+use kai_core::human::{CheckKind, HumanCheck, HumanHelper, HumanReply, OneTimeCode};
 use kai_core::{Decision, Grounding};
 use std::io::{BufRead, Write};
 
@@ -27,7 +29,12 @@ impl EventSink for Printer {
             ),
             EngineEvent::Finished { outcome } => eprintln!("  ⏹ {outcome:?}"),
             EngineEvent::Observed { .. } => {}
-            EngineEvent::Output { .. } | EngineEvent::Steered { .. } => {}
+            EngineEvent::HumanDone { result, .. } => {
+                eprintln!("     ↩ back from you: {}", result.replace('_', " "));
+            }
+            EngineEvent::NeedsHuman { .. }
+            | EngineEvent::Output { .. }
+            | EngineEvent::Steered { .. } => {}
         }
     }
 }
@@ -99,6 +106,65 @@ impl Approver for TerminalApprover {
     }
 }
 
+/// Asks the person at the terminal (bell + desktop notification), then reads
+/// one line: Enter = "I did it", `stop` = stop the run, a code (when Kai can
+/// type it) or an answer (for a question).
+pub struct TerminalHuman;
+
+#[async_trait]
+impl HumanHelper for TerminalHuman {
+    async fn ask(&self, check: &HumanCheck) -> HumanReply {
+        kai_os::notify::desktop(check.kind.title(), &check.prompt).await;
+        let check = check.clone();
+        tokio::task::spawn_blocking(move || {
+            eprintln!("\x07\n  🙋 {}\n     {}", check.kind.title(), check.prompt);
+            eprintln!("     (seen: {})", check.evidence);
+            let hint = if check.accepts_code() {
+                "Type the code for Kai to enter, or press Enter once you entered it; `stop` stops"
+            } else if check.kind == CheckKind::Question {
+                "Type your answer (Enter alone: you handled it); `stop` stops"
+            } else {
+                "Press Enter once you're done; `stop` stops"
+            };
+            for _ in 0..3 {
+                eprint!("     {hint}: ");
+                let _ = std::io::stderr().flush();
+                let mut line = String::new();
+                match std::io::stdin().lock().read_line(&mut line) {
+                    Ok(0) | Err(_) => return HumanReply::Stop,
+                    Ok(_) => {}
+                }
+                if let Some(reply) = parse_reply(&check, &line) {
+                    return reply;
+                }
+                eprintln!("     That doesn't look like a code (4–12 letters or digits).");
+            }
+            HumanReply::Stop
+        })
+        .await
+        .unwrap_or(HumanReply::Stop)
+    }
+}
+
+/// One terminal line as an answer; `None` when a code was expected and the
+/// line is neither a code nor empty.
+fn parse_reply(check: &HumanCheck, line: &str) -> Option<HumanReply> {
+    let line = line.trim();
+    if line.eq_ignore_ascii_case("stop") {
+        return Some(HumanReply::Stop);
+    }
+    if line.is_empty() || line.eq_ignore_ascii_case("done") {
+        return Some(HumanReply::Resolved);
+    }
+    if check.accepts_code() {
+        return OneTimeCode::parse(line).map(HumanReply::Code);
+    }
+    if check.accepts_answer() {
+        return Some(HumanReply::Answer(line.to_string()));
+    }
+    Some(HumanReply::Resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +181,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(describe(&d), "run `df -h`");
+    }
+
+    #[test]
+    fn terminal_replies() {
+        use kai_core::{Element, Rect, Role};
+        let code_screen = Grounding::Marks(vec![Element {
+            mark: 1,
+            role: Role::TextField,
+            name: "Verification code".into(),
+            bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
+            enabled: true,
+            secure: false,
+            value: None,
+        }]);
+        let code = kai_core::human::detect(&code_screen).unwrap();
+        assert!(matches!(
+            parse_reply(&code, " 123 456\n"),
+            Some(HumanReply::Code(_))
+        ));
+        assert_eq!(parse_reply(&code, "\n"), Some(HumanReply::Resolved));
+        assert_eq!(parse_reply(&code, "STOP"), Some(HumanReply::Stop));
+        assert_eq!(parse_reply(&code, "not a code!"), None);
+        let q = HumanCheck::question("Which account?");
+        assert_eq!(
+            parse_reply(&q, "the work one\n"),
+            Some(HumanReply::Answer("the work one".into()))
+        );
     }
 }

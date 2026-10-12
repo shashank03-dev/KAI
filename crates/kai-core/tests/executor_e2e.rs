@@ -76,6 +76,7 @@ async fn run(
         sink: &NullSink,
         steering,
         verifier: None,
+        human: None,
         skills: &[],
         config,
     };

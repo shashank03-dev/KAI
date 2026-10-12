@@ -1,7 +1,7 @@
 //! What the UI knows about the current run. Both the main window and the mini
 //! window read one `Entity<RunState>`; the agent's messages update it.
 
-use crate::agent::{Pending, Ui};
+use crate::agent::{HumanPending, Pending, Ui};
 use crate::team::{OutputView, SteerView, Team};
 use ely_gpui_component::chat::StepState;
 use kai_core::engine::EngineEvent;
@@ -18,7 +18,7 @@ pub enum Phase {
     /// Waiting for an earlier run to finish with the screen.
     Queued,
     Running,
-    /// Waiting on the user: an approval.
+    /// Waiting on the user: an approval or a human check.
     Waiting,
     Done,
 }
@@ -54,6 +54,9 @@ pub struct RunState {
     pub thinking: bool,
     pub max_steps: u32,
     pub approval: Option<Pending>,
+    /// A CAPTCHA, one-time code, sign-in approval or question waiting on
+    /// the user (`docs/HUMAN_CHECKS.md`).
+    pub human: Option<HumanPending>,
     pub plan: Option<Plan>,
     pub report: Option<String>,
     pub trace: Option<Trace>,
@@ -152,6 +155,12 @@ impl RunState {
                 );
                 self.approval = Some(p);
             }
+            Ui::Human(h) => {
+                self.phase = Phase::Waiting;
+                self.thinking = false;
+                self.caption = format!("Waiting for you: {}", h.check.kind.title());
+                self.human = Some(h);
+            }
             Ui::Plan(p) => {
                 self.team_view = Team::from_plan(&p);
                 self.plan = Some(p);
@@ -170,6 +179,7 @@ impl RunState {
                 self.phase = Phase::Done;
                 self.thinking = false;
                 self.approval = None;
+                self.human = None;
                 for s in &mut self.steps {
                     if s.state == StepState::Working {
                         s.state = StepState::Done;
@@ -195,6 +205,7 @@ impl RunState {
                 self.phase = Phase::Done;
                 self.thinking = false;
                 self.error = Some(e);
+                self.human = None;
                 self.team_view.settle();
             }
         }
@@ -284,6 +295,12 @@ impl RunState {
                 command,
                 output,
             }),
+            EngineEvent::NeedsHuman { .. } => self.phase = Phase::Waiting,
+            EngineEvent::HumanDone { result, .. } => {
+                self.phase = Phase::Running;
+                self.human = None;
+                self.caption = format!("Back to work ({})", result.replace('_', " "));
+            }
             EngineEvent::Steered { step, message } => {
                 match self
                     .steers

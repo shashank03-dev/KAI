@@ -280,6 +280,7 @@ pub fn engine<'a>(
         sink: &kai_core::engine::NullSink,
         steering: &NoSteering,
         verifier: None,
+        human: None,
         skills: &[],
         config: Config::default(),
     }

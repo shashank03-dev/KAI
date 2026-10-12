@@ -116,6 +116,7 @@ pass. The first rule that matches wins:
 | `time_limit` | the run hit the time limit |
 | `gave_up` | the model chose `ask_user`, or Kai stopped and asked (no progress, repeated errors) |
 | `grounding_miss` | best effort: an unverified click whose thought quotes a name (`click "Save"`) that the clicked mark does not carry |
+| `needs_human` | the run hit a CAPTCHA, one-time code, sign-in approval or question that nobody answered (headless run, timeout, or too many asks); see `docs/HUMAN_CHECKS.md` |
 | `other` | anything else (stopped by the user, failed) |
 
 The bench results JSON gets a `failure` per task and a `failures`

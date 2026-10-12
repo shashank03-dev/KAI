@@ -134,6 +134,19 @@ fn text_hash(s: &str) -> u64 {
 }
 
 impl Engine<'_> {
+    /// One observation, full or tree-only, with any one-time code Kai typed
+    /// for the user blanked out of the element list before anything (model,
+    /// verifier, trace, UI) reads it.
+    pub(super) async fn look(&self, r: &Run<'_>, tree_only: bool) -> anyhow::Result<Observation> {
+        let mut obs = if tree_only {
+            self.perceptor.observe_tree_only().await?
+        } else {
+            self.perceptor.observe().await?
+        };
+        crate::human::redact(&mut obs.grounding, &r.human.codes);
+        Ok(obs)
+    }
+
     /// Whether this step may skip the screenshot. Any doubt means no.
     fn want_tree_only(&self, r: &Run<'_>) -> bool {
         let c = &self.config;
@@ -161,11 +174,7 @@ impl Engine<'_> {
         } else {
             self.want_tree_only(r)
         };
-        let mut obs = if tree_only {
-            self.perceptor.observe_tree_only().await?
-        } else {
-            self.perceptor.observe().await?
-        };
+        let mut obs = self.look(r, tree_only).await?;
         // Typed text that the tree doesn't show (web pages often don't expose
         // field values) would read as "typing failed": look properly.
         let typed_hidden = tree_only
@@ -175,7 +184,7 @@ impl Engine<'_> {
                 .is_some_and(|t| !tree_shows(&obs.grounding.as_text(), t));
         if tree_only && (typed_hidden || !rich(&obs.grounding)) {
             // The tree got poor (or turned into a grid): look properly.
-            obs = self.perceptor.observe().await?;
+            obs = self.look(r, false).await?;
             tree_only = false;
         }
 
@@ -203,7 +212,7 @@ impl Engine<'_> {
                     pend.expect
                 ));
                 if tree_only {
-                    obs = self.perceptor.observe().await?;
+                    obs = self.look(r, false).await?;
                     tree_only = false;
                 }
             }

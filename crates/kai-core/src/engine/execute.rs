@@ -219,6 +219,13 @@ impl Engine<'_> {
                 }
             };
             let g = &obs.grounding;
+            // A CAPTCHA or a one-time code is the user's: hand back, and the
+            // next model step pauses for them.
+            if crate::human::guard(&decision, g).is_some() || self.unhandled_check(r, g).is_some() {
+                let note = format!("'{}' needs the user (a human check).", sg.describe());
+                self.escalate(r, note, acted_any);
+                return None;
+            }
             let step = r.step;
             r.step += 1;
             let timings = Timings {

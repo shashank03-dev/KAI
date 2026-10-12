@@ -7,6 +7,8 @@
 //! - it has a target and, after a fresh tree-only observation, that number no
 //!   longer names the same element (role + name) the model saw, or the
 //!   screen is a grid (no blind grid clicks);
+//! - a follow-up would work a CAPTCHA or type a one-time code (only the user
+//!   does that; the next step pauses for them);
 //! - an action fails, or the step limit is reached.
 
 use super::{BATCHED, Engine, Pending, Run, observe};
@@ -53,7 +55,10 @@ impl Engine<'_> {
                 }
                 let t_obs = Instant::now();
                 let now = match self.perceptor.observe_tree_only().await {
-                    Ok(o) => o.grounding,
+                    Ok(mut o) => {
+                        crate::human::redact(&mut o.grounding, &r.human.codes);
+                        o.grounding
+                    }
                     Err(e) => {
                         log::info!("batch stopped: re-observe failed: {e}");
                         break;
@@ -69,6 +74,10 @@ impl Engine<'_> {
             let pw = risk::is_payment_or_password(d, &grounding);
             if risk::needs_approval(self.config.approval, risk::classify(d, &grounding), pw) {
                 log::info!("batch stopped: {:?} needs approval", d.action);
+                break;
+            }
+            if crate::human::guard(d, &grounding).is_some() {
+                log::info!("batch stopped: {:?} is the user's to do", d.action);
                 break;
             }
 

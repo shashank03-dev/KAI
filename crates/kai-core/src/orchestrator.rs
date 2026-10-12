@@ -181,6 +181,8 @@ pub struct Orchestrator<'a> {
     pub sink: &'a dyn EventSink,
     /// User messages mid-run; whichever sub-agent steps next reads them.
     pub steering: &'a dyn crate::engine::Steering,
+    /// Who to ask at a CAPTCHA, one-time code or question (any sub-agent).
+    pub human: Option<&'a dyn crate::human::HumanHelper>,
     pub skills: &'a [Skill],
     pub config: Config,
     /// How many terminal sub-agents may run at once.
@@ -330,6 +332,7 @@ impl Orchestrator<'_> {
             sink: self.sink,
             steering: self.steering,
             verifier: None,
+            human: self.human,
             skills: self.skills,
             config: self.config,
         }

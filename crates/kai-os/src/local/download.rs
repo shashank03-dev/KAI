@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// Shared cancel flag for an install. Cloning shares the flag.
 #[derive(Debug, Clone, Default)]
@@ -106,13 +106,18 @@ pub async fn fetch(
     if size.is_some_and(|s| have > s) {
         have = 0;
     }
+    // Not `append`: on Windows an append-only handle may not change the
+    // file's length (`set_len` fails with "Access is denied"). Write mode,
+    // with the position moved to the end after every truncation, instead.
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(false)
         .open(&part)
         .await
         .with_context(|| format!("cannot write {}", part.display()))?;
     file.set_len(have).await?;
+    file.seek(std::io::SeekFrom::Start(have)).await?;
     let mut hasher = Sha256::new();
     if have > 0 {
         hash_prefix(&part, have, &mut hasher, cancel).await?;
@@ -149,6 +154,7 @@ pub async fn fetch(
                 // The server ignored the range: start over.
                 if have > 0 {
                     file.set_len(0).await?;
+                    file.seek(std::io::SeekFrom::Start(0)).await?;
                     have = 0;
                     hasher = Sha256::new();
                 }
@@ -161,6 +167,7 @@ pub async fn fetch(
                     break;
                 }
                 file.set_len(0).await?;
+                file.seek(std::io::SeekFrom::Start(0)).await?;
                 have = 0;
                 hasher = Sha256::new();
                 continue;
