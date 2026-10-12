@@ -388,3 +388,44 @@ statistically solid; docs/ROADMAP.md requires a 100+ task held-out set with
   through the Gemini API*; OpenAI's terms likewise. So the default training
   data is Gemma's own runs on the owner's Droplet; GPT/Gemini-API runs stay
   evaluation-only. Not legal advice — the owner should confirm.
+
+## Round 4 (2026-10-12) — human checks: CAPTCHAs, one-time codes, questions
+
+Design: [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md). Research behind it:
+[docs/RESEARCH_2026_10_FOUNDATIONS.md](docs/RESEARCH_2026_10_FOUNDATIONS.md) §6.
+
+- **Kai never solves a CAPTCHA and never guesses a code.** The owner asked for
+  "ask the user when the agent meets an OTP or a CAPTCHA, notify them, then
+  proceed". Automated CAPTCHA solving circumvents a site's access control and
+  is a losing race against behavioural detection anyway, so the design is a
+  hand-off: the person at the computer does it, Kai waits and carries on.
+- **The harness decides, not the model.** Detection reads the element list
+  before every model call; a guard refuses any click on a CAPTCHA element and
+  any `type` into a one-time-code field on all three action paths (model
+  step, batched `then`, executor). Models can be talked into "solving it for
+  accessibility"; a prompt rule alone would not hold.
+- **Conservative detection over recall.** Whole-phrase matching on names;
+  the invisible "protected by reCAPTCHA" badge, promo/ZIP/postal codes and
+  "2-Step Verification" settings links never pause a run. A missed check is
+  cheap (the model is told to `ask_user`, which now reaches the user); a
+  false pause on every sign-in page would not be.
+- **`ask_user` is a real question when someone can answer** (app, terminal).
+  Headless/bench/piped runs keep the old behaviour (end as `AskedUser`) and
+  get a new failure category `needs_human`, appended to the taxonomy.
+- **Codes are typed by Kai only on request, only into the field the user
+  saw** (re-found by name + role), only if they look like a code (4–12
+  letters/digits), and are redacted from every later element list, the
+  trace, UI events and memory. Screenshots can still show a code while it is
+  on the page; documented, not hidden.
+- **Waiting is the user's time**: excluded from the run's time limit,
+  bounded by `human_wait` (10 min) and 6 asks per run, and the kill switch is
+  polled while waiting.
+- **Notifications**: Linux via the freedesktop notification service (zbus,
+  already a dependency); Windows relies on the always-on-top mini window and
+  the raised main-window dialog (no new Windows API surface without a Windows
+  machine to test on).
+- **Not built here**: the app crate could not be compiled in this session
+  (the Ely UI dependency is not reachable from the sandbox); its changes
+  mirror the approval dialog's patterns and are checked by CI. `cua.rs` (the
+  experimental OpenAI native loop) is not wired to human checks.
+

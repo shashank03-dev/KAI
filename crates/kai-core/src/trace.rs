@@ -196,6 +196,11 @@ pub struct Trace {
     /// Ids of the memory lessons shown to the model this run, for credit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lessons: Vec<String>,
+    /// Every pause for the user (CAPTCHA, one-time code, sign-in approval,
+    /// question): kind, evidence, result and wait. Never the answer or the
+    /// code. Absent in old traces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub human: Vec<crate::human::HumanRecord>,
 }
 
 impl Trace {
@@ -210,6 +215,7 @@ impl Trace {
             executor: None,
             steered: Vec::new(),
             lessons: Vec::new(),
+            human: Vec::new(),
         }
     }
 

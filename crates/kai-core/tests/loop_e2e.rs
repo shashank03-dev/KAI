@@ -137,6 +137,7 @@ fn engine<'a>(
         sink: &NullSink,
         steering: &kai_core::engine::NoSteering,
         verifier: None,
+        human: None,
         skills: &[],
         config: Config::default(),
     }

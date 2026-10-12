@@ -151,6 +151,20 @@ pub enum EngineEvent {
         command: String,
         output: String,
     },
+    /// The run is paused until the user gets past a CAPTCHA, gives a
+    /// one-time code, approves a sign-in or answers a question
+    /// (`docs/HUMAN_CHECKS.md`).
+    NeedsHuman {
+        step: u32,
+        check: crate::human::HumanCheck,
+    },
+    /// The user answered; `result` is the [`crate::human::HumanRecord`]
+    /// result (`resolved`, `answered`, `code_typed`, …).
+    HumanDone {
+        step: u32,
+        kind: crate::human::CheckKind,
+        result: String,
+    },
     /// A user message was folded into this step.
     Steered {
         step: u32,
@@ -192,6 +206,9 @@ pub struct Config {
     /// After a failed or recovered run, ask the model once for up to two
     /// lessons. Off by default: it costs one extra call per such run.
     pub reflect: bool,
+    /// How long a human check waits for the user before the run ends as
+    /// "asked user". The wait does not count against `max_time`.
+    pub human_wait: Duration,
 }
 
 impl Default for Config {
@@ -210,6 +227,7 @@ impl Default for Config {
             executor_gates: crate::executor::Gates::default(),
             learn: true,
             reflect: false,
+            human_wait: Duration::from_secs(600),
         }
     }
 }

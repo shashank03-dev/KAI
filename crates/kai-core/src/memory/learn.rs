@@ -41,9 +41,15 @@ pub fn shell_failed(out: &str) -> bool {
     code.parse::<i32>().is_ok_and(|c| c != 0)
 }
 
+/// A step the user settled (a CAPTCHA, a code, a question): never a lesson.
+fn by_user(s: &StepRecord) -> bool {
+    s.path.as_deref() == Some("human")
+}
+
 /// The step acted but nothing changed (and nobody skipped it).
 fn no_change(s: &StepRecord) -> bool {
     !s.verified
+        && !by_user(s)
         && s.approval.as_deref() != Some("skipped")
         && !matches!(
             s.decision.action,
@@ -53,6 +59,7 @@ fn no_change(s: &StepRecord) -> bool {
 
 fn worked(s: &StepRecord) -> bool {
     s.verified
+        && !by_user(s)
         && !failed(s)
         && !matches!(
             s.decision.action,

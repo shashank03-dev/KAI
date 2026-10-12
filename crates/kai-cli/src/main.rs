@@ -11,7 +11,7 @@ mod models;
 
 use backend::{BackendArg, BackendOpts};
 use clap::{Parser, Subcommand};
-use console::{Printer, TerminalApprover};
+use console::{Printer, TerminalApprover, TerminalHuman};
 use kai_core::settings::Settings;
 use kai_core::{Engine, Skill};
 use std::path::{Path, PathBuf};
@@ -351,6 +351,9 @@ async fn run_task(
         running.clone(),
     ));
     let approver = TerminalApprover { auto_yes: yes };
+    // CAPTCHAs, one-time codes and questions reach whoever is at this
+    // terminal; piped input means nobody is, so those end the run instead.
+    let human = std::io::IsTerminal::is_terminal(&std::io::stdin()).then_some(TerminalHuman);
 
     let ok = if let Some(cfg) = native {
         let runner = kai_core::cua::CuaRunner {
@@ -379,6 +382,7 @@ async fn run_task(
             interrupt: &kill,
             sink: &Printer,
             steering: &kai_core::engine::NoSteering,
+            human: human.as_ref().map(|h| h as &dyn kai_core::HumanHelper),
             skills: &skills,
             config,
             parallelism: s.parallelism,
@@ -403,6 +407,7 @@ async fn run_task(
             sink: &Printer,
             steering: &kai_core::engine::NoSteering,
             verifier: None,
+            human: human.as_ref().map(|h| h as &dyn kai_core::HumanHelper),
             skills: &skills,
             config,
         };
