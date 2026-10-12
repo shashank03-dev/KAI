@@ -11,6 +11,7 @@ use kai_os::local::{Cancelled, LocalManager, Progress};
 use local_support::{Route, bytes, fake_runtime_tgz, fake_runtime_zip, serve, sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 const MIB: usize = 1 << 20;
@@ -243,6 +244,7 @@ async fn unpacks_a_flat_zip_runtime() {
     );
 }
 
+#[cfg(target_os = "linux")]
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
