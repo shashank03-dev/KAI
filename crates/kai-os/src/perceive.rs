@@ -1,5 +1,6 @@
-//! The real eyes: [`DesktopPerceptor`] captures the primary display, reads
-//! the accessibility tree and grounds it; it can also observe the tree alone
+//! The real eyes: [`DesktopPerceptor`] captures the primary display (or,
+//! window scope on, the focused app's part of it), reads the accessibility
+//! tree and grounds it; it can also observe the tree alone
 //! (no pixels) and zoom into a region for a second look.
 
 use crate::{a11y, frame, marks, zoom};
@@ -42,6 +43,41 @@ fn grab() -> anyhow::Result<(RgbaImage, Rect)> {
         img.height() as f32,
     );
     Ok((img, at))
+}
+
+/// What the model is shown: the whole primary display, or (window scope on)
+/// the focused app's region of it, cut from the same capture.
+fn grab_view() -> anyhow::Result<(RgbaImage, Rect)> {
+    let (img, at) = grab()?;
+    if !frame::config().window_scope {
+        return Ok((img, at));
+    }
+    match crate::window::focused_region(at) {
+        Some(r) => {
+            let (x, y) = ((r.x - at.x).round() as u32, (r.y - at.y).round() as u32);
+            let (w, h) = (r.w.round() as u32, r.h.round() as u32);
+            let w = w.min(img.width().saturating_sub(x));
+            let h = h.min(img.height().saturating_sub(y));
+            if w == 0 || h == 0 {
+                return Ok((img, at));
+            }
+            let cut = image::imageops::crop_imm(&img, x, y, w, h).to_image();
+            Ok((
+                cut,
+                Rect::new(at.x + x as f32, at.y + y as f32, w as f32, h as f32),
+            ))
+        }
+        None => Ok((img, at)),
+    }
+}
+
+/// The region [`grab_view`] would show, without capturing.
+fn view_rect() -> anyhow::Result<Rect> {
+    let d = primary_rect()?;
+    if !frame::config().window_scope {
+        return Ok(d);
+    }
+    Ok(crate::window::focused_region(d).unwrap_or(d))
 }
 
 /// Captures the primary display, reads the accessibility tree and grounds it.
@@ -140,7 +176,7 @@ impl DesktopPerceptor {
         // Capture and the tree read run in parallel, both off the UI thread.
         let capture = tokio::task::spawn_blocking(move || {
             let t = Instant::now();
-            grab().map(|g| (g, t.elapsed()))
+            grab_view().map(|g| (g, t.elapsed()))
         });
         let tree = async {
             match tree {
@@ -198,7 +234,7 @@ impl Perceptor for DesktopPerceptor {
     async fn observe_tree_only(&self) -> anyhow::Result<Observation> {
         let t = Instant::now();
         let (nodes, screen) =
-            tokio::join!(a11y::read_tree(), tokio::task::spawn_blocking(primary_rect));
+            tokio::join!(a11y::read_tree(), tokio::task::spawn_blocking(view_rect));
         let tree_time = t.elapsed();
         let screen = screen??;
         let grounding = a11y::ground_live(&nodes, screen);

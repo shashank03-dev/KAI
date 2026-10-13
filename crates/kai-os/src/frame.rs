@@ -17,8 +17,8 @@ pub const MODEL_MAX_PIXELS: u32 = 280 * 48 * 48;
 pub const JPEG_QUALITY: u8 = 75;
 
 /// How frames for the model are sized and encoded. Set from the environment
-/// (`KAI_FRAME_MAX_SIDE`, `KAI_FRAME_MAX_PIXELS`, `KAI_JPEG_QUALITY`) on first
-/// use, or by the host with [`set_config`], so benches can A/B frame sizes.
+/// (`KAI_FRAME_MAX_SIDE`, `KAI_FRAME_MAX_PIXELS`, `KAI_JPEG_QUALITY`,
+/// `KAI_WINDOW_SCOPE`) on first use, or by the host with [`set_config`], so benches can A/B frame sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameConfig {
     /// Longest side in pixels.
@@ -28,6 +28,9 @@ pub struct FrameConfig {
     pub max_pixels: u32,
     /// JPEG quality, 1..=100.
     pub quality: u8,
+    /// Show the model only the focused app's windows, not the whole display
+    /// (`KAI_WINDOW_SCOPE=1`; `crate::window`). Off by default.
+    pub window_scope: bool,
 }
 
 impl Default for FrameConfig {
@@ -36,6 +39,7 @@ impl Default for FrameConfig {
             max_side: MODEL_LONG_SIDE,
             max_pixels: MODEL_MAX_PIXELS,
             quality: JPEG_QUALITY,
+            window_scope: false,
         }
     }
 }
@@ -58,6 +62,7 @@ impl FrameConfig {
                 .filter(|v| (1..=100).contains(v))
                 .map(|v| v as u8)
                 .unwrap_or(d.quality),
+            window_scope: std::env::var("KAI_WINDOW_SCOPE").is_ok_and(|v| v.trim() == "1"),
         }
     }
 
@@ -271,12 +276,14 @@ mod tests {
             max_side: 1024,
             max_pixels: 0,
             quality: 70,
+            window_scope: false,
         };
         assert_eq!(side.target_size(1920, 1080), (1024, 576));
         let tokens = FrameConfig {
             max_side: 4096,
             max_pixels: 280 * 48 * 48,
             quality: 70,
+            window_scope: false,
         };
         let (w, h) = tokens.target_size(1920, 1080);
         assert!(w * h <= 280 * 48 * 48, "{w}x{h}");

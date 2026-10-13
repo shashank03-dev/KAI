@@ -19,6 +19,7 @@ pub mod probe;
 pub mod secrets;
 pub mod shell;
 pub mod web;
+pub mod window;
 pub mod zoom;
 
 pub use desktop::{DesktopActuator, DesktopPerceptor};
