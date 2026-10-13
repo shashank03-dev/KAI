@@ -119,6 +119,25 @@ pub fn server_args(
     a
 }
 
+/// How long `start` waits for the port to come free: a server that was
+/// just stopped (by this run, or by the previous `kai` run that dropped its
+/// handle) takes a moment to exit. Seen: two bench runs back to back.
+const PORT_WAIT: Duration = Duration::from_secs(15);
+
+/// Wait until `port` on 127.0.0.1 can be bound, up to `limit`.
+pub(crate) async fn wait_for_port(port: u16, limit: Duration) -> anyhow::Result<()> {
+    let deadline = Instant::now() + limit;
+    loop {
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(_) => return Ok(()),
+            Err(e) if Instant::now() >= deadline => {
+                anyhow::bail!("port {port} on 127.0.0.1 is in use ({e}); pick another port")
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
+        }
+    }
+}
+
 /// Memory and latency settings for one user and one request at a time
 /// (measured with Holo3.1 4B Q4 on a 4-vCPU AMX CPU, docs/LOCAL_MODELS.md):
 /// - `--no-repack`: repacking keeps a second copy of the weights next to the
@@ -185,9 +204,7 @@ impl LocalManager {
             .server_path()
             .ok_or_else(|| anyhow::anyhow!("the llama.cpp runtime is not installed"))?;
         let _ = self.stop();
-        std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|e| {
-            anyhow::anyhow!("port {port} on 127.0.0.1 is in use ({e}); pick another port")
-        })?;
+        wait_for_port(port, PORT_WAIT).await?;
         let dir = self.model_dir(&entry.id);
         let model = dir.join(
             entry
@@ -357,6 +374,28 @@ fn kill_pid(_: u32) {}
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn start_waits_for_a_port_that_is_being_freed() {
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            drop(held);
+        });
+        wait_for_port(port, Duration::from_secs(5)).await.unwrap();
+        release.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_port_that_stays_busy_still_fails_with_the_reason() {
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        let e = wait_for_port(port, Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("is in use"), "{e}");
+    }
     use super::*;
 
     #[test]
