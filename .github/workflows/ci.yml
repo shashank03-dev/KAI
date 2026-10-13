@@ -1,28 +1,11 @@
 name: CI
 
-# Runs only when work lands on main (one push per batch of work), on PRs,
-# or by hand from the Actions tab. Pushes to other branches cost nothing;
-# validate locally there (fmt, clippy -D warnings, test, skill validate).
-# Doc-only, bench-result and screenshot changes never trigger a run; the
-# shipped skills (SKILL.md files) still do, since CI validates them.
+# PAUSED (2026-10-13, at the owner's request): research and tests are in
+# progress, so pushes to main and pull requests do not start CI. Run it by
+# hand from the Actions tab (Run workflow). To resume, restore the `push`
+# and `pull_request` triggers from the commit before "CI: paused".
+# Validate locally meanwhile (fmt, clippy -D warnings, test, skill validate).
 on:
-  push:
-    branches: [main]
-    paths:
-      - "**"
-      - "!**.md"
-      - "!docs/**"
-      - "!bench/results/**"
-      - "!screenshots/**"
-      - "skills/**"
-  pull_request:
-    paths:
-      - "**"
-      - "!**.md"
-      - "!docs/**"
-      - "!bench/results/**"
-      - "!screenshots/**"
-      - "skills/**"
   workflow_dispatch:
 
 # A newer push to the same branch cancels the older run instead of paying
