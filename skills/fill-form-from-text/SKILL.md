@@ -16,8 +16,10 @@ metadata:
    so.
 3. Password and payment fields: never fill them. Use `ask_user` and let the user
    type those themselves.
-4. Press **Submit** or **Send** only when the user asked you to send or
-   submit the form; then do it once every field is filled (it is `high` risk,
-   so Kai asks the user first). Never press **Pay** yourself. Otherwise reply
-   `done` once every field you have a value for is filled, and say which
-   fields you left empty.
+4. If the user asked you to send or submit the form, click **Send** or
+   **Submit** yourself once every field is filled, with `risk` set to
+   `high`. Do not use `ask_user` for this: the request was the user's
+   permission, and Kai shows its own approval prompt for high-risk clicks.
+   Never press **Pay** yourself. If the user did not ask you to send it,
+   don't: reply `done` once every field you have a value for is filled, and
+   say which fields you left empty.
