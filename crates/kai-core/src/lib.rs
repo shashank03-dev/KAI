@@ -17,6 +17,7 @@ pub mod human;
 pub mod ledger;
 pub mod macro_history;
 pub mod mcp;
+pub mod memo;
 pub mod memory;
 pub mod models;
 pub mod orchestrator;

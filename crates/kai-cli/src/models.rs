@@ -1,11 +1,12 @@
-//! `kai models list|install|start|stop|remove`, `--backend local`, and the
+//! `kai models list|install|start|stop|remove|search|pull`, `--backend local`, and the
 //! local-models part of `kai doctor`. Nothing is downloaded or started
 //! unless one of these commands asks for it.
 
 use clap::Subcommand;
+use kai_core::models::hub::parse_ref;
 use kai_core::models::{Catalog, DEFAULT_PORT, Fit, ModelEntry, rank};
 use kai_core::settings::Settings;
-use kai_os::local::{Cancelled, LocalManager, LocalServer, Progress, detect_hardware};
+use kai_os::local::{Cancelled, LocalManager, LocalServer, Progress, detect_hardware, hub};
 use std::io::Write;
 use std::process::ExitCode;
 
@@ -27,6 +28,16 @@ pub enum ModelsCmd {
     },
     /// Stop the local server Kai started.
     Stop,
+    /// Search Hugging Face for GGUF vision models to pull.
+    Search { query: String },
+    /// Add a GGUF vision model from Hugging Face to your catalog, pinned to
+    /// the repo's current commit: `owner/repo` or `owner/repo:Q5_K_M`.
+    Pull {
+        repo: String,
+        /// Download it right away.
+        #[arg(long)]
+        install: bool,
+    },
     /// Delete a downloaded model.
     Remove { id: String },
 }
@@ -77,6 +88,38 @@ pub async fn run(cmd: ModelsCmd) -> anyhow::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        ModelsCmd::Search { query } => {
+            search(&query).await?;
+            Ok(ExitCode::SUCCESS)
+        }
+        ModelsCmd::Pull { repo, install: now } => {
+            let e = hub::resolve(&parse_ref(&repo)?).await?;
+            if let Some(same) = cat.same_weights(&e).filter(|s| s.id != e.id) {
+                println!(
+                    "These weights are already in the catalog as {}: kai models install {}",
+                    same.id, same.id
+                );
+                return Ok(ExitCode::SUCCESS);
+            }
+            let path = Catalog::user_file();
+            Catalog::save_user_entry(&path, &e)?;
+            println!(
+                "Added {} ({:.1} GB, {}) to {}",
+                e.id,
+                e.download_gb,
+                e.license,
+                path.display()
+            );
+            println!(
+                "It is untested with Kai: try it with `kai bench --backend local --model {}`.",
+                e.id
+            );
+            if now {
+                return install(&m, &e).await;
+            }
+            println!("Install it: kai models install {}", e.id);
+            Ok(ExitCode::SUCCESS)
+        }
         ModelsCmd::Remove { id } => {
             anyhow::ensure!(m.is_installed(&id), "{id} is not installed");
             m.remove(&id)?;
@@ -100,6 +143,22 @@ fn resolve(cat: &Catalog, id: &str) -> anyhow::Result<ModelEntry> {
     })
 }
 
+async fn search(query: &str) -> anyhow::Result<()> {
+    let hits = hub::search(query).await?;
+    if hits.is_empty() {
+        println!("No GGUF vision models on Hugging Face match {query:?}.");
+        return Ok(());
+    }
+    for h in hits {
+        println!(
+            "{:<56} {:>9} downloads {:>5} likes",
+            h.repo, h.downloads, h.likes
+        );
+    }
+    println!("\nAdd one: kai models pull <repo>   (or <repo>:<quant>, e.g. :Q8_0)");
+    Ok(())
+}
+
 fn gb(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
@@ -121,8 +180,13 @@ fn list(cat: &Catalog, m: &LocalManager) {
         } else {
             ""
         };
+        let made = if e.agent_trained {
+            " · made for computer use"
+        } else {
+            ""
+        };
         println!(
-            "{mark:<9} {:<24} {}{have}\n          {} · {} · {:.1} GB · {} · vision: {} · computer use: {}\n          {}\n",
+            "{mark:<9} {:<24} {}{have}\n          {} · {} · {:.1} GB · {} · vision: {} · computer use: {}{made}\n          {}\n",
             e.id,
             e.label,
             e.maker,
@@ -135,6 +199,7 @@ fn list(cat: &Catalog, m: &LocalManager) {
         );
     }
     println!("Install one: kai models install <id>   (or: kai models install best)");
+    println!("More from Hugging Face: kai models search <name>, then kai models pull <repo>");
 }
 
 async fn install(m: &LocalManager, e: &ModelEntry) -> anyhow::Result<ExitCode> {

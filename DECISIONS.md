@@ -794,3 +794,40 @@ outside the bench set, each outcome checked independently.
 - **Next:** false done is now the main failure, not driving. A first gate
   to try: when the task names an output file, `done` needs that file to
   exist and be non-empty. Re-test t5 live.
+
+## Model store, run memo, ship plan (2026-10-13)
+
+Plan and research: `docs/SHIP_PLAN.md`. No model key and no GPU were in
+this session, so nothing below is a Kai bench number.
+
+- **OpenAI's computer-use loop re-read** (guide, accessed 2026-10-13): one
+  `computer_call` with an ordered `actions` array, then one screenshot back,
+  with history on the server (`previous_response_id`). Kai already has the
+  same loop in a smaller form: `then` for the actions, and marks instead of
+  pixels. The missing piece was memory of what the model *read*.
+- **Run memo** (`docs/LONG_RUNS.md`, `--memo`, **off**): a scratchpad of up
+  to 40 words that the model writes and that comes back on every later
+  turn. Injection-looking memos are refused (the test fails without the
+  guard, checked). With the switch off, the prompt and schema are
+  byte-identical (tested). Full-history resend and summarising calls were
+  rejected because of context, latency and cost for small models. To
+  measure: `--memo` A/B on live Gemma 4 26B, two runs per side.
+- **Model store** (`docs/MODEL_STORE.md`): `kai models search` and
+  `kai models pull <owner/repo>[:quant]` build a pinned entry (commit,
+  SHA-256, sizes) from the Hub's API into `<config>/models.json`. Gated,
+  split and text-only repos are refused. Pulled models are always
+  `untested`.
+  Live on 2026-10-13: search and pull (resolve only) ran against the real
+  Hub; see the note below.
+- **Curated shelf +7**, all `untested`: Holo4 35B-A3B (official GGUF,
+  Apache-2.0), Holo3.1 35B-A3B (official), Holo3.1 9B, Fara 7B (MIT), Gemma
+  4 12B QAT (Google's own), GLM-4.6V Flash (MIT) and Qwen3.5 9B. All 14 URLs
+  answered 200 with `x-linked-size` = `size_bytes` and `x-linked-etag` =
+  `sha256`. Memory comes from each model's `config.json` (only the
+  full-attention layers of the hybrid ones keep KV). Holo4 27B was left out
+  because it is CC BY-NC. New `agent_trained` flag: shown in `kai models
+  list` and used only to break ties between equally tested models. "Best"
+  still needs a Kai measurement.
+- **500-line rule restored** with no behaviour change: `prompt.rs` tests →
+  `prompt_tests.rs`, human-check phrase tables → `human_phrases.rs`, Skills
+  page tests → `skills_tests.rs`, and pages and shortcuts → `kai-app/src/nav.rs`.

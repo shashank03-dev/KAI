@@ -40,6 +40,10 @@ pixels.*
 - **Fully offline:** Holo3.1 4B (H Company, Apache-2.0) runs locally in
   about 4.4 GB of RAM (`kai models install holo-3.1-4b-q4`); see
   [docs/LOCAL_MODELS.md](docs/LOCAL_MODELS.md).
+- **A store of open models:** 17 pinned, hash-checked models ranked for your
+  computer (Gemma 4, Holo4, Holo3.1, Fara, Qwen, GLM, UI-TARS), and any
+  other GGUF vision model on Hugging Face with `kai models search` and
+  `kai models pull <owner/repo>` ([docs/MODEL_STORE.md](docs/MODEL_STORE.md)).
 - **Skills:** reusable know-how in the Agent Skill Open Standard. Finish a run,
   press **Save as skill**, and the next run of that task skips steps the model
   no longer needs to think about.
@@ -201,6 +205,8 @@ kai doctor                          # screen / accessibility / input checks
 kai run "find the 5 biggest files in Downloads"
 kai run --team "check my PC's firewall, updates and open ports"
 kai skill validate skills
+kai models list                     # open models for this computer, best first
+kai models pull Hcompany/Holo4-35B-A3B-GGUF   # any GGUF vision model from Hugging Face
 kai bench --backend replay --yes    # real desktop, recorded replies
 kai bench --backend vllm            # the real thing
 ```
@@ -227,6 +233,9 @@ optional deterministic steps in `metadata.kai`. Validate with
 - [docs/VERIFICATION.md](docs/VERIFICATION.md) — the outcome ledger and DONE gate (experimental, off by default)
 - [docs/SKILLS.md](docs/SKILLS.md) — the skill format and Kai's extension
 - [docs/BROWSER.md](docs/BROWSER.md) — the browser lane (`kai run --browser`)
+- [docs/MODEL_STORE.md](docs/MODEL_STORE.md) — the model store: curated open models and `kai models pull`
+- [docs/LONG_RUNS.md](docs/LONG_RUNS.md) — the run memo for long tasks (experimental, off by default)
+- [docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) — Kai vs OpenAI's computer-use loop, and what is left before release
 - [docs/RESEARCH_2026_10_VENDORS.md](docs/RESEARCH_2026_10_VENDORS.md) — how Anthropic and OpenAI do computer use, and where Kai differs
 - [docs/DEMO.md](docs/DEMO.md) — the 3-minute demo
 - [DECISIONS.md](DECISIONS.md) — every assumption and deviation, and what was not run here

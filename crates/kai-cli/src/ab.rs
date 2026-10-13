@@ -54,6 +54,10 @@ pub struct Ab {
     /// before stopping to ask.
     #[arg(long)]
     pub recover: bool,
+    /// Give the model a run memo: a short scratchpad it writes and sees on
+    /// every later step (docs/LONG_RUNS.md).
+    #[arg(long)]
+    pub memo: bool,
 }
 
 impl Ab {
@@ -91,6 +95,9 @@ impl Ab {
         if self.recover {
             v.push("--recover");
         }
+        if self.memo {
+            v.push("--memo");
+        }
         v
     }
 }
@@ -112,6 +119,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.procedures = ab.procedures;
     config.best_of = ab.best_of;
     config.recover = ab.recover;
+    config.memo = ab.memo;
     Ok(true)
 }
 
@@ -157,5 +165,13 @@ mod tests {
         apply_ab(&mut c, &ab).unwrap();
         assert!(c.macro_history);
         assert_eq!(ab.changed(), vec!["--macro-history"]);
+        assert!(!c.memo, "memo off unless asked for");
+        let ab = Ab {
+            memo: true,
+            ..Default::default()
+        };
+        apply_ab(&mut c, &ab).unwrap();
+        assert!(c.memo);
+        assert_eq!(ab.changed(), vec!["--memo"]);
     }
 }

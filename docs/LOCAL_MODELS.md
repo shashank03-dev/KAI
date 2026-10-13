@@ -142,7 +142,9 @@ skipped with a log line:
 
 ### Adding a new open model
 
-No code changes are needed: add one JSON entry.
+No code changes are needed. The quickest way is `kai models pull
+<owner/repo>` ([MODEL_STORE.md](MODEL_STORE.md)), which does steps 1, 3 and
+4 below from the Hub's own metadata. By hand, add one JSON entry:
 
 1. Find a GGUF repo with the model and its `mmproj` file. Get sizes and
    SHA-256 from `https://huggingface.co/api/models/<repo>/tree/main` (the
@@ -178,6 +180,12 @@ answered a HEAD request with 200 (after Hugging Face's redirect), its
 | `ui-tars-1.5-7b-q4` | mradermacher Q4_K_M + mmproj Q8_0 | 5.54 GB | Apache-2.0 (base model) | untested |
 | `holo-3.1-4b-q4` | mradermacher Q4_K_M + mmproj Q8_0 | 3.43 GB | Apache-2.0 | untested |
 | `holo-3.1-0.8b-q4` | mradermacher Q4_K_M + mmproj Q8_0 | 0.79 GB | Apache-2.0 | untested |
+
+Seven more were added on 2026-10-13 (Holo4 35B-A3B, Holo3.1 35B-A3B and
+9B, Fara 7B, Gemma 4 12B QAT, GLM-4.6V Flash, Qwen3.5 9B), verified the
+same way. They are listed with their memory figures in
+[MODEL_STORE.md](MODEL_STORE.md), which also covers `kai models pull` for
+any other GGUF vision model on Hugging Face.
 
 The ggml-org Gemma 4 GGUFs are converted from Google's QAT (quantization-aware
 trained) Q4_0 checkpoints, according to the repo card. That is why Q4_0 was

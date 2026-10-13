@@ -17,6 +17,7 @@
 pub mod disk;
 pub mod download;
 pub mod hardware;
+pub mod hub;
 pub mod runtime;
 pub mod server;
 

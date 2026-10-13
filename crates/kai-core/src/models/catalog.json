@@ -226,7 +226,8 @@
       "runtime": "llama.cpp",
       "served_name": "ui-tars-1.5-7b",
       "notes": "A model trained for computer use (Qwen2.5-VL based), community GGUF conversion by mradermacher. It was trained on its own action format, not Kai's JSON replies; not yet tried with Kai's harness.",
-      "computer_use": "untested"
+      "computer_use": "untested",
+      "agent_trained": true
     },
     {
       "id": "holo-3.1-4b-q4",
@@ -258,7 +259,8 @@
       "runtime": "llama.cpp",
       "served_name": "holo-3.1-4b",
       "notes": "H Company's computer-use model, fine-tuned from Qwen3.5-4B (community GGUF by mradermacher). Hybrid attention: only 8 of 32 layers keep a KV cache, so memory stays low.",
-      "computer_use": "untested"
+      "computer_use": "untested",
+      "agent_trained": true
     },
     {
       "id": "holo-3.1-0.8b-q4",
@@ -290,7 +292,241 @@
       "runtime": "llama.cpp",
       "served_name": "holo-3.1-0.8b",
       "notes": "The smallest Holo3.1 (Qwen3.5-0.8B base, community GGUF by mradermacher). Runs on almost any CPU; expect weaker decisions.",
-      "computer_use": "untested"
+      "computer_use": "untested",
+      "agent_trained": true
+    },
+    {
+      "id": "holo4-35b-a3b-q4",
+      "family": "holo-4",
+      "label": "Holo4 35B A3B",
+      "maker": "H Company",
+      "license": "Apache-2.0",
+      "params_b": 35.1,
+      "active_params_b": 3.0,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 22.2,
+      "min_ram_gb": 23.6,
+      "min_vram_gb": 23.6,
+      "files": [
+        {
+          "url": "https://huggingface.co/Hcompany/Holo4-35B-A3B-GGUF/resolve/93400a4734519493de4f49910de1f6e0e24be46b/q4_k_m.gguf",
+          "sha256": "4c51212a4b5673d6a4215b9d708cd1730f1b6b4dbb5f75552df18de8341ce669",
+          "role": "model",
+          "size_bytes": 21297870912
+        },
+        {
+          "url": "https://huggingface.co/Hcompany/Holo4-35B-A3B-GGUF/resolve/93400a4734519493de4f49910de1f6e0e24be46b/mmproj.f16.gguf",
+          "sha256": "e1076d4179a6d82dbc7f129f043ac5cb03e4584ef5c1ed4a0c31eca5d1a187e4",
+          "role": "mmproj",
+          "size_bytes": 899282976
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "holo4-35b-a3b",
+      "notes": "H Company's computer-use model (2026-09-28, official GGUF), fine-tuned from Qwen3.6-35B-A3B. H Company reports 80.8% on OSWorld (vendor-run; not yet measured with Kai). Mixture of experts: all 35B weights must fit in memory, but only ~3B work per token, so it runs nearly as fast as a 4B model and can split between GPU and RAM. Hybrid attention: only 10 of 40 layers keep a KV cache. Model supports 262K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": true
+    },
+    {
+      "id": "holo-3.1-35b-a3b-q4",
+      "family": "holo-3.1",
+      "label": "Holo3.1 35B A3B",
+      "maker": "H Company",
+      "license": "Apache-2.0",
+      "params_b": 35.1,
+      "active_params_b": 3.0,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 22.2,
+      "min_ram_gb": 23.6,
+      "min_vram_gb": 23.6,
+      "files": [
+        {
+          "url": "https://huggingface.co/Hcompany/Holo-3.1-35B-A3B-GGUF/resolve/95dd5447a6f101de041c7f03821dafac2bac19a4/q4_k_m.gguf",
+          "sha256": "6bfe5d1bd8e0cb6d737bc7056aff79443c77a99aa2391b7ccef2c5e1ee7db815",
+          "role": "model",
+          "size_bytes": 21297870912
+        },
+        {
+          "url": "https://huggingface.co/Hcompany/Holo-3.1-35B-A3B-GGUF/resolve/95dd5447a6f101de041c7f03821dafac2bac19a4/mmproj.f16.gguf",
+          "sha256": "d4baaa5ba48e097ed383aac6777677a3f3fbe0fa96d37174856f51c37028be70",
+          "role": "mmproj",
+          "size_bytes": 899282976
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "holo-3.1-35b-a3b",
+      "notes": "The previous Holo generation at the same size (official GGUF); H Company reports 79.3% on AndroidWorld (vendor-run). Same mixture-of-experts shape as Holo4 35B A3B; kept for comparison with it. Model supports 262K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": true
+    },
+    {
+      "id": "holo-3.1-9b-q4",
+      "family": "holo-3.1",
+      "label": "Holo3.1 9B",
+      "maker": "H Company",
+      "license": "Apache-2.0",
+      "params_b": 9.4,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 6.25,
+      "min_ram_gb": 7.8,
+      "min_vram_gb": 7.8,
+      "files": [
+        {
+          "url": "https://huggingface.co/mradermacher/Holo-3.1-9B-GGUF/resolve/371e848e3ade2b37b0b8ae59da2415346d86d2e2/Holo-3.1-9B.Q4_K_M.gguf",
+          "sha256": "e667aadce4ffd17cd351c5228bc5dd10bd4f362875c9bd4163ff2dee58249ff0",
+          "role": "model",
+          "size_bytes": 5629110176
+        },
+        {
+          "url": "https://huggingface.co/mradermacher/Holo-3.1-9B-GGUF/resolve/371e848e3ade2b37b0b8ae59da2415346d86d2e2/Holo-3.1-9B.mmproj-Q8_0.gguf",
+          "sha256": "f73c004cb5936351867593855eda826ece87f0bcc81539ee7f9a5e2beacaf5ad",
+          "role": "mmproj",
+          "size_bytes": 624230368
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "holo-3.1-9b",
+      "notes": "H Company's computer-use model for 8 GB graphics cards, fine-tuned from Qwen3.5-9B (community GGUF by mradermacher). H Company reports 72% on AndroidWorld (vendor-run). Hybrid attention: only 8 of 32 layers keep a KV cache. Model supports 262K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": true
+    },
+    {
+      "id": "gemma-4-12b-it-qat-q4",
+      "family": "gemma-4",
+      "label": "Gemma 4 12B (QAT)",
+      "maker": "Google",
+      "license": "Apache-2.0",
+      "params_b": 12.0,
+      "quant": "Q4_0",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 7.15,
+      "min_ram_gb": 8.9,
+      "min_vram_gb": 8.9,
+      "files": [
+        {
+          "url": "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/29d097773436b69ff9feafd636ab4cf873786537/gemma-4-12b-it-qat-q4_0.gguf",
+          "sha256": "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b",
+          "role": "model",
+          "size_bytes": 6975879296
+        },
+        {
+          "url": "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/29d097773436b69ff9feafd636ab4cf873786537/mmproj-gemma-4-12b-it-qat-q4_0.gguf",
+          "sha256": "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7",
+          "role": "mmproj",
+          "size_bytes": 175115616
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "gemma-4-12b-it",
+      "notes": "Google's own quantisation-aware 4-bit build of the dense Gemma 4 12B: trained for 4 bits, so it keeps more quality than a plain Q4 conversion. Same family as Kai's default model; fits a 12 GB graphics card. Model supports 256K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": false
+    },
+    {
+      "id": "fara-7b-q4",
+      "family": "fara",
+      "label": "Fara 7B",
+      "maker": "Microsoft",
+      "license": "MIT",
+      "params_b": 8.3,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 6.04,
+      "min_ram_gb": 8.0,
+      "min_vram_gb": 8.0,
+      "files": [
+        {
+          "url": "https://huggingface.co/bartowski/microsoft_Fara-7B-GGUF/resolve/b51b2b04408fbf5da0e91ba634dfc573a38efed5/microsoft_Fara-7B-Q4_K_M.gguf",
+          "sha256": "4597788eca332076afeb8376d64627583e1b14e10ce2e92a4a6d8a742f48a896",
+          "role": "model",
+          "size_bytes": 4683072288
+        },
+        {
+          "url": "https://huggingface.co/bartowski/microsoft_Fara-7B-GGUF/resolve/b51b2b04408fbf5da0e91ba634dfc573a38efed5/mmproj-microsoft_Fara-7B-f16.gguf",
+          "sha256": "148cc0a76f0fc5aa467f44a11e0a3d98f530df920f1a315384aafdc1d31ddc76",
+          "role": "mmproj",
+          "size_bytes": 1354162912
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "fara-7b",
+      "notes": "Microsoft's small computer-use agent for the web (Qwen2.5-VL 7B base, community GGUF by bartowski). Microsoft reports 73.5% on WebVoyager (vendor-run). It was trained on its own action format; Kai's JSON reply is enforced by the server's grammar. Model supports 128K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": true
+    },
+    {
+      "id": "glm-4.6v-flash-q4",
+      "family": "glm-4.6v",
+      "label": "GLM-4.6V Flash",
+      "maker": "Z.ai",
+      "license": "MIT",
+      "params_b": 10.3,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 7.15,
+      "min_ram_gb": 8.9,
+      "min_vram_gb": 8.9,
+      "files": [
+        {
+          "url": "https://huggingface.co/ggml-org/GLM-4.6V-Flash-GGUF/resolve/8166025cb5d128bdeec59e03d624e5bf07295139/GLM-4.6V-Flash-Q4_K_M.gguf",
+          "sha256": "10910372ab8a31a11b46d34cc54b1e8ff275e893c3d8787008497d000ac0e4e6",
+          "role": "model",
+          "size_bytes": 6166577888
+        },
+        {
+          "url": "https://huggingface.co/ggml-org/GLM-4.6V-Flash-GGUF/resolve/8166025cb5d128bdeec59e03d624e5bf07295139/mmproj-GLM-4.6V-Flash-Q8_0.gguf",
+          "sha256": "5d3af471d3a52020278528480f44b608592b42584e2e65828b40bc8851b653ac",
+          "role": "mmproj",
+          "size_bytes": 980055680
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "glm-4.6v-flash",
+      "notes": "Z.ai's small open vision model (llama.cpp's own GGUF), strong at reading documents and screens. A general model, not trained for computer use. Model supports 128K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": false
+    },
+    {
+      "id": "qwen3.5-9b-q4",
+      "family": "qwen3.5",
+      "label": "Qwen3.5 9B",
+      "maker": "Alibaba Qwen",
+      "license": "Apache-2.0",
+      "params_b": 9.7,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 6.6,
+      "min_ram_gb": 8.2,
+      "min_vram_gb": 8.2,
+      "files": [
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf",
+          "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+          "role": "model",
+          "size_bytes": 5680522464
+        },
+        {
+          "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/mmproj-F16.gguf",
+          "sha256": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f",
+          "role": "mmproj",
+          "size_bytes": 918166080
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "qwen3.5-9b",
+      "notes": "The general Qwen3.5 9B with vision (community GGUF by unsloth): the base Holo3.1 9B was trained from, here for comparison. Hybrid attention: only 8 of 32 layers keep a KV cache. Model supports 262K context; Kai asks for 16K.",
+      "computer_use": "untested",
+      "agent_trained": false
     }
   ]
 }

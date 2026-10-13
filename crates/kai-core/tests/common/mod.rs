@@ -18,6 +18,8 @@ pub struct Seen {
     pub had_image: bool,
     pub had_crop: bool,
     pub text: String,
+    pub system: String,
+    pub schema: serde_json::Value,
 }
 
 /// Wraps [`MockClient`] and records every call.
@@ -53,6 +55,8 @@ impl ModelClient for Counting {
             had_image: !req.images.screenshot_jpeg.is_empty(),
             had_crop: req.images.crop_jpeg.is_some(),
             text: req.user_text.to_string(),
+            system: req.system.to_string(),
+            schema: req.schema.clone(),
         });
         self.inner.decide(req).await
     }

@@ -299,6 +299,9 @@ pub struct Config {
     /// When two steps change nothing, diagnose why and change course once
     /// before stopping to ask (`engine/recover.rs`). Off until measured.
     pub recover: bool,
+    /// Offer the model a run memo, a scratchpad shown back every step, so
+    /// long runs keep what they read (`memo.rs`). Off until measured.
+    pub memo: bool,
 }
 
 impl Default for Config {
@@ -324,6 +327,7 @@ impl Default for Config {
             procedures: false,
             best_of: 0,
             recover: false,
+            memo: false,
         }
     }
 }

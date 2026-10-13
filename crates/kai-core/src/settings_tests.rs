@@ -142,6 +142,7 @@ fn experimental_switches_are_off_until_turned_on() {
     let s = Settings::default();
     let c = s.engine_config();
     assert!(!c.outcomes && !c.macro_history && !c.procedures && !c.recover && !c.executor);
+    assert!(!c.memo);
     assert_eq!(c.best_of, 0);
     let s = Settings {
         verify_outcomes: true,
@@ -149,9 +150,10 @@ fn experimental_switches_are_off_until_turned_on() {
         use_procedures: true,
         best_of_plans: true,
         recover: true,
+        memo: true,
         ..Settings::default()
     };
     let c = s.engine_config();
-    assert!(c.outcomes && c.macro_history && c.procedures && c.recover);
+    assert!(c.outcomes && c.macro_history && c.procedures && c.recover && c.memo);
     assert_eq!(c.best_of, 3);
 }

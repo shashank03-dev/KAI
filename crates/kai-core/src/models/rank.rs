@@ -124,6 +124,11 @@ fn computer_use_rank(e: &ModelEntry) -> i32 {
     }
 }
 
+/// Ties between equally tested models go to the ones made for computer use.
+fn agent_rank(e: &ModelEntry) -> i32 {
+    i32::from(e.agent_trained)
+}
+
 fn gpu_name(hw: &HardwareSummary) -> String {
     let name = hw.gpu_name.clone().unwrap_or_else(|| "GPU".into());
     match hw.gpu_vram_gb {
@@ -190,9 +195,9 @@ fn reason(e: &ModelEntry, hw: &HardwareSummary, p: Place) -> String {
 
 /// Rank the catalog for this hardware: Best first, then by how well each
 /// runs; models that do not fit last. Ties go to computer-use status, then
-/// to the larger model.
+/// to models trained for computer use, then to the larger model.
 pub fn rank(catalog: &Catalog, hw: &HardwareSummary) -> Vec<Ranked> {
-    let mut scored: Vec<(i32, i32, f32, Ranked)> = catalog
+    let mut scored: Vec<((i32, i32, i32), f32, Ranked)> = catalog
         .models
         .iter()
         .map(|e| {
@@ -208,11 +213,11 @@ pub fn rank(catalog: &Catalog, hw: &HardwareSummary) -> Vec<Ranked> {
                 fit,
                 reason: reason(e, hw, p),
             };
-            (t, computer_use_rank(e), e.params_b, r)
+            ((t, computer_use_rank(e), agent_rank(e)), e.params_b, r)
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.total_cmp(&a.2)));
-    let mut out: Vec<Ranked> = scored.into_iter().map(|s| s.3).collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.total_cmp(&a.1)));
+    let mut out: Vec<Ranked> = scored.into_iter().map(|s| s.2).collect();
     // "Best" is a recommendation, so it goes only to a model that has been
     // tried with Kai's harness; an untested model can rank high on fit
     // alone but is never recommended. No tested model fits: no Best.

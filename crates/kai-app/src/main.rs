@@ -16,6 +16,7 @@ mod i18n;
 mod local;
 mod local_api;
 mod mini;
+mod nav;
 mod onboarding;
 mod pages;
 mod runs;

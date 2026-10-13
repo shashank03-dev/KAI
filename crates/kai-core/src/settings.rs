@@ -128,6 +128,10 @@ pub struct Settings {
     /// When two steps change nothing, diagnose why and change course once
     /// before asking. Off until measured.
     pub recover: bool,
+    /// Give the model a run memo, a short scratchpad shown back every step,
+    /// so long runs keep what they read (docs/LONG_RUNS.md). Off until
+    /// measured.
+    pub memo: bool,
     /// Do tasks in Kai's own browser over the DevTools Protocol instead of
     /// on the desktop (docs/BROWSER.md): background input, the page's own
     /// tree. Off by default; Linux for now.
@@ -175,6 +179,7 @@ impl Default for Settings {
             use_procedures: false,
             best_of_plans: false,
             recover: false,
+            memo: false,
             use_browser: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
@@ -312,6 +317,7 @@ impl Settings {
             procedures: self.use_procedures,
             best_of: if self.best_of_plans { 3 } else { 0 },
             recover: self.recover,
+            memo: self.memo,
             learn: self.learn,
             reflect: self.reflect,
             ..crate::Config::default()

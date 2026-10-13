@@ -320,6 +320,7 @@ fn lessons_go_in_the_user_turn_never_the_system_prompt() {
         has_screenshot: true,
         lessons: Some(&block),
         macro_history: None,
+        memo: None,
     });
     assert!(turn.starts_with("From earlier runs on this computer:\n- In Mousepad"));
     assert!(turn.find("Elements:").unwrap() > turn.find("ctrl+s").unwrap());

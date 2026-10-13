@@ -153,6 +153,10 @@ impl Engine<'_> {
             system.push_str(crate::web::READ_RULE);
             schema = StepReply::with_read_page(&schema);
         }
+        if self.config.memo {
+            system.push_str(crate::memo::RULE);
+            schema = crate::memo::with_memo(&schema);
+        }
         let deadline = Instant::now() + self.config.max_time;
         r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
 
@@ -258,6 +262,7 @@ impl Engine<'_> {
         let first = self.outcome_request(r, &mut notes, schema);
         let lessons = self.lessons_for(r, obs);
         let verified = self.config.macro_history.then(|| self.verified_outcomes(r));
+        let memo = r.memo.render();
         let user_text = prompt::build_turn(&TurnInput {
             lessons: lessons.as_deref(),
             task: r.task,
@@ -268,6 +273,7 @@ impl Engine<'_> {
             notes: &notes,
             has_screenshot: !obs.images.screenshot_jpeg.is_empty(),
             macro_history: verified.as_deref(),
+            memo: memo.as_deref(),
         });
         let escalate = r.failure_streak > 0 || r.no_progress_streak > 0 || r.careful_next;
         r.careful_next = false;
@@ -301,6 +307,11 @@ impl Engine<'_> {
         }
         if reply.read_page && self.perceptor.reads_pages() {
             r.read_page = true;
+        }
+        if self.config.memo
+            && let Some(what) = r.memo.update(reply.memo.as_deref())
+        {
+            log::warn!("memo refused at step {step}: it looks like {what}");
         }
         let decision = reply.decision;
 

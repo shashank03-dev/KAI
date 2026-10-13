@@ -28,6 +28,9 @@ pub struct StepReply {
     /// Upcoming subgoals for the executor; empty when absent (today's
     /// behaviour). See [`crate::plan::parse_plan`].
     pub plan: Vec<Subgoal>,
+    /// The model's scratchpad for this run, when it wrote one (offered only
+    /// with `Config::memo`; see [`crate::memo`]).
+    pub memo: Option<String>,
     /// Raw `outcomes` (first call only; the engine reads them once and
     /// ignores them on every later reply). See [`crate::ledger`].
     pub outcomes: Vec<Value>,
@@ -76,6 +79,9 @@ impl StepReply {
             .remove("read_page")
             .and_then(|b| b.as_bool())
             .unwrap_or(false);
+        let memo = obj
+            .remove("memo")
+            .and_then(|m| m.as_str().map(str::to_string));
         let mut decision: Decision =
             serde_json::from_value(v).map_err(|e| SchemaError::Parse(e.to_string()))?;
         decision.validate_and_clamp()?;
@@ -110,6 +116,7 @@ impl StepReply {
             need_screen,
             read_page,
             plan,
+            memo,
             outcomes,
         })
     }

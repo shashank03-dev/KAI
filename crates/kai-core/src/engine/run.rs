@@ -80,6 +80,8 @@ pub(super) struct Run<'t> {
     pub(super) plan_note: Option<String>,
     /// Diagnosed recoveries so far (`Config::recover`).
     pub(super) recoveries: u32,
+    /// The model's scratchpad (`Config::memo`).
+    pub(super) memo: crate::memo::Memo,
 }
 
 impl<'t> Run<'t> {
@@ -129,6 +131,7 @@ impl<'t> Run<'t> {
             procedure: None,
             plan_note: None,
             recoveries: 0,
+            memo: Default::default(),
         }
     }
 }

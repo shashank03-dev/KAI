@@ -6,6 +6,9 @@
 //! OS-free: the hardware numbers come from `kai_os::local::detect_hardware`,
 //! downloads and the server from `kai_os::local::LocalManager`.
 
+pub mod hub;
+#[cfg(test)]
+mod hub_tests;
 mod rank;
 #[cfg(test)]
 mod rank_tests;
@@ -82,6 +85,11 @@ pub struct ModelEntry {
     pub notes: String,
     /// `recommended`, `experimental` or `untested`.
     pub computer_use: String,
+    /// Its maker trained it to operate computers (Holo, Fara). Shown in the
+    /// store and breaks ties between untested models; it is not a Kai
+    /// measurement (that is `computer_use`).
+    #[serde(default)]
+    pub agent_trained: bool,
 }
 
 impl ModelEntry {
@@ -214,7 +222,7 @@ impl Catalog {
     /// The built-in catalog with `<config>/models.json` merged on top.
     pub fn load() -> Self {
         let mut c = Self::builtin();
-        let path = crate::settings::Settings::dir().join("models.json");
+        let path = Self::user_file();
         if let Err(e) = c.merge_file(&path) {
             log::warn!("ignoring {}: {e:#}", path.display());
         }
@@ -256,6 +264,42 @@ impl Catalog {
 
     pub fn get(&self, id: &str) -> Option<&ModelEntry> {
         self.models.iter().find(|m| m.id == id)
+    }
+
+    /// An entry with the same model weights as `e` (by SHA-256), if any.
+    pub fn same_weights(&self, e: &ModelEntry) -> Option<&ModelEntry> {
+        let sha = e.model_file()?.sha256.as_deref()?;
+        self.models
+            .iter()
+            .find(|m| m.model_file().and_then(|f| f.sha256.as_deref()) == Some(sha))
+    }
+
+    /// The user's own catalog file, merged on top of the built-in one.
+    pub fn user_file() -> std::path::PathBuf {
+        crate::settings::Settings::dir().join("models.json")
+    }
+
+    /// Add `entry` to the user catalog at `path` (same id replaces), keeping
+    /// every other entry there. Written to a temporary file first, so a
+    /// crash never leaves half a catalog.
+    pub fn save_user_entry(path: &Path, entry: &ModelEntry) -> anyhow::Result<()> {
+        let mut user = match std::fs::read_to_string(path) {
+            Ok(text) => Self::from_json(&text)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(e) => return Err(e.into()),
+        };
+        user.version = 1;
+        user.merge(Catalog {
+            version: 1,
+            models: vec![entry.clone()],
+        });
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(&user)?)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
     }
 }
 
