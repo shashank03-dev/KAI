@@ -57,6 +57,11 @@ pub fn find_browser() -> Option<PathBuf> {
 pub(super) enum MarkTarget {
     Dom(DomRef),
     Dialog(DialogTarget),
+    /// An option of the dropdown the lane opened (`dropdown.rs`).
+    Option {
+        select: DomRef,
+        index: usize,
+    },
 }
 
 /// The marks of the latest observation and what each one stands for.
@@ -91,6 +96,8 @@ pub struct BrowserLane {
     /// The marks of the last dialog shown, so an action on one of them after
     /// the dialog closed is refused instead of clicking the page under it.
     pub(super) last_dialog: Mutex<Vec<kai_core::Element>>,
+    /// The native dropdown whose options are listed as marks.
+    pub(super) open_select: Mutex<Option<DomRef>>,
 }
 
 impl BrowserLane {
@@ -146,6 +153,7 @@ impl BrowserLane {
             )),
             file_chooser: AtomicBool::new(false),
             last_dialog: Mutex::default(),
+            open_select: Mutex::default(),
         })
     }
 
@@ -205,6 +213,7 @@ impl BrowserLane {
             *self.page.lock().unwrap_or_else(|e| e.into_inner()) = PageRef { target, session };
             *self.marked.lock().unwrap_or_else(|e| e.into_inner()) = Marked::default();
             *self.answer.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            self.close_dropdown();
             log::info!("browser lane: now working in the newly opened tab");
         } else if crashed {
             log::warn!("browser lane: the page crashed; reloading it");

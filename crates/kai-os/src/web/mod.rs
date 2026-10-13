@@ -6,6 +6,7 @@
 mod act;
 pub mod cdp;
 pub mod dialog;
+pub mod dropdown;
 pub mod keys;
 mod lane;
 mod look;

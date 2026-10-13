@@ -3,9 +3,9 @@
 //! the page, so nothing else can be read until it is answered).
 
 use super::cdp::DialogOpen;
-use super::dialog;
 use super::lane::{BrowserLane, MarkTarget, Marked};
 use super::snapshot::{self, PageInfo};
+use super::{dialog, dropdown};
 use crate::{a11y, frame, marks, zoom};
 use async_trait::async_trait;
 use kai_core::{Grounding, Images, Observation, ObserveTiming, Perceptor, Rect};
@@ -50,11 +50,19 @@ impl BrowserLane {
             anyhow::bail!("the page changed while it was read");
         }
         let raw: Vec<_> = nodes.iter().map(|(n, _)| n.clone()).collect();
-        let (grounding, picked) = a11y::ground_indexed(&raw, view);
-        let targets = picked
+        let (mut grounding, picked) = a11y::ground_indexed(&raw, view);
+        let mut targets: Vec<MarkTarget> = picked
             .iter()
             .map(|&i| MarkTarget::Dom(nodes[i].1))
             .collect();
+        // An open native dropdown: its options, numbered after the page.
+        if let Grounding::Marks(els) = &mut grounding
+            && let Some((select, under, options)) = self.open_list().await
+        {
+            let listed = dropdown::option_marks(&options, under, els.len() as u32 + 1);
+            targets.extend((0..listed.len()).map(|index| MarkTarget::Option { select, index }));
+            els.extend(listed);
+        }
         Ok((grounding, targets, info, view))
     }
 

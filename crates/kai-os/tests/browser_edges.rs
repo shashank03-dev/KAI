@@ -202,6 +202,34 @@ async fn native_dropdowns_are_chosen_by_label() {
     );
     let disabled = lane.act(&type_into(size, "Large"), &g).await.unwrap_err();
     assert!(disabled.to_string().contains("disabled"), "{disabled}");
+
+    // Clicking it opens the list as marks numbered after the page.
+    let g = lane.observe().await.unwrap().grounding;
+    lane.act(&click(size), &g).await.unwrap();
+    let open = lane.observe().await.unwrap().grounding;
+    let small = mark(&open, Role::ListItem, "Small (option)");
+    assert!(
+        small > mark(&open, Role::Button, "Buy"),
+        "{}",
+        open.as_text()
+    );
+    let large = mark(&open, Role::ListItem, "Large (option)");
+    assert!(!open.element(large).unwrap().enabled);
+    lane.act(&click(small), &open).await.unwrap();
+    let chosen = lane.observe().await.unwrap();
+    assert_eq!(chosen.window_title.as_deref(), Some("size=s"));
+    assert!(
+        !chosen.grounding.as_text().contains("(option)"),
+        "the list closes"
+    );
+    // Esc closes an open list without choosing.
+    lane.act(&click(size), &chosen.grounding).await.unwrap();
+    let again = lane.observe().await.unwrap().grounding;
+    assert!(again.as_text().contains("(option)"));
+    lane.act(&key(r#"["esc"]"#), &again).await.unwrap();
+    let closed = lane.observe().await.unwrap();
+    assert!(!closed.grounding.as_text().contains("(option)"));
+    assert_eq!(closed.window_title.as_deref(), Some("size=s"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

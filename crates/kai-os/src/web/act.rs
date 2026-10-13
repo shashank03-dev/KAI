@@ -6,7 +6,6 @@ use super::cdp::DialogOpen;
 use super::dialog::{self, DialogTarget};
 use super::keys::{self, Chord};
 use super::lane::{BrowserLane, MarkTarget};
-use super::snapshot::DomRef;
 use async_trait::async_trait;
 use kai_core::{Action, Actuator, Decision, Direction, Grounding};
 use serde_json::{Value, json};
@@ -15,27 +14,6 @@ use std::time::Duration;
 
 /// Longest a navigation may take before the step fails.
 const LOAD_LIMIT: Duration = Duration::from_secs(20);
-
-/// Picks a `<select>` option by its label (exact, then prefix, then
-/// contains; case-insensitive) or value, and fires `input` and `change` as
-/// a person's choice would. Runs on the element itself; the label is an
-/// argument, never pasted into the code.
-const CHOOSE_OPTION: &str = r#"function (label) {
-  const want = String(label).trim().toLowerCase();
-  const opts = Array.from(this.options || []);
-  const text = o => (o.label || o.text || '').trim();
-  const o = opts.find(o => text(o).toLowerCase() === want || o.value.toLowerCase() === want)
-    || opts.find(o => text(o).toLowerCase().startsWith(want))
-    || opts.find(o => text(o).toLowerCase().includes(want));
-  if (!o) return { ok: false, options: opts.map(text).slice(0, 30) };
-  if (o.disabled) return { ok: false, disabled: text(o) };
-  this.focus();
-  this.value = o.value;
-  o.selected = true;
-  this.dispatchEvent(new Event('input', { bubbles: true }));
-  this.dispatchEvent(new Event('change', { bubbles: true }));
-  return { ok: true, chosen: text(o) };
-}"#;
 
 /// An input call that a page dialog interrupted did its job: the click or
 /// key landed and the page answered with a dialog. The next observation
@@ -187,42 +165,6 @@ impl BrowserLane {
         .map(drop)
     }
 
-    /// Choose an option of a native `<select>` by its label.
-    async fn choose(&self, r: DomRef, label: &str) -> anyhow::Result<()> {
-        let node = self
-            .page("DOM.resolveNode", json!({"backendNodeId": r.id}))
-            .await?;
-        let object = node["object"]["objectId"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("the dropdown is no longer on the page"))?;
-        let res = self
-            .page(
-                "Runtime.callFunctionOn",
-                json!({
-                    "objectId": object,
-                    "functionDeclaration": CHOOSE_OPTION,
-                    "arguments": [{"value": label}],
-                    "returnByValue": true,
-                }),
-            )
-            .await?;
-        let v = &res["result"]["value"];
-        if v["ok"] == true {
-            return Ok(());
-        }
-        if let Some(d) = v["disabled"].as_str() {
-            anyhow::bail!("the option \"{d}\" is disabled");
-        }
-        let options: Vec<&str> = v["options"]
-            .as_array()
-            .map(|o| o.iter().filter_map(Value::as_str).collect())
-            .unwrap_or_default();
-        anyhow::bail!(
-            "no option \"{label}\" in this dropdown; its options are: {}",
-            options.join(", ")
-        )
-    }
-
     /// Answer the open page dialog.
     async fn answer(&self, accept: bool) -> anyhow::Result<()> {
         let session = self.current().session;
@@ -286,6 +228,13 @@ impl BrowserLane {
     }
 }
 
+/// The option's own text from its mark name (`Billing (option)`).
+fn option_label(name: &str) -> String {
+    name.trim_end_matches(" (selected option)")
+        .trim_end_matches(" (option)")
+        .to_string()
+}
+
 fn quad_centre(q: &Value) -> Option<(f64, f64)> {
     let v: Vec<f64> = q.as_array()?.iter().filter_map(Value::as_f64).collect();
     if v.len() < 8 {
@@ -321,6 +270,31 @@ impl Actuator for BrowserLane {
         if on_old_dialog || matches!(target, Some(MarkTarget::Dialog(_))) {
             anyhow::bail!("that page dialog is already closed; look at the page again");
         }
+        // A listed dropdown option, or a native dropdown to open: handled
+        // here, never by mouse (the browser's own popup is invisible).
+        match (d.action, target) {
+            (Action::Click | Action::DoubleClick, Some(MarkTarget::Option { select, index })) => {
+                let label = d
+                    .target
+                    .and_then(|m| g.element(m))
+                    .map(|e| option_label(&e.name))
+                    .unwrap_or_default();
+                return self.choose(select, &label, Some(index)).await;
+            }
+            (Action::Click, Some(MarkTarget::Dom(r))) if r.select => {
+                let _ = self.page("DOM.focus", json!({"backendNodeId": r.id})).await;
+                self.open_dropdown(r);
+                return Ok(());
+            }
+            (Action::Wait, _) => return Ok(()),
+            (Action::Key, _)
+                if d.keys == ["esc"] && self.open_select.lock().is_ok_and(|o| o.is_some()) =>
+            {
+                self.close_dropdown();
+                return Ok(());
+            }
+            _ => self.close_dropdown(),
+        }
         landed(match d.action {
             Action::Click | Action::DoubleClick | Action::RightClick => {
                 let mark = d.target.ok_or_else(|| anyhow::anyhow!("no target"))?;
@@ -333,7 +307,7 @@ impl Actuator for BrowserLane {
             }
             Action::Type => match target {
                 Some(MarkTarget::Dom(r)) if r.select => {
-                    self.choose(r, d.text.as_deref().unwrap_or("")).await
+                    self.choose(r, d.text.as_deref().unwrap_or(""), None).await
                 }
                 _ => {
                     if let Some(mark) = d.target {
@@ -405,6 +379,16 @@ mod tests {
         assert_eq!(quad_centre(&q), Some((20.0, 30.0)));
         assert_eq!(quad_centre(&json!([1.0, 2.0])), None);
         assert_eq!(quad_centre(&Value::Null), None);
+    }
+
+    #[test]
+    fn option_labels_come_back_from_mark_names() {
+        assert_eq!(option_label("Billing (option)"), "Billing");
+        assert_eq!(option_label("General (selected option)"), "General");
+        assert_eq!(
+            option_label("Odd (option) name (option)"),
+            "Odd (option) name"
+        );
     }
 
     #[test]
