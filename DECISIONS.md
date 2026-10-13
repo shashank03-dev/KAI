@@ -673,3 +673,14 @@ only back up procedures, which are off by default.
   Numbers and method: docs/LOCAL_MODELS.md.
 - **Screen capture needs a window manager** under bare Xvfb in this container
   (`kai smoke` failed with "Connection error" until openbox ran).
+- **Live A/B result** (bench/results/2026-10-13-browser-ab.md): with all
+  fixes, lane 8/8 vs desktop 7/8 on the four local web tasks (2 runs each),
+  38 vs 70 steps, 85k vs 162k prompt tokens, 178 s vs 409 s. Fixes found by
+  the live runs: dropdown popups as option marks, typing replaces a field's
+  value, the `fill-form` skill's submit rule (twice).
+- **Holo3.1 4B locally**: 3/4 on the same tasks via the lane, 46 s per call
+  on 4 CPU cores, 4.44 GB peak RSS. Stays `untested` in the catalog (one
+  run, CPU only): not enough to recommend it over Gemma.
+- **`kai bench --backend local`** now starts the model's server, as
+  `kai run` does (it failed unless a server was already running).
+- The lane stays opt-in (`--browser`): the A/B is two runs on four tasks.

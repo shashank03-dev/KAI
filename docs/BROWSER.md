@@ -101,16 +101,33 @@ engine, with scripted replies, opens the form, types a name, clicks Send
 (high risk, approved) and finishes with `done`; the page's address then shows
 the submitted form. Passed.
 
-**Not measured:** any live model on the lane (no model key in this session),
-so no pass-rate or steps-per-task claim. Next: run the bench's web tasks
-with and without `--browser` on the same model, twice per side.
+## Live model A/B (2026-10-13)
+
+Gemma 4 26B-A4B through the Gemini API, the bench's four local web tasks,
+two runs per side, each task checked by its own shell check. Full method,
+every round and the raw files: [bench/results/2026-10-13-browser-ab.md](../bench/results/2026-10-13-browser-ab.md).
+
+| | Desktop | Browser lane |
+| --- | --- | --- |
+| Tasks passed | 7 / 8 | **8 / 8** |
+| Steps | 70 | **38** |
+| Model calls | 76 | **42** |
+| Prompt tokens | 162k | **85k** |
+| Wall time | 409 s | **178 s** |
+
+Eight task runs per side is too few for the pass rate to mean much; the
+step, call and token reductions hold on every task. Each lane failure in
+earlier rounds became a fix: dropdowns open as option marks, typing
+replaces a field's value, and two skill problems that hit both paths.
+
+Run it yourself: `kai bench --backend gemini --model gemma-4-26b-a4b-it
+--browser --headless --only fill-form --only web-form-submit --only
+local-price-lookup --only download-file --yes`.
 
 ## Not built yet
 
 - **Page text for reading tasks** (Anthropic's `get_page_text`):
   RESEARCH_2026_10_VENDORS.md §5.2.
-- **`kai bench --browser`**: the bench's tasks set up and check the desktop;
-  web tasks need a lane-aware setup.
 - **Windows and Firefox.** Windows needs the pipe over inherited handles (or
   a port plus a token); Firefox speaks WebDriver BiDi, not CDP.
 - **File uploads.** Detected and handed to the user, not performed.

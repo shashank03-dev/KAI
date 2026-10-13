@@ -34,7 +34,12 @@ pixels.*
   --browser` drives a Chromium-family browser over the DevTools Protocol
   instead of the desktop: the page's own accessibility tree, input that never
   moves your pointer or takes focus, and the real page address for checks.
-  Same marks, same actions, same safety rules ([docs/BROWSER.md](docs/BROWSER.md)).
+  Same marks, same actions, same safety rules. Measured with Gemma 4 26B
+  on the four local web tasks: 8/8 vs 7/8 on the desktop, with half the
+  steps, tokens and time ([docs/BROWSER.md](docs/BROWSER.md)).
+- **Fully offline:** Holo3.1 4B (H Company, Apache-2.0) runs locally in
+  about 4.4 GB of RAM (`kai models install holo-3.1-4b-q4`); see
+  [docs/LOCAL_MODELS.md](docs/LOCAL_MODELS.md).
 - **Skills:** reusable know-how in the Agent Skill Open Standard. Finish a run,
   press **Save as skill**, and the next run of that task skips steps the model
   no longer needs to think about.

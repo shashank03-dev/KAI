@@ -220,6 +220,11 @@ screenshot (~950 prompt tokens), RSS read from `ps`:
 - **Image budget**: limiting the image to 512 or 320 tokens cut the first
   call to 14.4 s / 10.0 s but picked the wrong element (#58, #10 instead of
   #63), so Kai keeps the model's default budget.
+- **On real tasks** (`kai bench --backend local --model holo-3.1-4b-q4
+  --browser --headless`, the four local web tasks, one run): 3 / 4 passed,
+  model call p50 46 s, llama-server RSS 4.44 GB peak over the run.
+  Too slow for the 10-minute task limit on long tasks on a 4-core CPU;
+  details in `bench/results/2026-10-13-browser-ab.md`.
 - Kai starts every local server with these flags (`LEAN` in
   `crates/kai-os/src/local/server.rs`); a server already running with older
   flags is reused until it is stopped (`kai models stop`).
