@@ -84,7 +84,7 @@ fn layout(snapshot: &Value) -> (HashMap<i64, Layout>, PageInfo) {
             .and_then(|st| st.get(0))
             .map(|v| !matches!(s(v), "hidden" | "collapse"))
             .unwrap_or(true);
-        let tag = names.and_then(|n| n.get(ni)).map(&s).unwrap_or("");
+        let tag = names.and_then(|n| n.get(ni)).map(s).unwrap_or("");
         let is_input = tag.eq_ignore_ascii_case("input");
         let password = is_input
             && attrs
