@@ -4,13 +4,13 @@
 //! eyes and hands change (`docs/BROWSER.md`).
 
 use super::cdp::Cdp;
-use super::snapshot::{self, PageInfo};
-use crate::{a11y, frame, marks, zoom};
-use async_trait::async_trait;
-use kai_core::{Actuator, Grounding, Images, Observation, ObserveTiming, Perceptor, Rect};
+use super::dialog::DialogTarget;
+use super::snapshot::{DomRef, PageInfo};
+use kai_core::{Actuator, Grounding, Rect};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// How to start the lane's browser.
@@ -25,6 +25,9 @@ pub struct LaneOptions {
     pub headless: bool,
     /// Window (or headless viewport) size in CSS pixels.
     pub size: (u32, u32),
+    /// Where downloads go (the user's Downloads folder); `None` keeps the
+    /// browser's default (a headless browser then refuses downloads).
+    pub downloads: Option<PathBuf>,
 }
 
 /// Executable names tried on `PATH`, in order.
@@ -49,19 +52,45 @@ pub fn find_browser() -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The marks of the latest observation and the DOM node behind each one.
+/// What a mark stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MarkTarget {
+    Dom(DomRef),
+    Dialog(DialogTarget),
+}
+
+/// The marks of the latest observation and what each one stands for.
 #[derive(Default)]
 pub(super) struct Marked {
     pub grounding: Option<Grounding>,
-    pub nodes: Vec<i64>,
+    pub targets: Vec<MarkTarget>,
+}
+
+/// The tab Kai is working in.
+#[derive(Debug, Clone)]
+pub(super) struct PageRef {
+    pub target: String,
+    pub session: String,
 }
 
 pub struct BrowserLane {
     pub(super) cdp: Cdp,
-    pub(super) session: String,
+    pub(super) page: Mutex<PageRef>,
     pub(super) marked: Mutex<Marked>,
     /// Shell and app launches go to the desktop's hands when Kai has them.
     pub(super) fallback: Option<Box<dyn Actuator>>,
+    pub(super) headless: bool,
+    pub(super) size: (u32, u32),
+    /// What the model typed into an open `prompt()` dialog.
+    pub(super) answer: Mutex<Option<String>>,
+    /// The page facts and viewport of the last successful read, shown while
+    /// a dialog freezes the page.
+    pub(super) last: Mutex<(PageInfo, Rect)>,
+    /// A click opened a file picker (intercepted: Kai cannot choose files).
+    pub(super) file_chooser: AtomicBool,
+    /// The marks of the last dialog shown, so an action on one of them after
+    /// the dialog closed is refused instead of clicking the page under it.
+    pub(super) last_dialog: Mutex<Vec<kai_core::Element>>,
 }
 
 impl BrowserLane {
@@ -72,7 +101,27 @@ impl BrowserLane {
     ) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&opts.profile)?;
         let cdp = Cdp::launch(&opts.browser, &args(opts))?;
-        let targets = cdp.call("Target.getTargets", json!({}), None).await?;
+        let targets = match cdp.call("Target.getTargets", json!({}), None).await {
+            Ok(t) => t,
+            Err(e) if exited(&cdp).await => anyhow::bail!(
+                "the browser ({}) exited at start: {e}. Is another Kai browser already \
+                 open with the profile {}?",
+                opts.browser.display(),
+                opts.profile.display()
+            ),
+            Err(e) => return Err(e),
+        };
+        cdp.call("Target.setDiscoverTargets", json!({"discover": true}), None)
+            .await?;
+        if let Some(dir) = &opts.downloads {
+            std::fs::create_dir_all(dir)?;
+            cdp.call(
+                "Browser.setDownloadBehavior",
+                json!({"behavior": "allow", "downloadPath": dir}),
+                None,
+            )
+            .await?;
+        }
         let page = targets["targetInfos"]
             .as_array()
             .and_then(|t| t.iter().find(|t| t["type"] == "page"))
@@ -80,92 +129,99 @@ impl BrowserLane {
             .map(str::to_string);
         let target = match page {
             Some(id) => id,
-            None => cdp
-                .call("Target.createTarget", json!({"url": "about:blank"}), None)
-                .await?["targetId"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("the browser opened no page"))?
-                .to_string(),
+            None => new_tab(&cdp).await?,
         };
-        let attached = cdp
-            .call(
-                "Target.attachToTarget",
-                json!({"targetId": target, "flatten": true}),
-                None,
-            )
-            .await?;
-        let session = attached["sessionId"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("could not attach to the browser page"))?
-            .to_string();
-        for m in ["Page.enable", "DOM.enable", "Accessibility.enable"] {
-            cdp.call(m, json!({}), Some(&session)).await?;
-        }
-        if opts.headless {
-            let (w, h) = opts.size;
-            cdp.call(
-                "Emulation.setDeviceMetricsOverride",
-                json!({"width": w, "height": h, "deviceScaleFactor": 1, "mobile": false}),
-                Some(&session),
-            )
-            .await?;
-        }
+        let session = attach(&cdp, &target, opts.headless, opts.size).await?;
         Ok(Self {
             cdp,
-            session,
+            page: Mutex::new(PageRef { target, session }),
             marked: Mutex::default(),
             fallback,
+            headless: opts.headless,
+            size: opts.size,
+            answer: Mutex::default(),
+            last: Mutex::new((
+                PageInfo::default(),
+                Rect::new(0.0, 0.0, opts.size.0 as f32, opts.size.1 as f32),
+            )),
+            file_chooser: AtomicBool::new(false),
+            last_dialog: Mutex::default(),
         })
     }
 
+    pub(super) fn current(&self) -> PageRef {
+        self.page.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub(super) async fn page(&self, method: &str, params: Value) -> anyhow::Result<Value> {
-        self.cdp.call(method, params, Some(&self.session)).await
-    }
-
-    /// The visible area in CSS pixels.
-    async fn viewport(&self) -> anyhow::Result<Rect> {
-        let m = self.page("Page.getLayoutMetrics", json!({})).await?;
-        let v = &m["cssVisualViewport"];
-        let f = |k: &str| v[k].as_f64().unwrap_or(0.0) as f32;
-        Ok(Rect::new(0.0, 0.0, f("clientWidth"), f("clientHeight")))
-    }
-
-    /// Tree + snapshot + viewport, in parallel; grounds and remembers marks.
-    async fn read(&self) -> anyhow::Result<(Grounding, PageInfo, Rect, u64)> {
-        let t = Instant::now();
-        let (ax, snap, view) = tokio::join!(
-            self.page("Accessibility.getFullAXTree", json!({})),
-            self.page(
-                "DOMSnapshot.captureSnapshot",
-                json!({"computedStyles": ["visibility"]})
-            ),
-            self.viewport(),
-        );
-        let view = view?;
-        let (nodes, info) = snapshot::nodes(&ax?, &snap?, view);
-        let raw: Vec<_> = nodes.iter().map(|(n, _)| n.clone()).collect();
-        let (grounding, picked) = a11y::ground_indexed(&raw, view);
-        let ids = picked.iter().map(|&i| nodes[i].1).collect();
-        if let Ok(mut m) = self.marked.lock() {
-            *m = Marked {
-                grounding: Some(grounding.clone()),
-                nodes: ids,
-            };
+        if !self.cdp.alive() {
+            anyhow::bail!("Kai's browser was closed");
         }
-        Ok((grounding, info, view, t.elapsed().as_millis() as u64))
+        let session = self.current().session;
+        self.cdp.call(method, params, Some(&session)).await
     }
 
-    /// The viewport as an image (works with the window covered or headless).
-    async fn shot(&self) -> anyhow::Result<image::RgbaImage> {
-        let r = self
-            .page(
-                "Page.captureScreenshot",
-                json!({"format": "jpeg", "quality": 90}),
-            )
-            .await?;
-        let b64 = r["data"].as_str().unwrap_or("");
-        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)?;
-        Ok(image::load_from_memory(&bytes)?.to_rgba8())
+    /// The open dialog on the current tab, if any.
+    pub(super) fn dialog(&self) -> Option<Value> {
+        self.cdp.dialog(&self.current().session)
+    }
+
+    /// Follow what happened between steps: a tab this page opened
+    /// (`target=_blank`, `window.open`) becomes the working tab, as it would
+    /// for a person; a closed working tab hands over to another one; a
+    /// crashed page is reloaded; a file picker is remembered for the action.
+    pub(super) async fn sync_tabs(&self) -> anyhow::Result<()> {
+        let now = self.current();
+        let (mut opened, mut closed, mut crashed) = (None, false, false);
+        for (method, p, session) in self.cdp.drain_events() {
+            let mine = session.as_deref() == Some(now.session.as_str());
+            match method.as_str() {
+                "Target.targetCreated"
+                    if p["targetInfo"]["type"] == "page"
+                        && p["targetInfo"]["openerId"] == now.target.as_str() =>
+                {
+                    opened = p["targetInfo"]["targetId"].as_str().map(str::to_string);
+                }
+                "Target.targetDestroyed" if p["targetId"] == now.target.as_str() => closed = true,
+                "Inspector.targetCrashed" if mine => crashed = true,
+                "Page.fileChooserOpened" if mine => self.file_chooser.store(true, Ordering::SeqCst),
+                _ => {}
+            }
+        }
+        let next = match (opened, closed) {
+            (Some(t), _) => Some(t),
+            (None, true) => Some(match self.any_page().await? {
+                Some(t) => t,
+                None => new_tab(&self.cdp).await?,
+            }),
+            _ => None,
+        };
+        if let Some(target) = next {
+            let session = attach(&self.cdp, &target, self.headless, self.size).await?;
+            let _ = self
+                .cdp
+                .call("Target.activateTarget", json!({"targetId": target}), None)
+                .await;
+            *self.page.lock().unwrap_or_else(|e| e.into_inner()) = PageRef { target, session };
+            *self.marked.lock().unwrap_or_else(|e| e.into_inner()) = Marked::default();
+            *self.answer.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            log::info!("browser lane: now working in the newly opened tab");
+        } else if crashed {
+            log::warn!("browser lane: the page crashed; reloading it");
+            let _ = self.page("Page.reload", json!({})).await;
+            self.wait_loaded(Duration::from_secs(10)).await;
+        }
+        Ok(())
+    }
+
+    /// The newest page tab still open, if any.
+    async fn any_page(&self) -> anyhow::Result<Option<String>> {
+        let t = self.cdp.call("Target.getTargets", json!({}), None).await?;
+        Ok(t["targetInfos"]
+            .as_array()
+            .and_then(|v| v.iter().rev().find(|t| t["type"] == "page"))
+            .and_then(|t| t["targetId"].as_str())
+            .map(str::to_string))
     }
 
     pub(super) async fn ready_state(&self) -> Option<String> {
@@ -179,35 +235,82 @@ impl BrowserLane {
         r["result"]["value"].as_str().map(str::to_string)
     }
 
-    /// Wait until the document has loaded, up to `max`.
+    /// Wait until the document has loaded, up to `max`. Returns early when
+    /// a dialog freezes the page or the browser is gone.
     pub(super) async fn wait_loaded(&self, max: Duration) {
         let deadline = Instant::now() + max;
         while Instant::now() < deadline {
+            if self.dialog().is_some() || !self.cdp.alive() {
+                return;
+            }
             if self.ready_state().await.as_deref() == Some("complete") {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+}
 
-    fn observation(
-        grounding: Grounding,
-        info: PageInfo,
-        view: Rect,
-        images: Images,
-        hash: u64,
-        timing: ObserveTiming,
-    ) -> Observation {
-        Observation {
-            images,
-            grounding,
-            screen_hash: hash,
-            timing,
-            screen: Some(view),
-            window_title: Some(info.title).filter(|t| !t.is_empty()),
-            url: Some(info.url).filter(|u| !u.is_empty()),
+/// Whether the browser process has ended, allowing it a moment: the pipe
+/// closes just before the process is gone.
+async fn exited(cdp: &Cdp) -> bool {
+    for _ in 0..20 {
+        if !cdp.alive() {
+            return true;
         }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    false
+}
+
+/// A new blank tab; its target id.
+async fn new_tab(cdp: &Cdp) -> anyhow::Result<String> {
+    Ok(cdp
+        .call("Target.createTarget", json!({"url": "about:blank"}), None)
+        .await?["targetId"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("the browser opened no page"))?
+        .to_string())
+}
+
+/// Attach to a tab and turn on what the lane reads. File pickers are
+/// intercepted so a native dialog can never block the browser.
+async fn attach(
+    cdp: &Cdp,
+    target: &str,
+    headless: bool,
+    size: (u32, u32),
+) -> anyhow::Result<String> {
+    let attached = cdp
+        .call(
+            "Target.attachToTarget",
+            json!({"targetId": target, "flatten": true}),
+            None,
+        )
+        .await?;
+    let session = attached["sessionId"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("could not attach to the browser page"))?
+        .to_string();
+    for m in ["Page.enable", "DOM.enable", "Accessibility.enable"] {
+        cdp.call(m, json!({}), Some(&session)).await?;
+    }
+    cdp.call(
+        "Page.setInterceptFileChooserDialog",
+        json!({"enabled": true}),
+        Some(&session),
+    )
+    .await?;
+    if headless {
+        let (w, h) = size;
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride",
+            json!({"width": w, "height": h, "deviceScaleFactor": 1, "mobile": false}),
+            Some(&session),
+        )
+        .await?;
+    }
+    Ok(session)
 }
 
 /// Command line for the lane's browser.
@@ -237,121 +340,6 @@ fn args(o: &LaneOptions) -> Vec<String> {
     a
 }
 
-/// Scale CSS-pixel marks into screenshot pixels for drawing.
-fn scaled(g: &Grounding, k: f32, img: (u32, u32)) -> Grounding {
-    match g {
-        Grounding::Marks(els) => Grounding::Marks(
-            els.iter()
-                .map(|e| {
-                    let mut e = e.clone();
-                    let b = e.bounds;
-                    e.bounds = Rect::new(b.x * k, b.y * k, b.w * k, b.h * k);
-                    e
-                })
-                .collect(),
-        ),
-        Grounding::Grid { cols, rows, .. } => Grounding::Grid {
-            cols: *cols,
-            rows: *rows,
-            screen: Rect::new(0.0, 0.0, img.0 as f32, img.1 as f32),
-        },
-    }
-}
-
-#[async_trait]
-impl Perceptor for BrowserLane {
-    async fn observe(&self) -> anyhow::Result<Observation> {
-        let t = Instant::now();
-        let (read, shot) = tokio::join!(self.read(), self.shot());
-        let (grounding, info, view, tree_ms) = read?;
-        let img = shot?;
-        let capture_ms = t.elapsed().as_millis() as u64;
-        let t_enc = Instant::now();
-        let k = if view.w > 0.0 {
-            img.width() as f32 / view.w
-        } else {
-            1.0
-        };
-        let draw = scaled(&grounding, k, img.dimensions());
-        let (jpeg, hash) = tokio::task::spawn_blocking(move || {
-            let f = frame::downscale(&img);
-            let hash = frame::content_hash(&f.image);
-            let mut marked = f.image;
-            marks::draw(&mut marked, &draw, f.scale);
-            (frame::encode_jpeg(&marked), hash)
-        })
-        .await?;
-        let images = Images {
-            screenshot_jpeg: jpeg,
-            crop_jpeg: None,
-        };
-        let timing = ObserveTiming {
-            capture_ms,
-            tree_ms,
-            encode_ms: t_enc.elapsed().as_millis() as u64,
-        };
-        Ok(Self::observation(
-            grounding, info, view, images, hash, timing,
-        ))
-    }
-
-    /// The page's tree alone: no screenshot. Falls back to a full look when
-    /// the page has no usable tree (canvas apps), as on the desktop.
-    async fn observe_tree_only(&self) -> anyhow::Result<Observation> {
-        let (grounding, info, view, tree_ms) = self.read().await?;
-        if matches!(grounding, Grounding::Grid { .. }) {
-            return self.observe().await;
-        }
-        let hash = crate::perceive::tree_hash(&grounding);
-        let images = Images {
-            screenshot_jpeg: Vec::new(),
-            crop_jpeg: None,
-        };
-        let timing = ObserveTiming {
-            capture_ms: 0,
-            tree_ms,
-            encode_ms: 0,
-        };
-        Ok(Self::observation(
-            grounding, info, view, images, hash, timing,
-        ))
-    }
-
-    async fn zoom(&self, rect: Rect) -> Option<Vec<u8>> {
-        let view = self.viewport().await.ok()?;
-        let img = self.shot().await.ok()?;
-        let k = if view.w > 0.0 {
-            img.width() as f32 / view.w
-        } else {
-            1.0
-        };
-        let r = Rect::new(rect.x * k, rect.y * k, rect.w * k, rect.h * k);
-        let at = Rect::new(0.0, 0.0, img.width() as f32, img.height() as f32);
-        let plan = zoom::plan(r, at)?;
-        Some(frame::encode_jpeg(&zoom::render(&img, at, &plan)))
-    }
-
-    /// Settled when the document has loaded and two tree reads agree.
-    async fn settle(&self, max: Duration) {
-        let deadline = Instant::now() + max;
-        tokio::time::sleep(Duration::from_millis(60)).await;
-        self.wait_loaded(max).await;
-        let mut last = None;
-        while Instant::now() < deadline {
-            let now = self
-                .read()
-                .await
-                .ok()
-                .map(|r| crate::perceive::tree_hash(&r.0));
-            if now.is_some() && now == last {
-                return;
-            }
-            last = now;
-            tokio::time::sleep(Duration::from_millis(80)).await;
-        }
-    }
-}
-
 /// Where the lane keeps its profile by default.
 pub fn default_profile(config_dir: &Path) -> PathBuf {
     config_dir.join("browser")
@@ -368,27 +356,11 @@ mod tests {
             profile: "/tmp/kai-profile".into(),
             headless: true,
             size: (1280, 800),
+            downloads: None,
         };
         let a = args(&o);
         assert!(a.contains(&"--user-data-dir=/tmp/kai-profile".to_string()));
         assert!(a.contains(&"--headless=new".to_string()));
         assert!(!a.iter().any(|x| x.starts_with("--remote-debugging-port")));
-    }
-
-    #[test]
-    fn marks_scale_into_screenshot_pixels() {
-        let g = Grounding::Marks(vec![kai_core::Element {
-            mark: 1,
-            role: kai_core::Role::Button,
-            name: "b".into(),
-            bounds: Rect::new(10.0, 20.0, 30.0, 40.0),
-            enabled: true,
-            secure: false,
-            value: None,
-        }]);
-        let Grounding::Marks(m) = scaled(&g, 2.0, (100, 100)) else {
-            panic!()
-        };
-        assert_eq!(m[0].bounds, Rect::new(20.0, 40.0, 60.0, 80.0));
     }
 }

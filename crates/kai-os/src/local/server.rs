@@ -115,8 +115,33 @@ pub fn server_args(
     ] {
         a.push(s.into());
     }
+    a.extend(LEAN.iter().map(Into::into));
     a
 }
+
+/// Memory and latency settings for one user and one request at a time
+/// (measured with Holo3.1 4B Q4 on a 4-vCPU AMX CPU, docs/LOCAL_MODELS.md):
+/// - `--no-repack`: repacking keeps a second copy of the weights next to the
+///   mapped file (2.6 GB more for a 3 GB model, no speed gain measured);
+///   RSS 6.51 → 4.29 GB.
+/// - `-np 1`: Kai sends one request at a time; more slots only hold memory.
+/// - `--cache-ram 0`: no extra host-RAM prompt cache (up to 8 GB by default);
+///   the slot's own cache still reuses the stable prompt prefix.
+/// - `--ctx-checkpoints 2`: hybrid models (Qwen3.5, Holo3.1) save ~50 MB of
+///   recurrent state per checkpoint, up to 32 by default.
+/// - `--reasoning off`: Kai's replies are one short JSON object; thinking
+///   took 64+ tokens per reply and ~9 s per step on that CPU, without it ~1 s.
+const LEAN: &[&str] = &[
+    "--no-repack",
+    "-np",
+    "1",
+    "--cache-ram",
+    "0",
+    "--ctx-checkpoints",
+    "2",
+    "--reasoning",
+    "off",
+];
 
 fn local_http() -> reqwest::Client {
     reqwest::Client::builder()
@@ -351,6 +376,10 @@ mod tests {
         assert_eq!(after("--alias"), "gemma-4-e4b-it");
         assert_eq!(after("-c"), "16384");
         assert!(s.contains(&"--jinja".to_string()) && s.contains(&"--offline".to_string()));
+        assert_eq!(after("-np"), "1");
+        assert_eq!(after("--cache-ram"), "0");
+        assert_eq!(after("--reasoning"), "off");
+        assert!(s.contains(&"--no-repack".to_string()));
         assert!(!s.iter().any(|x| x == "0.0.0.0"));
     }
 }

@@ -34,6 +34,7 @@ const HIGH_RISK_WORDS: &[&str] = &[
     "checkout",
     "order",
     "delete",
+    "discard",
     "remove",
     "erase",
     "submit",

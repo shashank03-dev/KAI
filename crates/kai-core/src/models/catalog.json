@@ -227,6 +227,70 @@
       "served_name": "ui-tars-1.5-7b",
       "notes": "A model trained for computer use (Qwen2.5-VL based), community GGUF conversion by mradermacher. It was trained on its own action format, not Kai's JSON replies; not yet tried with Kai's harness.",
       "computer_use": "untested"
+    },
+    {
+      "id": "holo-3.1-4b-q4",
+      "family": "holo-3.1",
+      "label": "Holo3.1 4B",
+      "maker": "H Company",
+      "license": "Apache-2.0",
+      "params_b": 4.5,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 3.43,
+      "min_ram_gb": 5.0,
+      "min_vram_gb": 5.0,
+      "files": [
+        {
+          "url": "https://huggingface.co/mradermacher/Holo-3.1-4B-GGUF/resolve/6d76eab0233f62783ddec95a7a2e2b057c6d7e66/Holo-3.1-4B.Q4_K_M.gguf",
+          "sha256": "cfdd26e8e9ee34de0c052ea68fb5c61dd8f34986fa3e1b631e2bab6ab1b44ac9",
+          "role": "model",
+          "size_bytes": 3066386464
+        },
+        {
+          "url": "https://huggingface.co/mradermacher/Holo-3.1-4B-GGUF/resolve/6d76eab0233f62783ddec95a7a2e2b057c6d7e66/Holo-3.1-4B.mmproj-Q8_0.gguf",
+          "sha256": "5118fd0455a94250a52ef741d5c3c836a6187e0ca18f851caf4abd746769aeac",
+          "role": "mmproj",
+          "size_bytes": 366895424
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "holo-3.1-4b",
+      "notes": "H Company's computer-use model, fine-tuned from Qwen3.5-4B (community GGUF by mradermacher). Hybrid attention: only 8 of 32 layers keep a KV cache, so memory stays low.",
+      "computer_use": "untested"
+    },
+    {
+      "id": "holo-3.1-0.8b-q4",
+      "family": "holo-3.1",
+      "label": "Holo3.1 0.8B",
+      "maker": "H Company",
+      "license": "Apache-2.0",
+      "params_b": 0.9,
+      "quant": "Q4_K_M",
+      "vision": true,
+      "context": 16384,
+      "download_gb": 0.79,
+      "min_ram_gb": 2.0,
+      "min_vram_gb": 2.0,
+      "files": [
+        {
+          "url": "https://huggingface.co/mradermacher/Holo-3.1-0.8B-GGUF/resolve/001390171bb629065edf16ea8f5d39640c61c507/Holo-3.1-0.8B.Q4_K_M.gguf",
+          "sha256": "b591d94d48d425170057668d35531db1f5556384f41b172009656b58b110df15",
+          "role": "model",
+          "size_bytes": 672330784
+        },
+        {
+          "url": "https://huggingface.co/mradermacher/Holo-3.1-0.8B-GGUF/resolve/001390171bb629065edf16ea8f5d39640c61c507/Holo-3.1-0.8B.mmproj-Q8_0.gguf",
+          "sha256": "edef9f77b4432a046c6585dcaec76c8ac48f56f0d975e5e4f02bb9b38090c62e",
+          "role": "mmproj",
+          "size_bytes": 115924352
+        }
+      ],
+      "runtime": "llama.cpp",
+      "served_name": "holo-3.1-0.8b",
+      "notes": "The smallest Holo3.1 (Qwen3.5-0.8B base, community GGUF by mradermacher). Runs on almost any CPU; expect weaker decisions.",
+      "computer_use": "untested"
     }
   ]
 }

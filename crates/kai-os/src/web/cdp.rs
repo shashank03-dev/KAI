@@ -4,7 +4,7 @@
 //! cannot be reached by any other process on the machine.
 
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::Child;
@@ -17,11 +17,46 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
 
 /// Longest one protocol call may take (navigation waits separately).
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(15);
+/// How often a waiting call checks whether a page dialog froze its page.
+const DIALOG_POLL: Duration = Duration::from_millis(20);
+/// Events kept for the lane to read; older ones are dropped.
+const MAX_EVENTS: usize = 256;
+/// The events the lane acts on (tabs, crashes, file pickers). Dialogs are
+/// tracked separately, per session, as they arrive.
+const KEPT_EVENTS: &[&str] = &[
+    "Target.targetCreated",
+    "Target.targetDestroyed",
+    "Inspector.targetCrashed",
+    "Page.fileChooserOpened",
+];
+
+/// A JavaScript dialog (`alert`, `confirm`, `prompt`, `beforeunload`) is
+/// open on the page: the page is frozen and answers nothing until it is
+/// handled. Calls on that page return this instead of hanging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialogOpen;
+
+impl std::fmt::Display for DialogOpen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a page dialog is open")
+    }
+}
+impl std::error::Error for DialogOpen {}
+
+/// What the reader thread learned outside replies.
+#[derive(Default)]
+struct Shared {
+    /// `Page.javascriptDialogOpening` params per page session, until closed.
+    dialogs: HashMap<String, Value>,
+    /// Kept events: `(method, params, session)`.
+    events: VecDeque<(String, Value, Option<String>)>,
+}
 
 /// One browser process and the pipe to it. Dropping it closes the browser.
 pub struct Cdp {
     writer: Mutex<std::fs::File>,
     pending: Pending,
+    shared: Arc<Mutex<Shared>>,
     next: AtomicU64,
     child: Mutex<Child>,
 }
@@ -50,8 +85,8 @@ impl Cdp {
         // never clobber the other one; dup2 clears close-on-exec.
         unsafe {
             cmd.pre_exec(move || {
-                let r2 = libc::fcntl(r, libc::F_DUPFD, 10);
-                let w2 = libc::fcntl(w, libc::F_DUPFD, 10);
+                let r2 = libc::fcntl(r, libc::F_DUPFD_CLOEXEC, 10);
+                let w2 = libc::fcntl(w, libc::F_DUPFD_CLOEXEC, 10);
                 if r2 < 0 || w2 < 0 || libc::dup2(r2, 3) < 0 || libc::dup2(w2, 4) < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
@@ -65,13 +100,15 @@ impl Cdp {
         let reader = unsafe { std::fs::File::from(OwnedFd::from_raw_fd(we_read.into_raw())) };
 
         let pending: Pending = Arc::default();
-        let p = pending.clone();
+        let shared: Arc<Mutex<Shared>> = Arc::default();
+        let (p, sh) = (pending.clone(), shared.clone());
         std::thread::Builder::new()
             .name("kai-cdp-read".into())
-            .spawn(move || read_loop(reader, p))?;
+            .spawn(move || read_loop(reader, p, sh))?;
         Ok(Self {
             writer: Mutex::new(writer),
             pending,
+            shared,
             next: AtomicU64::new(1),
             child: Mutex::new(child),
         })
@@ -83,7 +120,8 @@ impl Cdp {
     }
 
     /// Send one command (to the browser, or to an attached page `session`)
-    /// and wait for its result.
+    /// and wait for its result. A call on a page whose dialog opens (or is
+    /// already open) fails with [`DialogOpen`] instead of waiting.
     pub async fn call(
         &self,
         method: &str,
@@ -119,15 +157,48 @@ impl Cdp {
             self.lock_pending().remove(&id);
             anyhow::bail!("browser pipe closed: {e}");
         }
-        match tokio::time::timeout(limit, rx).await {
-            Ok(Ok(Ok(v))) => Ok(v),
-            Ok(Ok(Err(e))) => anyhow::bail!("{method}: {e}"),
-            Ok(Err(_)) => anyhow::bail!("{method}: the browser closed"),
-            Err(_) => {
+        // Answering the dialog is the one call a frozen page still takes.
+        let watch = session.filter(|_| method != "Page.handleJavaScriptDialog");
+        let deadline = tokio::time::Instant::now() + limit;
+        tokio::pin!(rx);
+        loop {
+            if let Some(s) = watch
+                && self.dialog(s).is_some()
+            {
                 self.lock_pending().remove(&id);
-                anyhow::bail!("{method}: no reply within {limit:?}")
+                return Err(DialogOpen.into());
+            }
+            let tick = (deadline - tokio::time::Instant::now()).min(DIALOG_POLL);
+            match tokio::time::timeout(tick, &mut rx).await {
+                Ok(Ok(Ok(v))) => return Ok(v),
+                Ok(Ok(Err(e))) => anyhow::bail!("{method}: {e}"),
+                Ok(Err(_)) => anyhow::bail!("{method}: the browser closed"),
+                Err(_) if tokio::time::Instant::now() >= deadline => {
+                    self.lock_pending().remove(&id);
+                    anyhow::bail!("{method}: no reply within {limit:?}")
+                }
+                Err(_) => {}
             }
         }
+    }
+
+    /// The dialog open on this page session, if any.
+    pub fn dialog(&self, session: &str) -> Option<Value> {
+        self.lock_shared().dialogs.get(session).cloned()
+    }
+
+    /// Forget a dialog Kai just answered (the closing event may lag).
+    pub fn clear_dialog(&self, session: &str) {
+        self.lock_shared().dialogs.remove(session);
+    }
+
+    /// Take the kept events (oldest first).
+    pub fn drain_events(&self) -> Vec<(String, Value, Option<String>)> {
+        self.lock_shared().events.drain(..).collect()
+    }
+
+    fn lock_shared(&self) -> std::sync::MutexGuard<'_, Shared> {
+        self.shared.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Whether the browser process is still running.
@@ -154,10 +225,10 @@ impl Drop for Cdp {
     }
 }
 
-/// Route each NUL-terminated reply to its waiting caller. Events (no `id`)
-/// are not used: the lane reads state by asking, which keeps it simple and
-/// race-free. On EOF every waiting call fails.
-fn read_loop(reader: std::fs::File, pending: Pending) {
+/// Route each NUL-terminated reply to its waiting caller, track page
+/// dialogs, and keep the events the lane reads. On EOF every waiting call
+/// fails.
+fn read_loop(reader: std::fs::File, pending: Pending, shared: Arc<Mutex<Shared>>) {
     let mut r = BufReader::new(reader);
     let mut buf = Vec::new();
     loop {
@@ -173,6 +244,7 @@ fn read_loop(reader: std::fs::File, pending: Pending) {
             continue;
         };
         let Some(id) = v.get("id").and_then(Value::as_u64) else {
+            event(&v, &shared);
             continue;
         };
         let reply = match v.get("error") {
@@ -192,6 +264,27 @@ fn read_loop(reader: std::fs::File, pending: Pending) {
         for (_, tx) in p.drain() {
             let _ = tx.send(Err("the browser closed".into()));
         }
+    }
+}
+
+fn event(v: &Value, shared: &Mutex<Shared>) {
+    let method = v["method"].as_str().unwrap_or("");
+    let session = v["sessionId"].as_str().map(str::to_string);
+    let mut sh = shared.lock().unwrap_or_else(|e| e.into_inner());
+    match (method, session) {
+        ("Page.javascriptDialogOpening", Some(s)) => {
+            sh.dialogs.insert(s, v["params"].clone());
+        }
+        ("Page.javascriptDialogClosed", Some(s)) => {
+            sh.dialogs.remove(&s);
+        }
+        (m, s) if KEPT_EVENTS.contains(&m) => {
+            if sh.events.len() >= MAX_EVENTS {
+                sh.events.pop_front();
+            }
+            sh.events.push_back((m.to_string(), v["params"].clone(), s));
+        }
+        _ => {}
     }
 }
 

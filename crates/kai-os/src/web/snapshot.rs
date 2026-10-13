@@ -24,6 +24,17 @@ struct Layout {
     bounds: Rect,
     visible: bool,
     password: bool,
+    select: bool,
+}
+
+/// The DOM node behind a mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DomRef {
+    /// `backendNodeId`: stable for the node's life, unlike `nodeId`.
+    pub id: i64,
+    /// A native `<select>`: options are chosen by label, not by clicking
+    /// (its popup is drawn by the browser, outside the page).
+    pub select: bool,
 }
 
 /// The main document's layout per backend node id, and the page facts.
@@ -73,9 +84,8 @@ fn layout(snapshot: &Value) -> (HashMap<i64, Layout>, PageInfo) {
             .and_then(|st| st.get(0))
             .map(|v| !matches!(s(v), "hidden" | "collapse"))
             .unwrap_or(true);
-        let is_input = names
-            .and_then(|n| n.get(ni))
-            .is_some_and(|n| s(n).eq_ignore_ascii_case("input"));
+        let tag = names.and_then(|n| n.get(ni)).map(&s).unwrap_or("");
+        let is_input = tag.eq_ignore_ascii_case("input");
         let password = is_input
             && attrs
                 .and_then(|a| a.get(ni))
@@ -93,6 +103,7 @@ fn layout(snapshot: &Value) -> (HashMap<i64, Layout>, PageInfo) {
                 bounds: rect,
                 visible,
                 password,
+                select: tag.eq_ignore_ascii_case("select"),
             },
         );
     }
@@ -132,7 +143,11 @@ fn prop<'a>(node: &'a Value, name: &str) -> Option<&'a Value> {
 /// visible area (`x`, `y` = 0). Grounding (`a11y::ground_indexed`) then does
 /// reading order, de-duplication, the mark cap and the grid fallback, exactly
 /// as on the desktop.
-pub fn nodes(ax_tree: &Value, snapshot: &Value, viewport: Rect) -> (Vec<(RawNode, i64)>, PageInfo) {
+pub fn nodes(
+    ax_tree: &Value,
+    snapshot: &Value,
+    viewport: Rect,
+) -> (Vec<(RawNode, DomRef)>, PageInfo) {
     let (layout, info) = layout(snapshot);
     let (sx, sy) = info.scroll;
     let mut out = Vec::new();
@@ -172,7 +187,13 @@ pub fn nodes(ax_tree: &Value, snapshot: &Value, viewport: Rect) -> (Vec<(RawNode
             value: if l.password { None } else { value },
             handle: None,
         };
-        out.push((raw, id));
+        out.push((
+            raw,
+            DomRef {
+                id,
+                select: l.select,
+            },
+        ));
     }
     (out, info)
 }
@@ -204,24 +225,25 @@ mod tests {
             {"nodeId":"7","ignored":false,"role":{"value":"button"},"name":{"value":"Far below"},"backendDOMNodeId":37,"properties":[]},
             {"nodeId":"8","ignored":true,"role":{"value":"button"},"name":{"value":"Ghost"},"backendDOMNodeId":40,"properties":[]},
             {"nodeId":"9","ignored":false,"role":{"value":"StaticText"},"name":{"value":"Contact"},"backendDOMNodeId":38,"properties":[]},
-            {"nodeId":"10","ignored":false,"role":{"value":"button"},"name":{"value":"Hidden"},"backendDOMNodeId":41,"properties":[]}
+            {"nodeId":"10","ignored":false,"role":{"value":"button"},"name":{"value":"Hidden"},"backendDOMNodeId":41,"properties":[]},
+            {"nodeId":"11","ignored":false,"role":{"value":"combobox"},"name":{"value":"Size"},"value":{"value":"Two"},"backendDOMNodeId":19,"properties":[]}
         ]})
     }
 
     fn snap(scroll_y: f64) -> Value {
         json!({
-            "strings": ["https://t.test/contact","Contact us","INPUT","type","password","BUTTON","visible","hidden","OPTION"],
+            "strings": ["https://t.test/contact","Contact us","INPUT","type","password","BUTTON","visible","hidden","OPTION","SELECT"],
             "documents": [{
                 "documentURL": 0, "title": 1, "scrollOffsetX": 0, "scrollOffsetY": scroll_y,
                 "nodes": {
-                    "backendNodeId": [12, 15, 32, 33, 37, 41, 3, 29],
-                    "nodeName": [2, 2, 5, 5, 5, 5, -1, 8],
-                    "attributes": [[], [3, 4], [], [], [], [], [], []]
+                    "backendNodeId": [12, 15, 32, 33, 37, 41, 3, 29, 19],
+                    "nodeName": [2, 2, 5, 5, 5, 5, -1, 8, 9],
+                    "attributes": [[], [3, 4], [], [], [], [], [], [], []]
                 },
                 "layout": {
-                    "nodeIndex": [0, 1, 2, 3, 4, 5, 6],
-                    "bounds": [[42,80,185,21],[296,80,185,21],[628,80,47,21],[679,80,33,21],[0,2140,74,21],[0,120,50,20],[0,0,1280,2162]],
-                    "styles": [[6],[6],[6],[6],[6],[7],[6]]
+                    "nodeIndex": [0, 1, 2, 3, 4, 5, 6, 8],
+                    "bounds": [[42,80,185,21],[296,80,185,21],[628,80,47,21],[679,80,33,21],[0,2140,74,21],[0,120,50,20],[0,0,1280,2162],[576,81,48,19]],
+                    "styles": [[6],[6],[6],[6],[6],[7],[6],[6]]
                 }
             }]
         })
@@ -234,7 +256,7 @@ mod tests {
         h: 800.0,
     };
 
-    fn by_name<'a>(v: &'a [(RawNode, i64)], name: &str) -> &'a (RawNode, i64) {
+    fn by_name<'a>(v: &'a [(RawNode, DomRef)], name: &str) -> &'a (RawNode, DomRef) {
         v.iter().find(|(n, _)| n.name == name).unwrap()
     }
 
@@ -243,8 +265,14 @@ mod tests {
         let (v, info) = nodes(&ax(), &snap(0.0), VIEW);
         assert_eq!(info.url, "https://t.test/contact");
         assert_eq!(info.title, "Contact us");
-        let (name, id) = by_name(&v, "Name");
-        assert_eq!(*id, 12);
+        let (name, r) = by_name(&v, "Name");
+        assert_eq!(
+            *r,
+            DomRef {
+                id: 12,
+                select: false
+            }
+        );
         assert_eq!(name.role, Role::TextField);
         assert_eq!(name.value.as_deref(), Some("Ann"));
         assert_eq!(name.bounds, Rect::new(42.0, 80.0, 185.0, 21.0));
@@ -257,6 +285,22 @@ mod tests {
                 "{gone} should be dropped"
             );
         }
+    }
+
+    #[test]
+    fn native_selects_are_flagged_and_show_their_value() {
+        let (v, _) = nodes(&ax(), &snap(0.0), VIEW);
+        let (size, r) = by_name(&v, "Size");
+        assert_eq!(size.role, Role::ComboBox);
+        assert_eq!(size.value.as_deref(), Some("Two"));
+        assert_eq!(
+            *r,
+            DomRef {
+                id: 19,
+                select: true
+            }
+        );
+        assert!(!by_name(&v, "Send").1.select);
     }
 
     #[test]

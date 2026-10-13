@@ -97,6 +97,7 @@ async fn lane() -> Option<(BrowserLane, tempfile::TempDir)> {
         profile: profile.path().to_path_buf(),
         headless: true,
         size: (1280, 800),
+        downloads: None,
     };
     Some((BrowserLane::launch(&opts, None).await.unwrap(), profile))
 }
@@ -314,6 +315,7 @@ async fn desktop_vs_lane_on_one_page() {
         profile: profile.path().to_path_buf(),
         headless: false,
         size: (1280, 800),
+        downloads: None,
     };
     let lane = BrowserLane::launch(&opts, None).await.unwrap();
     lane.open_url(&format!("{base}/")).await.unwrap();

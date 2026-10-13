@@ -213,10 +213,16 @@ pub fn rank(catalog: &Catalog, hw: &HardwareSummary) -> Vec<Ranked> {
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.total_cmp(&a.2)));
     let mut out: Vec<Ranked> = scored.into_iter().map(|s| s.3).collect();
-    if let Some(first) = out.first_mut()
-        && first.fit != Fit::TooBig
+    // "Best" is a recommendation, so it goes only to a model that has been
+    // tried with Kai's harness; an untested model can rank high on fit
+    // alone but is never recommended. No tested model fits: no Best.
+    if let Some(i) = out
+        .iter()
+        .position(|r| r.fit != Fit::TooBig && computer_use_rank(&r.entry) > 0)
     {
-        first.fit = Fit::Best;
+        let mut best = out.remove(i);
+        best.fit = Fit::Best;
+        out.insert(0, best);
     }
     out
 }

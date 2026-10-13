@@ -5,8 +5,10 @@
 
 mod act;
 pub mod cdp;
+pub mod dialog;
 pub mod keys;
 mod lane;
+mod look;
 pub mod snapshot;
 
 pub use lane::{BrowserLane, LaneOptions, default_profile, find_browser};

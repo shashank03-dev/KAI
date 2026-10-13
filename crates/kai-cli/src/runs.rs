@@ -44,6 +44,7 @@ impl LaneArgs {
             profile: kai_os::web::default_profile(&Settings::dir()),
             headless: self.headless,
             size: (1280, 800),
+            downloads: downloads_dir(),
         };
         eprintln!(
             "Working in Kai's browser ({}); its profile is {}",
@@ -54,6 +55,16 @@ impl LaneArgs {
             kai_os::web::BrowserLane::launch(&opts, desktop).await?,
         ))
     }
+}
+
+/// The user's Downloads folder: `XDG_DOWNLOAD_DIR` when set, else
+/// `~/Downloads` (`%USERPROFILE%\Downloads` on Windows).
+fn downloads_dir() -> Option<std::path::PathBuf> {
+    if let Some(d) = std::env::var_os("XDG_DOWNLOAD_DIR").filter(|d| !d.is_empty()) {
+        return Some(d.into());
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+    Some(std::path::PathBuf::from(home).join("Downloads"))
 }
 
 /// A recorder for `kai run --record <root>`: `<root>/<time>-<task slug>/`.
