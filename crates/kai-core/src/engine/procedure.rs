@@ -46,7 +46,7 @@ impl Engine<'_> {
             Some(shape) => store.report(shape, outcome == Outcome::Success),
             None if outcome == Outcome::Success => store
                 .record(&r.trace, crate::procedure::all_verified(&r.trace))
-                .map(|_| ()),
+                .map(|stored| log::debug!("procedure recorded: {stored}")),
             None => Ok(()),
         };
         if let Err(e) = res {
