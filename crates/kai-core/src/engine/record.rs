@@ -2,7 +2,7 @@
 //! and got back, attached to the step it produced.
 
 use super::{Engine, Run, RunOptions};
-use crate::client::{ClientError, Images, ModelClient, ModelReply, ModelRequest};
+use crate::client::{ClientError, ModelClient, ModelReply, ModelRequest};
 use crate::ports::{EngineEvent, Observation};
 use crate::reply::StepReply;
 use crate::trace::{CallRecord, Outcome};
@@ -117,11 +117,13 @@ impl Engine<'_> {
         client: &dyn ModelClient,
         system: &str,
         user_text: &str,
-        images: &Images,
+        obs: &Observation,
         schema: &serde_json::Value,
         max_tokens: u32,
-        focused: Option<u32>,
     ) -> anyhow::Result<Decided> {
+        // A `type` with no target goes to the field that has focus.
+        let focused = obs.grounding.focused_field();
+        let images = &obs.images;
         let req = ModelRequest {
             system,
             user_text,
