@@ -142,12 +142,17 @@ impl Engine<'_> {
 
     async fn drive(&self, r: &mut Run<'_>, opts: RunOptions<'_>) -> Outcome {
         let active_skill = prompt::select_skill(r.task, self.skills);
-        let (system, schema) = if r.decider.is_some() {
+        let (mut system, mut schema) = if r.decider.is_some() {
             let s = prompt::system_prompt_with_plan(self.skills);
             (s, StepReply::json_schema_with_plan())
         } else {
             (prompt::system_prompt(self.skills), StepReply::json_schema())
         };
+        // Eyes that can read pages (the browser lane) offer `read_page`.
+        if self.perceptor.reads_pages() {
+            system.push_str(crate::web::READ_RULE);
+            schema = StepReply::with_read_page(&schema);
+        }
         let deadline = Instant::now() + self.config.max_time;
         r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
 
@@ -230,6 +235,10 @@ impl Engine<'_> {
         self.sink.emit(&EngineEvent::Thinking { step });
         let mut notes = std::mem::take(&mut r.notes);
         notes.extend(r.plan_note.clone());
+        if std::mem::take(&mut r.read_page) {
+            let read = self.perceptor.page_text(crate::web::PAGE_TEXT_MAX).await;
+            notes.push(crate::web::page_text_note(read));
+        }
         let first = self.outcome_request(r, &mut notes, schema);
         let lessons = self.lessons_for(r, obs);
         let verified = self.config.macro_history.then(|| self.verified_outcomes(r));
@@ -273,6 +282,9 @@ impl Engine<'_> {
         let (reply, model_time, first_token) = (decided.reply, decided.total, decided.first_token);
         if reply.need_screen {
             r.force_full = true;
+        }
+        if reply.read_page && self.perceptor.reads_pages() {
+            r.read_page = true;
         }
         let decision = reply.decision;
 

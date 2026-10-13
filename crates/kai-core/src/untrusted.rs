@@ -101,6 +101,17 @@ pub fn suspicious(g: &Grounding) -> Option<HumanCheck> {
     None
 }
 
+/// What kind of untrusted content a block of page text holds, if any: the
+/// same phrase lists as [`suspicious`], for text that is not in the element
+/// list (the browser lane's `read_page`).
+pub fn suspicious_text(text: &str) -> Option<&'static str> {
+    let lower = text.to_lowercase();
+    [INJECTION, PHISHING]
+        .into_iter()
+        .find(|list| list.iter().any(|p| crate::risk::has_phrase(&lower, p)))
+        .map(label)
+}
+
 /// What sensitive data `text` holds, if any: `card number`, `IBAN`,
 /// `ID number`, `API key` or `private key`.
 pub fn sensitive(text: &str) -> Option<&'static str> {

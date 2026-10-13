@@ -36,6 +36,8 @@ pub(super) struct Run<'t> {
     pub(super) failure_streak: u32,
     /// The next observation must include a screenshot.
     pub(super) force_full: bool,
+    /// The model asked to read the page's text with its next turn.
+    pub(super) read_page: bool,
     /// Use the careful model for the next decision.
     pub(super) careful_next: bool,
     pub(super) tree_only_streak: u32,
@@ -98,6 +100,7 @@ impl<'t> Run<'t> {
             no_progress_streak: 0,
             failure_streak: 0,
             force_full: true,
+            read_page: false,
             careful_next: false,
             tree_only_streak: 0,
             last_rich: false,

@@ -249,6 +249,27 @@ impl Perceptor for BrowserLane {
         Ok(Self::text_only(grounding, info, view, tree_ms))
     }
 
+    fn reads_pages(&self) -> bool {
+        true
+    }
+
+    /// The page's visible text (`innerText`: what a person can read, no
+    /// hidden elements, no field values), one tidy line per line of text.
+    async fn page_text(&self, max_chars: usize) -> Option<(String, usize)> {
+        let r = self
+            .page(
+                "Runtime.evaluate",
+                json!({
+                    "expression": "document.body ? document.body.innerText : ''",
+                    "returnByValue": true,
+                }),
+            )
+            .await
+            .ok()?;
+        let raw = r["result"]["value"].as_str()?;
+        Some(tidy(raw, max_chars))
+    }
+
     async fn zoom(&self, rect: Rect) -> Option<Vec<u8>> {
         let view = self.viewport().await.ok()?;
         let img = self.shot().await.ok()?;
@@ -285,9 +306,31 @@ impl Perceptor for BrowserLane {
     }
 }
 
+/// One line per line of text, blank runs dropped, spaces collapsed; cut to
+/// `max` chars. Returns the text and its full length.
+fn tidy(raw: &str, max: usize) -> (String, usize) {
+    let text = raw
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let total = text.chars().count();
+    (text.chars().take(max).collect(), total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_text_is_tidied_and_cut() {
+        let (t, n) = tidy("  Prices \n\n\n\tBlue   Kettle\t34.99\n   \n", 100);
+        assert_eq!(t, "Prices\nBlue Kettle 34.99");
+        assert_eq!(n, t.chars().count());
+        let (cut, total) = tidy("abcdef", 3);
+        assert_eq!((cut.as_str(), total), ("abc", 6));
+    }
 
     #[test]
     fn marks_scale_into_screenshot_pixels() {

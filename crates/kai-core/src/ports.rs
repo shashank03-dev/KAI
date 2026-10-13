@@ -58,6 +58,18 @@ pub trait Perceptor: Send + Sync {
     fn ui_events(&self) -> Option<u64> {
         None
     }
+    /// Whether [`Perceptor::page_text`] can answer (Kai's browser lane). The
+    /// system prompt offers `read_page` only then, so the desktop prompt
+    /// stays byte-for-byte the same.
+    fn reads_pages(&self) -> bool {
+        false
+    }
+    /// The visible page's text, for a reading step the model asked for with
+    /// `read_page`: `(text cut to at most max_chars, full length in chars)`.
+    /// `None` where there is no page to read.
+    async fn page_text(&self, _max_chars: usize) -> Option<(String, usize)> {
+        None
+    }
 }
 
 /// Read-only checks for the outcome ledger's OS probes (`file_exists`,

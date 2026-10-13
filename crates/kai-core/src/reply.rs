@@ -22,6 +22,9 @@ pub struct StepReply {
     pub then: Vec<Decision>,
     /// The model asked for a screenshot on the next step.
     pub need_screen: bool,
+    /// The model asked to read the page's text on the next step (offered
+    /// only where the eyes can read pages; see `Perceptor::reads_pages`).
+    pub read_page: bool,
     /// Upcoming subgoals for the executor; empty when absent (today's
     /// behaviour). See [`crate::plan::parse_plan`].
     pub plan: Vec<Subgoal>,
@@ -50,6 +53,10 @@ impl StepReply {
         };
         let need_screen = obj
             .remove("need_screen")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false);
+        let read_page = obj
+            .remove("read_page")
             .and_then(|b| b.as_bool())
             .unwrap_or(false);
         let mut decision: Decision =
@@ -84,6 +91,7 @@ impl StepReply {
             decision,
             then,
             need_screen,
+            read_page,
             plan,
             outcomes,
         })
@@ -93,6 +101,13 @@ impl StepReply {
     pub fn with_outcomes(schema: &Value) -> Value {
         let mut s = schema.clone();
         s["properties"]["outcomes"] = crate::ledger::outcomes_schema();
+        s
+    }
+
+    /// `schema` plus the optional `read_page` flag (the browser lane).
+    pub fn with_read_page(schema: &Value) -> Value {
+        let mut s = schema.clone();
+        s["properties"]["read_page"] = serde_json::json!({ "type": "boolean" });
         s
     }
 
@@ -139,6 +154,7 @@ fn follow_up(mut item: Value) -> Option<Decision> {
         .or_insert_with(|| Value::String(String::new()));
     o.remove("then");
     o.remove("need_screen");
+    o.remove("read_page");
     let mut d: Decision = serde_json::from_value(item).ok()?;
     d.validate_and_clamp().ok()?;
     if matches!(d.action, Action::Done | Action::AskUser) {
@@ -254,6 +270,34 @@ mod tests {
         let s = StepReply::json_schema_with_plan();
         assert_eq!(s["properties"]["plan"]["maxItems"], MAX_PLAN);
         assert!(StepReply::json_schema()["properties"].get("plan").is_none());
+    }
+
+    #[test]
+    fn read_page_parses_and_is_only_in_the_lane_schema() {
+        let r = StepReply::parse_checked(
+            r#"{"thought":"read prices","action":"wait","risk":"none","read_page":true}"#,
+        )
+        .unwrap();
+        assert!(r.read_page);
+        assert!(
+            !StepReply::parse_checked(r#"{"thought":"","action":"wait","risk":"none"}"#)
+                .unwrap()
+                .read_page
+        );
+        // A follow-up may not carry it (it would be dropped, not fail).
+        let t = StepReply::parse_checked(
+            r#"{"thought":"","action":"click","target":1,"risk":"none",
+                "then":[{"action":"key","keys":["enter"],"read_page":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(t.then.len(), 1);
+        assert!(
+            StepReply::json_schema()["properties"]
+                .get("read_page")
+                .is_none()
+        );
+        let lane = StepReply::with_read_page(&StepReply::json_schema());
+        assert_eq!(lane["properties"]["read_page"]["type"], "boolean");
     }
 
     #[test]

@@ -204,6 +204,14 @@ async fn page_marks_typing_submit_policy_and_back() {
     let pressed = lane.observe_tree_only().await.unwrap();
     mark(&pressed.grounding, Role::Button, "Pressed");
 
+    // The page's text is readable (for `read_page`), field values are not.
+    assert!(lane.reads_pages());
+    let (text, total) = lane.page_text(10_000).await.unwrap();
+    assert!(text.contains("Contact"), "{text}");
+    assert_eq!(total, text.chars().count());
+    let (short, _) = lane.page_text(5).await.unwrap();
+    assert_eq!(short.chars().count(), 5);
+
     // The address policy holds whatever the model asks for.
     for bad in [
         "file:///etc/passwd",
