@@ -180,3 +180,30 @@ async fn a_card_number_is_confirmed_even_on_autopilot_and_never_saved() {
         "{why}"
     );
 }
+
+/// Approves, but only after the user took their time.
+struct SlowApprover(std::time::Duration);
+#[async_trait::async_trait]
+impl kai_core::engine::Approver for SlowApprover {
+    async fn approve(&self, _d: &Decision, _g: &Grounding) -> kai_core::engine::ApprovalChoice {
+        tokio::time::sleep(self.0).await;
+        kai_core::engine::ApprovalChoice::Approve
+    }
+}
+
+#[tokio::test]
+async fn waiting_for_an_approval_is_not_counted_against_the_time_limit() {
+    // Seen live: an approval answered after ten minutes ended the run at
+    // once on its 600 s limit.
+    let delete = r#"{"thought":"clean up","action":"shell","text":"rm -rf ~/old","risk":"high","expect":"gone"}"#;
+    let done = r#"{"thought":"finished","action":"done","risk":"none"}"#;
+    let screen = common::Screen::marks();
+    let hands = common::Hands::new(&screen);
+    let model = common::Counting::new(&[delete, done]);
+    let approver = SlowApprover(std::time::Duration::from_millis(300));
+    let stop = common::flag();
+    let mut e = common::engine(&model, &screen, &hands, &approver, &stop);
+    e.config.max_time = std::time::Duration::from_millis(150);
+    let t = e.run("tidy up").await;
+    assert_eq!(t.outcome, Some(Outcome::Success));
+}
