@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::Child;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,9 +20,11 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often a waiting call checks whether a page dialog froze its page.
 const DIALOG_POLL: Duration = Duration::from_millis(20);
 /// Events kept for the lane to read; older ones are dropped.
+#[cfg(target_os = "linux")]
 const MAX_EVENTS: usize = 256;
 /// The events the lane acts on (tabs, crashes, file pickers). Dialogs are
 /// tracked separately, per session, as they arrive.
+#[cfg(target_os = "linux")]
 const KEPT_EVENTS: &[&str] = &[
     "Target.targetCreated",
     "Target.targetDestroyed",
@@ -228,7 +230,9 @@ impl Drop for Cdp {
 /// Route each NUL-terminated reply to its waiting caller, track page
 /// dialogs, and keep the events the lane reads. On EOF every waiting call
 /// fails.
+#[cfg(target_os = "linux")]
 fn read_loop(reader: std::fs::File, pending: Pending, shared: Arc<Mutex<Shared>>) {
+    use std::io::{BufRead, BufReader};
     let mut r = BufReader::new(reader);
     let mut buf = Vec::new();
     loop {
@@ -267,6 +271,7 @@ fn read_loop(reader: std::fs::File, pending: Pending, shared: Arc<Mutex<Shared>>
     }
 }
 
+#[cfg(target_os = "linux")]
 fn event(v: &Value, shared: &Mutex<Shared>) {
     let method = v["method"].as_str().unwrap_or("");
     let session = v["sessionId"].as_str().map(str::to_string);
