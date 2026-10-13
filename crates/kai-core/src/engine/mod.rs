@@ -197,6 +197,22 @@ impl Engine<'_> {
         Outcome::StepLimit
     }
 
+    /// Ask the user to approve a step. The wait is the user's time, not
+    /// Kai's: it moves the run's deadline like a human check does (seen
+    /// live: an approval answered after ten minutes ended the run at once
+    /// on its time limit).
+    async fn ask_approval(
+        &self,
+        r: &mut Run<'_>,
+        d: &crate::schema::Decision,
+        g: &crate::element::Grounding,
+    ) -> ApprovalChoice {
+        let t = Instant::now();
+        let choice = self.approver.approve(d, g).await;
+        r.human.waited += t.elapsed();
+        choice
+    }
+
     /// One observe → decide → act (→ batch) round. `Some` ends the run.
     async fn model_step(
         &self,
@@ -335,7 +351,7 @@ impl Engine<'_> {
         let pw = risk::is_payment_or_password(&decision, &obs.grounding);
         if risk::needs_approval(self.config.approval, final_risk, pw) {
             self.sink.emit(&EngineEvent::AwaitingApproval { step });
-            match self.approver.approve(&decision, &obs.grounding).await {
+            match self.ask_approval(r, &decision, &obs.grounding).await {
                 ApprovalChoice::Approve => rec.approval = Some("approved".to_string()),
                 ApprovalChoice::Skip => {
                     rec.approval = Some("skipped".to_string());

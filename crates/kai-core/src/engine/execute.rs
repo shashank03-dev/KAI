@@ -247,7 +247,7 @@ impl Engine<'_> {
             let pw = risk::is_payment_or_password(&decision, g);
             if risk::needs_approval(self.config.approval, risk::classify(&decision, g), pw) {
                 self.sink.emit(&EngineEvent::AwaitingApproval { step });
-                match self.approver.approve(&decision, g).await {
+                match self.ask_approval(r, &decision, g).await {
                     ApprovalChoice::Approve => rec.approval = Some("approved".into()),
                     ApprovalChoice::Skip => {
                         rec.approval = Some("skipped".into());
