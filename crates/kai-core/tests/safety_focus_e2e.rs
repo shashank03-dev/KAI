@@ -46,6 +46,7 @@ impl Login<'_> {
             timing: Default::default(),
             screen: None,
             window_title: Some("Sign in".into()),
+            url: None,
         }
     }
 }

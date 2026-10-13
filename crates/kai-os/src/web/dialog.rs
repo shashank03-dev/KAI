@@ -108,6 +108,7 @@ pub fn marks(params: &Value, typed: Option<&str>, view: Rect) -> Vec<(Element, D
                 bounds: Rect::new(x, cy - 15.0, 110.0, 30.0),
                 enabled: true,
                 secure: false,
+                focused: false,
                 value,
             };
             (el, target)

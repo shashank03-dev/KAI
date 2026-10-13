@@ -184,6 +184,7 @@ pub fn nodes(
             enabled: !disabled,
             visible: l.visible && intersects(bounds, viewport),
             secure: l.password,
+            focused: prop(n, "focused").and_then(Value::as_bool) == Some(true),
             value: if l.password { None } else { value },
             handle: None,
         };

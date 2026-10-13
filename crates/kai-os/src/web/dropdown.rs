@@ -81,6 +81,7 @@ pub fn option_marks(options: &[Opt], under: Rect, first: u32) -> Vec<Element> {
             ),
             enabled: !o.disabled,
             secure: false,
+            focused: false,
             value: None,
         })
         .collect()

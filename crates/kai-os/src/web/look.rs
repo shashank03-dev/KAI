@@ -341,6 +341,7 @@ mod tests {
             bounds: Rect::new(10.0, 20.0, 30.0, 40.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }]);
         let Grounding::Marks(m) = scaled(&g, 2.0, (100, 100)) else {
