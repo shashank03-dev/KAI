@@ -353,7 +353,8 @@ impl Engine<'_> {
 
         // ---- Act ----
         let t_act = Instant::now();
-        let guarded = act::reopen_guard(&mut r.opened, &decision);
+        let guarded = act::reopen_guard(&mut r.opened, &decision)
+            .or_else(|| act::repeat_guard(&r.history, &decision));
         r.events_mark = self.perceptor.ui_events();
         let acted = match guarded {
             Some(note) => Ok((Some(note), "none")),

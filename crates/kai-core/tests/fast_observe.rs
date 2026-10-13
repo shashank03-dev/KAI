@@ -85,12 +85,28 @@ async fn a_silent_shell_step_is_not_reported_as_a_stalled_screen() {
     let mut hands = Hands::new(&screen);
     hands.frozen = true;
     let (ap, stop) = (approve_all(), flag());
-    let client = Counting::new(&[shell, shell, DONE]);
+    let other = r#"{"thought":"check","action":"shell","text":"ls ~/s.png","risk":"low","expect":"listed"}"#;
+    let client = Counting::new(&[shell, other, DONE]);
     let trace = engine(&client, &screen, &hands, &ap, &stop).run("x").await;
     assert_eq!(trace.outcome, Some(Outcome::Success));
     for seen in client.seen() {
         assert!(!seen.text.contains("has not changed"), "{}", seen.text);
     }
+}
+
+#[tokio::test]
+async fn the_same_shell_command_twice_is_called_out_as_a_loop() {
+    // Seen live: Gemma wrote the same file 40 times once nothing said stop.
+    let echo = r#"{"thought":"write it","action":"shell","text":"echo 101.52 > ~/tip.txt","risk":"low","expect":"written"}"#;
+    let screen = Screen::marks();
+    let mut hands = Hands::new(&screen);
+    hands.frozen = true;
+    let (ap, stop) = (approve_all(), flag());
+    let client = Counting::new(&[echo, echo, DONE]);
+    engine(&client, &screen, &hands, &ap, &stop).run("x").await;
+    let third = &client.seen()[2].text;
+    assert!(third.contains("same command twice"), "{third}");
+    assert!(third.contains("has not changed"), "{third}");
 }
 
 struct FixedVerifier(f32);

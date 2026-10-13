@@ -234,12 +234,23 @@ impl Engine<'_> {
             events: effect::events_since(r.events_mark.take(), self.perceptor.ui_events()),
         };
         // Terminal work changes no pixels; an unchanged screen after a
-        // shell step is not a stall (its output already went to the model).
+        // shell step is not a stall (its output already went to the model),
+        // unless it was the very command, with the very result, of the step
+        // before: that is a loop (seen live: one `echo` 40 times).
         let after_shell = r
             .pending
             .as_ref()
             .is_some_and(|p| p.action == Action::Shell);
-        let no_progress = fx.no_op() && !after_shell;
+        let repeated = after_shell
+            && matches!(r.history.as_slice(), [.., a, b] if a.summary == b.summary && a.output == b.output);
+        if repeated {
+            r.notes.push(
+                "You just ran the same command twice and got the same result. Do not run it \
+                 again: if the task is complete, reply done; otherwise try something else."
+                    .into(),
+            );
+        }
+        let no_progress = fx.no_op() && (!after_shell || repeated);
         if no_progress {
             r.no_progress_streak += 1;
         } else {

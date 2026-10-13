@@ -147,6 +147,10 @@ impl Engine<'_> {
                         " Put the exact terminal command in `text`, e.g. \
                          {\"thought\":\"run it\",\"action\":\"shell\",\"text\":\"ls -la\"}."
                     }
+                    crate::schema::SchemaError::MissingUrl => {
+                        " Put the full web address in `text`, e.g. \
+                         {\"thought\":\"open it\",\"action\":\"open_url\",\"text\":\"https://example.com/page\"}."
+                    }
                     crate::schema::SchemaError::MissingText(_) => {
                         " Put the text to type or the app name in `text`."
                     }

@@ -37,6 +37,36 @@ pub(super) fn reopen_guard(opened: &mut Vec<String>, d: &Decision) -> Option<Str
     None
 }
 
+/// What [`repeat_guard`] answers instead of running a command again.
+const NOT_AGAIN: &str = "Not run again:";
+
+/// Refuse a shell command that already ran twice in a row with the same
+/// result: a third run will not change it (seen live: Gemma wrote the same
+/// file 40 times). Returns the note the model sees instead.
+pub(super) fn repeat_guard(history: &[HistoryItem], d: &Decision) -> Option<String> {
+    if d.action != Action::Shell {
+        return None;
+    }
+    let summary = HistoryItem::from_decision(d).summary;
+    let same: Vec<&HistoryItem> = history
+        .iter()
+        .rev()
+        .take_while(|h| h.summary == summary)
+        .collect();
+    let looping = same.iter().any(|h| {
+        h.output
+            .as_deref()
+            .is_some_and(|o| o.starts_with(NOT_AGAIN))
+    }) || (same.len() >= 2 && same[0].output == same[1].output);
+    looping.then(|| {
+        format!(
+            "{NOT_AGAIN} this exact command already ran twice in a row with the same result \
+             (see your last steps). If the task is complete, reply done; otherwise do \
+             something different."
+        )
+    })
+}
+
 impl Engine<'_> {
     /// Perform one action. Returns command output for `shell` (so the model
     /// sees it next step) and the path taken: `a11y`, `mouse`, `keyboard`,
@@ -259,5 +289,32 @@ mod tests {
         assert!(reopen_guard(&mut seen, &open("http://127.0.0.1:8765/contact.html")).is_none());
         assert!(reopen_guard(&mut seen, &open("http://127.0.0.1:8765/contact.html/")).is_some());
         assert!(reopen_guard(&mut seen, &open("https://example.com")).is_none());
+    }
+
+    #[test]
+    fn a_third_identical_command_in_a_row_is_not_run() {
+        let echo = Decision::parse_checked(
+            r#"{"thought":"x","action":"shell","text":"echo 1 > f","risk":"low"}"#,
+        )
+        .unwrap();
+        let ran = |out: &str| {
+            let mut h = HistoryItem::from_decision(&echo);
+            h.push_output(out);
+            h
+        };
+        assert!(repeat_guard(&[], &echo).is_none());
+        assert!(repeat_guard(&[ran("[exit 0]")], &echo).is_none());
+        // Polling that changes its output is not a loop.
+        assert!(repeat_guard(&[ran("10%"), ran("50%")], &echo).is_none());
+        let twice = [ran("[exit 0]"), ran("[exit 0]")];
+        let note = repeat_guard(&twice, &echo).unwrap();
+        // Still refused after the refusal itself joins the history.
+        let mut after = twice.to_vec();
+        after.push(ran(&note));
+        assert!(repeat_guard(&after, &echo).is_some());
+        // Something else in between starts over.
+        let mut other = twice.to_vec();
+        other.push(HistoryItem::note("click #3"));
+        assert!(repeat_guard(&other, &echo).is_none());
     }
 }
