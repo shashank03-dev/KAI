@@ -890,3 +890,10 @@ Still no model key and no GPU in this session, so there are no live numbers.
   that. Replayed on the 10 real cut replies from the log: 9 salvaged, and
   the tenth (cut before `risk`) goes to repair as it should. There is no
   prompt or schema change, so prompts stay byte-stable.
+- **Measured (2026-10-13), Holo3.1 4B on 4 CPU cores, 14 tasks, one run per
+  build** (`bench/results/2026-10-13-local.md`): the cut-off reply fix cut
+  repair calls from 16 to 6, step p95 from 172 s to 118 s and wall time by
+  15%. Passed 8/14 before and 6/14 after, which is noise at one run each
+  (different tasks failed). At ~60 s per call, Holo 4B on a CPU stays
+  `untested`. Also found and fixed: a second local run started right after
+  the first failed on a busy port (`652175e`).
