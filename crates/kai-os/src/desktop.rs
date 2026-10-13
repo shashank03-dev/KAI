@@ -142,6 +142,8 @@ impl Actuator for DesktopActuator {
 /// Kai's own process and its parent (the app, or the terminal running
 /// `kai`).
 fn own_pids() -> Vec<u32> {
+    // Only Unix adds the parent below (Windows CI: unused_mut).
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut v = vec![std::process::id()];
     #[cfg(unix)]
     v.push(std::os::unix::process::parent_id());
