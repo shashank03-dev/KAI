@@ -54,9 +54,15 @@ pub struct RunState {
     pub thinking: bool,
     pub max_steps: u32,
     pub approval: Option<Pending>,
+    /// Approvals asked while another was showing (Team: sub-agents run side
+    /// by side). Dropping a pending approval answers Stop, so none is ever
+    /// replaced; each shows in turn ([`RunState::take_approval`]).
+    pub approvals_waiting: std::collections::VecDeque<Pending>,
     /// A CAPTCHA, one-time code, sign-in approval or question waiting on
     /// the user (`docs/HUMAN_CHECKS.md`).
     pub human: Option<HumanPending>,
+    /// Checks asked while another was showing, as for approvals.
+    pub humans_waiting: std::collections::VecDeque<HumanPending>,
     pub plan: Option<Plan>,
     pub report: Option<String>,
     pub trace: Option<Trace>,
@@ -81,6 +87,28 @@ pub struct RunState {
 }
 
 impl RunState {
+    /// The approval being shown, for answering; the next queued one (if
+    /// any) takes its place.
+    pub fn take_approval(&mut self) -> Option<Pending> {
+        let p = self.approval.take();
+        self.approval = self.approvals_waiting.pop_front();
+        if self.approval.is_some() {
+            self.phase = Phase::Waiting;
+        }
+        p
+    }
+
+    /// The check being shown, for answering; the next queued one takes its
+    /// place.
+    pub fn take_human(&mut self) -> Option<HumanPending> {
+        let h = self.human.take();
+        self.human = self.humans_waiting.pop_front();
+        if self.human.is_some() {
+            self.phase = Phase::Waiting;
+        }
+        h
+    }
+
     pub fn start(&mut self, task: String, team: bool, max_steps: u32) {
         *self = Self {
             phase: Phase::Running,
@@ -157,13 +185,21 @@ impl RunState {
                     "Waiting for you: {}",
                     describe(&p.decision, p.element.as_deref())
                 );
-                self.approval = Some(p);
+                if self.approval.is_some() {
+                    self.approvals_waiting.push_back(p);
+                } else {
+                    self.approval = Some(p);
+                }
             }
             Ui::Human(h) => {
                 self.phase = Phase::Waiting;
                 self.thinking = false;
                 self.caption = format!("Waiting for you: {}", h.check.kind.title());
-                self.human = Some(h);
+                if self.human.is_some() {
+                    self.humans_waiting.push_back(h);
+                } else {
+                    self.human = Some(h);
+                }
             }
             Ui::Plan(p) => {
                 self.team_view = Team::from_plan(&p);
@@ -183,7 +219,9 @@ impl RunState {
                 self.phase = Phase::Done;
                 self.thinking = false;
                 self.approval = None;
+                self.approvals_waiting.clear();
                 self.human = None;
+                self.humans_waiting.clear();
                 for s in &mut self.steps {
                     if s.state == StepState::Working {
                         s.state = StepState::Done;
@@ -259,8 +297,12 @@ impl RunState {
             }
             EngineEvent::AwaitingApproval { .. } => self.phase = Phase::Waiting,
             EngineEvent::Acted { step, timings } => {
-                self.phase = Phase::Running;
-                self.approval = None;
+                // Not `approval = None`: in Team mode this can be another
+                // sub-agent acting, and dropping a pending approval stops
+                // the one that asked (seen live: "You stopped Kai").
+                if self.approval.is_none() {
+                    self.phase = Phase::Running;
+                }
                 self.last_model_ms = Some(timings.model_ms)
                     .filter(|ms| *ms > 0)
                     .or(self.last_model_ms);
@@ -366,10 +408,52 @@ pub fn describe(d: &Decision, element: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kai_core::engine::ApprovalChoice;
     use std::sync::Arc;
 
     fn decision(json: &str) -> Box<Decision> {
         Box::new(Decision::parse_checked(json).unwrap())
+    }
+
+    fn pending(text: &str) -> (Pending, futures::channel::oneshot::Receiver<ApprovalChoice>) {
+        let (reply, rx) = futures::channel::oneshot::channel();
+        let d = decision(&format!(
+            r#"{{"thought":"x","action":"shell","text":"{text}","risk":"high"}}"#
+        ));
+        let p = Pending {
+            decision: *d,
+            element: None,
+            explain: None,
+            reply,
+        };
+        (p, rx)
+    }
+
+    #[test]
+    fn team_approvals_wait_their_turn_and_are_never_dropped() {
+        // Two sub-agents ask at once, and a third acts meanwhile. Dropping
+        // an approval answers Stop, which stopped a sub-agent live.
+        let mut s = RunState::default();
+        s.start("t".into(), true, 40);
+        let (a, mut rx_a) = pending("rm a");
+        let (b, mut rx_b) = pending("rm b");
+        s.apply(Ui::Approval(a));
+        s.apply(Ui::Approval(b));
+        s.apply(Ui::Event(EngineEvent::Acted {
+            step: 3,
+            timings: Default::default(),
+        }));
+        assert_eq!(s.phase, Phase::Waiting);
+        assert!(matches!(rx_a.try_recv(), Ok(None)), "a was dropped");
+        assert!(matches!(rx_b.try_recv(), Ok(None)), "b was dropped");
+        let first = s.take_approval().unwrap();
+        assert_eq!(first.decision.text.as_deref(), Some("rm a"));
+        assert_eq!(s.phase, Phase::Waiting, "b is showing now");
+        first.reply.send(ApprovalChoice::Approve).unwrap();
+        assert_eq!(rx_a.try_recv(), Ok(Some(ApprovalChoice::Approve)));
+        let second = s.take_approval().unwrap();
+        assert_eq!(second.decision.text.as_deref(), Some("rm b"));
+        assert!(s.take_approval().is_none());
     }
 
     #[test]
