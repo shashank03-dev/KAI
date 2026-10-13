@@ -119,6 +119,7 @@ impl Screen {
                     bounds: Rect::new(10.0 * i as f32, 0.0, 10.0, 10.0),
                     enabled: true,
                     secure: false,
+                    focused: false,
                     value: None,
                 })
                 .collect(),

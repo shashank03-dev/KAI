@@ -27,6 +27,7 @@ impl Perceptor for Inbox {
             bounds: Rect::new(0.0, 20.0 * mark as f32, 100.0, 20.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         };
         Ok(Observation {

@@ -37,6 +37,8 @@ pub struct RawNode {
     pub enabled: bool,
     pub visible: bool,
     pub secure: bool,
+    /// Has keyboard focus (AT-SPI `Focused`, UIA `HasKeyboardFocus`).
+    pub focused: bool,
     /// Current text of a field (Linux: AT-SPI Text). `None` when unknown.
     pub value: Option<String>,
     /// The live object, for accessibility-first actions. `None` in tests.
@@ -159,7 +161,10 @@ pub fn ground_indexed(nodes: &[RawNode], screen: Rect) -> (Grounding, Vec<usize>
     let mut marks: Vec<Element> = Vec::new();
     let mut picked: Vec<usize> = Vec::new();
     for (i, n) in keep {
-        if marks.iter().any(|m| near(m.bounds, n.bounds)) {
+        if let Some(m) = marks.iter_mut().find(|m| near(m.bounds, n.bounds)) {
+            // A focused or secure inner node marks the box that stands for it.
+            m.focused |= n.focused;
+            m.secure |= n.secure || n.role == Role::PasswordField;
             continue;
         }
         if marks.len() >= MAX_MARKS {
@@ -173,6 +178,7 @@ pub fn ground_indexed(nodes: &[RawNode], screen: Rect) -> (Grounding, Vec<usize>
             bounds: n.bounds,
             enabled: n.enabled,
             secure: n.secure || n.role == Role::PasswordField,
+            focused: n.focused,
             value: n.value.clone(),
         });
     }
@@ -256,6 +262,7 @@ mod tests {
             enabled: true,
             visible: true,
             secure: false,
+            focused: false,
             value: None,
             handle: None,
         }

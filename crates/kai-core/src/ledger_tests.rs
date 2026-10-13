@@ -16,6 +16,7 @@ fn obs(title: &str) -> Observation {
             bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }]),
         screen_hash: 0,

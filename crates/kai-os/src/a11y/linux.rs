@@ -103,6 +103,7 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
                 enabled: state.contains(State::Enabled) || state.contains(State::Sensitive),
                 visible: state.contains(State::Visible),
                 secure: arole == A::PasswordText,
+                focused: state.contains(State::Focused),
                 value: if role == Role::TextField && arole != A::Terminal {
                     field_text(&p).await
                 } else {

@@ -32,6 +32,7 @@ fn grounding() -> Grounding {
         bounds: Rect::new(x, y, w, h),
         enabled: true,
         secure: false,
+        focused: false,
         value: None,
     };
     Grounding::Marks(vec![

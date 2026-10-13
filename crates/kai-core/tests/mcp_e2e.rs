@@ -190,6 +190,7 @@ impl engine::Perceptor for Injected {
                 bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
                 enabled: true,
                 secure: false,
+                focused: false,
                 value: None,
             }]),
             screen_hash: 0,

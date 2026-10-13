@@ -122,6 +122,7 @@ mod tests {
             bounds: Rect::new(10.0, 10.0, 50.0, 20.0),
             enabled: true,
             secure: false,
+            focused: false,
             value: None,
         }
     }
@@ -206,6 +207,7 @@ mod tests {
             enabled: true,
             visible: true,
             secure: false,
+            focused: false,
             value: None,
             handle: Some(dummy()),
         }];

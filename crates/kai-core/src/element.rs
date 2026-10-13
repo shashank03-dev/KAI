@@ -77,6 +77,10 @@ pub struct Element {
     /// True when this is (or sits inside) a password field — forces high risk.
     #[serde(default)]
     pub secure: bool,
+    /// Has keyboard focus: where an untargeted `type` lands. Unknown (false
+    /// everywhere) when the OS did not say.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub focused: bool,
     /// What a text field or dropdown currently holds (never for secure
     /// fields), so the model can see that its typing landed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -251,6 +255,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
             enabled,
             secure,
+            focused: false,
             value: None,
         }
     }
