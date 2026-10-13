@@ -59,9 +59,16 @@ _kai_start() {
   export QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
   export SAL_USE_VCLPLUGIN=gtk3
   export MOZ_ENABLE_WAYLAND=0
+  # A killed Firefox must not ask "Open in Troubleshoot Mode?" next time.
+  export MOZ_DISABLE_AUTO_SAFE_MODE=1
   # Web links go to Firefox (the container has no default-browser setting).
   if [ -z "${BROWSER:-}" ] && command -v firefox >/dev/null 2>&1; then
     export BROWSER=firefox
+  fi
+
+  # Folders open in the file manager (`xdg-open ~/dir`), as on a desktop.
+  if command -v xdg-mime >/dev/null 2>&1 && command -v pcmanfm >/dev/null 2>&1; then
+    xdg-mime default pcmanfm.desktop inode/directory >/dev/null 2>&1 || true
   fi
 
   # 4. AT-SPI bus launcher (it starts the a11y bus and the registry daemon).
@@ -93,7 +100,7 @@ _kai_start() {
     echo "export XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
     echo "export NO_AT_BRIDGE=0 GTK_MODULES=gail:atk-bridge ACCESSIBILITY_ENABLED=1"
     echo "export GNOME_ACCESSIBILITY=1 QT_ACCESSIBILITY=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1"
-    echo "export SAL_USE_VCLPLUGIN=gtk3 MOZ_ENABLE_WAYLAND=0"
+    echo "export SAL_USE_VCLPLUGIN=gtk3 MOZ_ENABLE_WAYLAND=0 MOZ_DISABLE_AUTO_SAFE_MODE=1"
     [ -n "${BROWSER:-}" ] && echo "export BROWSER=$BROWSER"
   } >"$dir/env"
   echo "Kai desktop up on $DISPLAY (env: $dir/env)"
