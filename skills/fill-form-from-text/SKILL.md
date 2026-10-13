@@ -4,7 +4,7 @@ description: Fill in a web or desktop form using details the user pasted or desc
 license: MIT
 metadata:
   author: kai
-  version: "1.0"
+  version: "1.1"
 ---
 # Fill a form from text
 
@@ -16,6 +16,8 @@ metadata:
    so.
 3. Password and payment fields: never fill them. Use `ask_user` and let the user
    type those themselves.
-4. Do not press **Submit**, **Send** or **Pay**. Those are `high` risk. Reply
-   `done` once every field you have a value for is filled, and say which fields
-   you left empty.
+4. Press **Submit** or **Send** only when the user asked you to send or
+   submit the form; then do it once every field is filled (it is `high` risk,
+   so Kai asks the user first). Never press **Pay** yourself. Otherwise reply
+   `done` once every field you have a value for is filled, and say which
+   fields you left empty.
