@@ -120,6 +120,7 @@ impl Engine<'_> {
         images: &Images,
         schema: &serde_json::Value,
         max_tokens: u32,
+        focused: Option<u32>,
     ) -> anyhow::Result<Decided> {
         let req = ModelRequest {
             system,
@@ -131,7 +132,7 @@ impl Engine<'_> {
         };
         let reply = client.decide(&req).await?;
 
-        match StepReply::parse_checked(&reply.raw) {
+        match StepReply::parse_with_focus(&reply.raw, focused) {
             Ok(d) => Ok(Decided::new(d, &reply)),
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
@@ -166,7 +167,8 @@ impl Engine<'_> {
                     ..req
                 };
                 let reply2 = client.decide(&req2).await?;
-                let mut d = Decided::new(StepReply::parse_checked(&reply2.raw)?, &reply2);
+                let mut d =
+                    Decided::new(StepReply::parse_with_focus(&reply2.raw, focused)?, &reply2);
                 d.add_usage(&reply);
                 Ok(d)
             }

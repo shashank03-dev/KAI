@@ -38,6 +38,16 @@ impl StepReply {
     /// triggers the repair retry); an invalid follow-up drops itself and every
     /// follow-up after it, never the main decision.
     pub fn parse_checked(raw: &str) -> Result<Self, SchemaError> {
+        Self::parse_with_focus(raw, None)
+    }
+
+    /// [`Self::parse_checked`], where a `type` with no target goes to
+    /// `focused`: the editable field that has keyboard focus on the screen
+    /// the model saw. Gemma answers `"target": null` after clicking into a
+    /// field (seen live in Find and Replace); naming the focused field keeps
+    /// every target check (password fields always ask). Without a focused
+    /// field it stays an error, as before.
+    pub fn parse_with_focus(raw: &str, focused: Option<u32>) -> Result<Self, SchemaError> {
         let json = extract_json_object(raw)
             .ok_or_else(|| SchemaError::Parse("no JSON object found in reply".to_string()))?;
         let mut v: Value =
@@ -45,6 +55,12 @@ impl StepReply {
         let obj = v
             .as_object_mut()
             .ok_or_else(|| SchemaError::Parse("reply is not a JSON object".to_string()))?;
+        if let Some(mark) = focused
+            && obj.get("action") == Some(&"type".into())
+            && obj.get("target").is_none_or(Value::is_null)
+        {
+            obj.insert("target".into(), mark.into());
+        }
         let mut then_raw = obj.remove("then");
         hoist_empty_shell(obj, &mut then_raw);
         let plan_raw = obj.remove("plan");
@@ -194,6 +210,27 @@ fn follow_up(mut item: Value) -> Option<Decision> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_type_with_no_target_takes_the_focused_field_only_when_there_is_one() {
+        let raw = r#"{"thought":"x","action":"type","target":null,"text":"Friday","risk":"none"}"#;
+        let r = StepReply::parse_with_focus(raw, Some(4)).unwrap();
+        assert_eq!(r.decision.target, Some(4));
+        // No focused field: still an error (the repair asks for a target).
+        assert!(StepReply::parse_with_focus(raw, None).is_err());
+        assert!(StepReply::parse_checked(raw).is_err());
+        // A named target is never replaced; other actions are untouched.
+        let named = r#"{"thought":"x","action":"type","target":2,"text":"a","risk":"none"}"#;
+        assert_eq!(
+            StepReply::parse_with_focus(named, Some(4))
+                .unwrap()
+                .decision
+                .target,
+            Some(2)
+        );
+        let click = r#"{"thought":"x","action":"click","risk":"none"}"#;
+        assert!(StepReply::parse_with_focus(click, Some(4)).is_err());
+    }
 
     #[test]
     fn an_empty_shell_takes_the_command_from_its_first_follow_up() {
