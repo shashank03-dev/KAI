@@ -249,7 +249,20 @@ impl Engine<'_> {
                     .into(),
             );
         }
-        let no_progress = fx.no_op() && (!after_shell || repeated);
+        // Two steps taken in turn that only lead back to the same screen
+        // (seen live: open the Search menu, pick the wrong item, which
+        // closes it; 19 times over) change something every step, so the
+        // check above never fires.
+        let cycling = r.list_before == Some(th) && super::act::cycling(&r.history);
+        if cycling {
+            r.notes.push(
+                "Your last two steps, done twice, only led back to the same screen. Do not \
+                 repeat them: read the element names again (the item you want may have \
+                 another number) or take another route."
+                    .into(),
+            );
+        }
+        let no_progress = (fx.no_op() && (!after_shell || repeated)) || cycling;
         if no_progress {
             r.no_progress_streak += 1;
         } else {
@@ -288,6 +301,7 @@ impl Engine<'_> {
             ));
         }
 
+        r.list_before = r.last_sig.map(|(_, prev_th, _)| prev_th);
         r.last_sig = Some((obs.screen_hash, th, tree_only));
         r.last_rich = rich(&obs.grounding);
         if tree_only {

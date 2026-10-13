@@ -81,6 +81,21 @@ pub(super) fn looping(history: &[HistoryItem]) -> bool {
     }
 }
 
+/// The last four steps are two different steps done twice in turn (A B A
+/// B) with the same results.
+pub(super) fn cycling(history: &[HistoryItem]) -> bool {
+    match history {
+        [.., a, b, c, d] => {
+            a.same_step(c)
+                && b.same_step(d)
+                && !a.same_step(b)
+                && a.output == c.output
+                && b.output == d.output
+        }
+        _ => false,
+    }
+}
+
 impl Engine<'_> {
     /// Perform one action. Returns command output for `shell` (so the model
     /// sees it next step) and the path taken: `a11y`, `mouse`, `keyboard`,
