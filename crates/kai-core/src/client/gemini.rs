@@ -274,8 +274,8 @@ fn retry_delay(v: &serde_json::Value) -> Option<Duration> {
         .iter()
         .find_map(|d| d["retryDelay"].as_str())
         .and_then(|s| s.trim().strip_suffix('s')?.parse::<f64>().ok())
-        .filter(|s| s.is_finite() && *s >= 0.0)
-        .map(Duration::from_secs_f64)
+        // `try_`: a huge value ("1e30s") must not panic the run.
+        .and_then(|s| Duration::try_from_secs_f64(s).ok())
 }
 
 /// Which quota a 429 hit (`QuotaFailure.violations[].quotaMetric`), for the
@@ -382,7 +382,9 @@ mod tests {
         let none = serde_json::json!({"error": {"code": 429, "message": "slow down"}});
         assert_eq!(retry_delay(&none), None);
         assert_eq!(quota_metric(&none), None);
-        let bad = serde_json::json!({"error": {"details": [{"retryDelay": "-1s"}]}});
-        assert_eq!(retry_delay(&bad), None);
+        for bad in ["-1s", "NaNs", "infs", "1e30s", "s", "12"] {
+            let v = serde_json::json!({"error": {"details": [{"retryDelay": bad}]}});
+            assert_eq!(retry_delay(&v), None, "{bad}");
+        }
     }
 }

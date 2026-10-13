@@ -265,8 +265,16 @@ impl KaiApp {
         if self.queued_count(cx) > 0 {
             self.queue_held = true;
         }
-        self.answer(ApprovalChoice::Stop, cx);
-        self.answer_human(HumanReply::Stop, cx);
+        if let Some(state) = self.active_state() {
+            let (approvals, humans) = state.update(cx, |r, _| r.take_all());
+            for p in approvals {
+                let _ = p.reply.send(ApprovalChoice::Stop);
+            }
+            for h in humans {
+                let _ = h.reply.send(HumanReply::Stop);
+            }
+        }
+        self.human_draft.update(cx, |d, cx| d.set_text("", cx));
         cx.notify();
     }
 
@@ -286,10 +294,13 @@ impl KaiApp {
                 entry.control.stop();
                 // Also interrupt typing or a click in progress.
                 cx.global::<AgentHandle>().0.stop();
-                if let Some(p) = state.update(cx, |r, _| r.take_approval()) {
+                // Every sub-agent's approval and check, queued ones too:
+                // one left waiting would keep the run from ending.
+                let (approvals, humans) = state.update(cx, |r, _| r.take_all());
+                for p in approvals {
                     let _ = p.reply.send(ApprovalChoice::Stop);
                 }
-                if let Some(h) = state.update(cx, |r, _| r.take_human()) {
+                for h in humans {
                     let _ = h.reply.send(HumanReply::Stop);
                 }
             }
@@ -416,11 +427,8 @@ impl KaiApp {
             return;
         };
         if let Some(p) = state.update(cx, |r, cx| {
-            if r.phase == Phase::Waiting {
-                r.phase = Phase::Running;
-            }
             cx.notify();
-            r.take_approval()
+            r.answer_approval(choice)
         }) {
             let _ = p.reply.send(choice);
         }

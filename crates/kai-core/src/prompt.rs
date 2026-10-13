@@ -227,6 +227,9 @@ pub struct HistoryItem {
     /// The name of the element the step acted on, for the macro summary
     /// (mark numbers change every frame).
     pub target_name: Option<String>,
+    /// The whole command of a `shell` step. The summary shortens a long
+    /// one, and two different scripts must not look like a repeat.
+    pub command: Option<String>,
 }
 
 impl HistoryItem {
@@ -299,7 +302,18 @@ impl HistoryItem {
             summary.push(' ');
             summary.push_str(&d.keys.join("+"));
         }
-        Self::note(summary)
+        Self {
+            command: (d.action == crate::schema::Action::Shell)
+                .then(|| d.text.clone())
+                .flatten(),
+            ..Self::note(summary)
+        }
+    }
+
+    /// The same step as `other`: same summary and, for a shell step, the
+    /// same whole command.
+    pub fn same_step(&self, other: &HistoryItem) -> bool {
+        self.summary == other.summary && self.command == other.command
     }
 }
 

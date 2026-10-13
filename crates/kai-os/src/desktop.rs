@@ -129,33 +129,83 @@ fn own_pids() -> Vec<u32> {
 }
 
 /// Would `cmd` kill Kai? A kill-family command (`kill`, `pkill`, `killall`,
-/// `taskkill`, `Stop-Process`) that names one of `own` as a number, targets
-/// every process (`kill -1`), or matches Kai by name. Seen live: Gemma ran
+/// `taskkill`, `Stop-Process`) that names one of `own` as a number (or
+/// `$PPID`, the shell's parent), targets every process (`kill -9 -1`), or
+/// matches Kai by name (`pkill -f target/release/kai`), including through a
+/// pipeline that feeds it (`pgrep kai | xargs kill`). Seen live: Gemma ran
 /// `ps aux | grep mousepad`, which matched Kai's own command line, then
-/// killed that PID.
+/// killed that PID. Only the statement holding the killer counts, so
+/// `pkill mousepad; cat ~/kai/notes` runs.
 pub fn kills_kai(cmd: &str, own: &[u32]) -> bool {
-    let c = cmd.to_ascii_lowercase();
-    let words: Vec<&str> = c
-        .split(|ch: char| ch.is_whitespace() || ";|&()`'\"".contains(ch))
-        .filter(|w| !w.is_empty())
-        .collect();
-    let killer = |w: &str| {
-        let w = w.rsplit('/').next().unwrap_or(w);
+    // PID 1 cannot be killed by Kai's user, and is the parent of a detached
+    // app: it must not make `kill -1 <pid>` (SIGHUP) look like a hit.
+    let own: Vec<u32> = own.iter().copied().filter(|p| *p > 1).collect();
+    let c = cmd.to_ascii_lowercase().replace("||", ";");
+    c.split([';', '\n', '&'])
+        .any(|statement| statement_kills(statement, &own))
+}
+
+fn statement_kills(statement: &str, own: &[u32]) -> bool {
+    let words = |seg: &str| -> Vec<String> {
+        seg.split(|ch: char| ch.is_whitespace() || "()`'\"{}".contains(ch))
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let segments: Vec<Vec<String>> = statement.split('|').map(words).collect();
+    let killer = |w: &String| {
+        let w = w.rsplit(['/', '\\']).next().unwrap_or(w);
+        let w = w.strip_suffix(".exe").unwrap_or(w);
         matches!(
             w,
             "kill" | "pkill" | "killall" | "taskkill" | "stop-process"
         )
     };
-    let Some(start) = words.iter().position(|w| killer(w)) else {
+    let Some((k, at)) = segments
+        .iter()
+        .enumerate()
+        .find_map(|(k, ws)| ws.iter().position(killer).map(|at| (k, at)))
+    else {
         return false;
     };
-    words[start + 1..].iter().any(|w| {
-        w.trim_start_matches('-')
+    let names_kai = |w: &str| w.split(['/', '\\']).any(|part| part.starts_with("kai"));
+    let own_number = |w: &str| {
+        w.strip_prefix('-')
+            .unwrap_or(w)
             .parse::<u32>()
             .is_ok_and(|n| own.contains(&n))
-            || *w == "-1"
-            || w.starts_with("kai")
-    })
+    };
+    let hits = kill_targets(&segments[k][at + 1..])
+        .iter()
+        .any(|w| own_number(w) || *w == "-1" || matches!(*w, "$ppid" | "${ppid}") || names_kai(w));
+    // What a pipeline feeds the killer (`pgrep kai | xargs kill`).
+    let fed = segments[..k]
+        .iter()
+        .flatten()
+        .filter(|w| !w.starts_with('-'))
+        .any(|w| own_number(w) || names_kai(w));
+    hits || fed
+}
+
+/// The arguments of a kill command that name what to kill: a leading
+/// signal (`-9`, `-TERM`, `-1` before a PID) and `-s`/`-n` with their value
+/// are left out; after `--` everything counts.
+fn kill_targets(args: &[String]) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    let mut options = true;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if options && a == "--" {
+            options = false;
+        } else if options && matches!(a, "-s" | "-n" | "--signal" | "-signal") {
+            i += 1;
+        } else if !(options && i == 0 && a.starts_with('-') && args.len() > 1) {
+            out.push(a);
+        }
+        i += 1;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -181,6 +231,41 @@ mod tests {
             "pkill mousepad",
             "ls -la 31093",
             "killall mousepad",
+        ] {
+            assert!(!super::kills_kai(cmd, &own), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn the_kill_guard_sees_pipelines_paths_and_signals() {
+        // PID 1 is the parent of a detached app (`setsid -f kai-app`).
+        let own = [31093, 1];
+        for cmd in [
+            "pgrep kai | xargs kill",
+            "pgrep -f kai-app | xargs -r kill -9",
+            "pkill -f target/release/kai",
+            "pkill -f \"/home/user/KAI/target/release/kai-app\"",
+            "echo 31093 | xargs kill",
+            "kill -s TERM 31093",
+            "kill -- -1",
+            "kill -9 -31093",
+            "kill $PPID",
+            "Get-Process kai | Stop-Process",
+            "taskkill.exe /IM kai.exe /F",
+            "cd /tmp && kill 31093",
+        ] {
+            assert!(super::kills_kai(cmd, &own), "{cmd}");
+        }
+        for cmd in [
+            // `-1` before a PID is SIGHUP, and PID 1 is not Kai.
+            "kill -1 1234",
+            "kill -9 1",
+            "kill %1",
+            "kill -l",
+            "pkill mousepad; cat ~/kai/notes.txt",
+            "kill 1234 && ls kai.txt",
+            "ps aux | grep mousepad | awk '{print $2}' | xargs kill",
+            "pkill -x mousepad || true",
         ] {
             assert!(!super::kills_kai(cmd, &own), "{cmd}");
         }

@@ -94,11 +94,25 @@ pub fn exclude_windows(agent: &Agent, cx: &mut App) {
 impl MiniView {
     fn answer(run: &Entity<RunState>, choice: ApprovalChoice, cx: &mut App) {
         if let Some(p) = run.update(cx, |r, cx| {
-            r.phase = Phase::Running;
             cx.notify();
-            r.take_approval()
+            r.answer_approval(choice)
         }) {
             let _ = p.reply.send(choice);
+        }
+    }
+
+    /// The mini window's Stop: every approval and check of this run, shown
+    /// or queued, answers Stop.
+    fn stop_all(run: &Entity<RunState>, cx: &mut App) {
+        let (approvals, humans) = run.update(cx, |r, cx| {
+            cx.notify();
+            r.take_all()
+        });
+        for p in approvals {
+            let _ = p.reply.send(ApprovalChoice::Stop);
+        }
+        for h in humans {
+            let _ = h.reply.send(HumanReply::Stop);
         }
     }
 
@@ -291,7 +305,7 @@ impl Render for MiniView {
                             .child(stop_button("mini-stop").full_width().on_click(
                                 move |_, _, cx| {
                                     cx.global::<AgentHandle>().0.stop();
-                                    Self::answer(&stop_run, ApprovalChoice::Stop, cx);
+                                    Self::stop_all(&stop_run, cx);
                                 },
                             )),
                     )

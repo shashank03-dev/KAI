@@ -355,6 +355,7 @@ impl Engine<'_> {
         let t_act = Instant::now();
         let guarded = act::reopen_guard(&mut r.opened, &decision)
             .or_else(|| act::repeat_guard(&r.history, &decision));
+        let refused = guarded.is_some();
         r.events_mark = self.perceptor.ui_events();
         let acted = match guarded {
             Some(note) => Ok((Some(note), "none")),
@@ -397,7 +398,10 @@ impl Engine<'_> {
         if let Some(out) = &output {
             item.push_output(out);
             // Terminal work changes no pixels; it is progress by itself.
-            r.no_progress_streak = 0;
+            // A refused repeat is not: it must not keep a loop alive.
+            if !refused {
+                r.no_progress_streak = 0;
+            }
         }
         if decision.action == Action::Wait {
             // Waiting is deliberate; an unchanged screen is expected.
