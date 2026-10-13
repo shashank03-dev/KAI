@@ -860,3 +860,33 @@ Still no model key and no GPU in this session, so there are no live numbers.
 - **Found while smoke-testing:** `kai models list | head` panicked on the
   closed pipe. Unix now gets the default SIGPIPE (exit 141, quiet), as
   other CLIs do (`console::init`).
+
+## Windows for real, and cut-off replies from open models (2026-10-13)
+
+- **First run on a real Windows machine** (GitHub `windows-latest`, run
+  38429042037, workflow `windows.yml`). Clippy `-D warnings`, the full test
+  suite, release build and CLI smoke (skills, models list, mock bench 30/30)
+  all passed. `kai-app` started on Direct3D 11 (Microsoft Basic Render
+  Driver) and photographed all 60 screens, light and dark, and they render
+  as on Linux. The desktop replay passed 10 of the 19 replayable tasks,
+  including `web-form-submit` on the real Windows desktop. 7 failures are
+  recorded replies that are Linux shell (`bc`, `zip`, `for f in *`), so
+  they cannot pass in PowerShell; that is not a Kai bug. 2 (`tip-calculator`,
+  `calendar-event`) report "task setup failed" and are not diagnosed yet.
+  The app logs "window not found / Invalid window handle" once at start,
+  when the splash closes; it is harmless here, but noted. Manual dispatch
+  from this session's GitHub connection was refused (403), so the session
+  branch alone carries a push trigger; `main` stays manual-only.
+- **Cut-off replies keep what was complete** (`reply_salvage.rs`). Holo3.1
+  4B on this CPU (~60–145 s per call) wrote follow-ups with every optional
+  field, and once looped `"left","left",…`. 10 of ~50 replies hit the
+  192-token budget, 9 of them inside `then`, and each repair cost another
+  full call. Kai now keeps every top-level field that ended before the cut
+  and every complete follow-up. That is the existing rule for an invalid
+  follow-up ("drops itself and the rest, never the main decision"). The
+  usual validation is the guard: a cut `text` or `target` fails to parse
+  and is repaired. A reply whose `risk` was cut is never salvaged, because
+  a missing `risk` would read as "none"; the guard test caught exactly
+  that. Replayed on the 10 real cut replies from the log: 9 salvaged, and
+  the tenth (cut before `risk`) goes to repair as it should. There is no
+  prompt or schema change, so prompts stay byte-stable.

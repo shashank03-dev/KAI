@@ -29,6 +29,7 @@ pub mod procedure;
 pub mod prompt;
 pub mod recorder;
 pub mod reply;
+pub mod reply_salvage;
 pub mod risk;
 pub mod schema;
 pub mod settings;

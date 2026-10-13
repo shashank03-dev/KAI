@@ -136,6 +136,7 @@ impl Engine<'_> {
 
         match StepReply::parse_with_focus(&reply.raw, focused) {
             Ok(d) => Ok(Decided::new(d, &reply)),
+            Err(_) if let Some(d) = salvaged(&reply.raw, focused) => Ok(Decided::new(d, &reply)),
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
                 // no-op improvement on vLLM structured outputs).
@@ -176,4 +177,16 @@ impl Engine<'_> {
             }
         }
     }
+}
+
+/// A reply cut off inside `then`: its main decision and complete follow-ups
+/// ([`crate::reply_salvage`]), with no repair call.
+fn salvaged(raw: &str, focused: Option<u32>) -> Option<StepReply> {
+    let fixed = crate::reply_salvage::salvage_cut_then(raw)?;
+    let r = StepReply::parse_with_focus(&fixed, focused).ok()?;
+    log::info!(
+        "reply was cut off in `then`: kept the action and {} follow-up(s)",
+        r.then.len()
+    );
+    Some(r)
 }
