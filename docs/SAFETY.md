@@ -47,6 +47,12 @@ whatever the level, autopilot included:
   (`sk-…`, `ghp_…`, `AKIA…`, or 32+ mixed letters and digits), or a private
   key. Typing it into a form counts as sending it.
 
+Effect words ("send", "delet…", "pay", "order", "submit", …) count where a
+word starts with them, also after `re`, `pre`, `un` or `auto` ("resend",
+"preorder", "autopay") and inside camel case ("PlaceOrder"), but not
+inside other words ("display", "border", "information"). A `wait`, `done`
+or `ask_user` never escalates: it cannot send or delete anything.
+
 For sensitive data the approval prompt explains the action, the risk and how
 the data is used, for example:
 
@@ -81,6 +87,24 @@ Each reads the accessibility tree first, where the OS reports focus (AT-SPI
 A replayed procedure step (`docs/PROCEDURES.md`) reads the screen before
 every step, untargeted ones too, so the same checks run there.
 
+## Approvals in Team mode
+
+Sub-agents can ask at the same time. Approvals and human checks queue per
+run and show one at a time; one sub-agent acting or finishing its check
+never drops another's (a dropped approval answers Stop). Stop answers every
+queued one. An Approve within 600 ms of an approval appearing is ignored, so
+a double click cannot approve the queued step that takes the first one's
+place unread.
+
+## Kai does not stop itself
+
+A shell step that would kill Kai is not run: a kill-family command (`kill`,
+`pkill`, `killall`, `taskkill`, `Stop-Process`) naming Kai's process or its
+parent, `$PPID`, every process (`kill -9 -1`), or Kai by name, including a
+pipeline that feeds it (`pgrep kai | xargs kill`). Only the statement that
+holds the killer counts. Not caught: a kill by user (`pkill -u $USER`) or
+by a PID computed at run time (`kill $(cat pidfile)`).
+
 ## Tests
 
 | Guarantee | Test |
@@ -90,7 +114,10 @@ every step, untargeted ones too, so the same checks run there.
 | A card number needs approval even on autopilot; trace and later turns never hold it; the explanation names action, risk and use | `safety_e2e::a_card_number_is_confirmed_even_on_autopilot_and_never_saved` |
 | A skill step never types blind into a focused password field (and still types into an ordinary one) | `safety_focus_e2e::a_skill_step_never_types_blind_into_the_focused_password_field` |
 | A replay reads the screen before an untargeted step; an injection there stops it before anything runs | `safety_focus_e2e::a_replay_reads_the_screen_before_an_untargeted_first_step` |
-| Untargeted typing follows focus; unknown focus with a password field on screen asks | `risk::tests::untargeted_typing_*` |
+| Untargeted typing follows focus; unknown focus with a password field on screen asks; any focused secure field counts | `risk::tests::untargeted_typing_*`, `risk::tests::any_focused_secure_field_counts_when_several_report_focus` |
+| Effect words escalate after a prefix and in camel case, not inside other words | `risk::tests::effect_words_*` |
+| Team approvals queue, are never dropped by another sub-agent, and a fast Approve is ignored | `state::tests` (kai-app) |
+| Commands that would kill Kai are refused; ordinary kills run | `desktop::tests::a_command_that_would_kill_kai_is_refused`, `desktop::tests::the_kill_guard_sees_pipelines_paths_and_signals` |
 | What counts as sensitive, and what does not (emails, dates, URLs, order numbers) | `untrusted::tests` |
 | Ordinary screens ("Password", "Verify your email address", "System settings") are not flagged | `untrusted::tests::ordinary_screens_are_not_flagged` |
 
