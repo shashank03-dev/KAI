@@ -2,6 +2,11 @@
 # Open URL in the first browser found (Firefox on PATH or in /opt/firefox,
 # then Chromium/Chrome), detached. Used by task setup.
 url="$1"
+# `kai bench --browser`: Kai's own browser opens the page instead.
+if [ "$KAI_BENCH_LANE" = 1 ]; then
+  printf '%s\n' "$url" > "$KAI_BENCH_OPEN_FILE"
+  exit 0
+fi
 for b in firefox /opt/firefox/firefox chromium chromium-browser google-chrome; do
   if command -v "$b" >/dev/null 2>&1 || [ -x "$b" ]; then
     setsid -f "$b" "$url" >/dev/null 2>&1 </dev/null

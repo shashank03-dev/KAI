@@ -180,17 +180,21 @@ impl Actuator for DryRun<'_> {
 }
 
 /// Run a setup/check/teardown command with `KAI_BENCH_DIR` set. True on exit 0.
-pub async fn sh(cmd: &str, bench_dir: &Path) -> bool {
+pub async fn sh_env(cmd: &str, bench_dir: &Path, env: &[(&str, String)]) -> bool {
     let shell = kai_os::shell::Shell::new(kai_os::KillSwitch::new());
-    let dir = bench_dir.display().to_string();
-    let full = if cfg!(windows) {
-        format!("$env:KAI_BENCH_DIR='{}'; {cmd}", dir.replace('\'', "''"))
-    } else {
-        format!(
-            "export KAI_BENCH_DIR='{}'; {cmd}",
-            dir.replace('\'', r"'\''")
-        )
-    };
+    let mut vars = vec![("KAI_BENCH_DIR", bench_dir.display().to_string())];
+    vars.extend(env.iter().map(|(k, v)| (*k, v.clone())));
+    let exports: String = vars
+        .iter()
+        .map(|(k, v)| {
+            if cfg!(windows) {
+                format!("$env:{k}='{}'; ", v.replace('\'', "''"))
+            } else {
+                format!("export {k}='{}'; ", v.replace('\'', r"'\''"))
+            }
+        })
+        .collect();
+    let full = format!("{exports}{cmd}");
     match shell.run(&full).await {
         Ok(out) => {
             let ok = out.trim_end().ends_with("[exit 0]");
@@ -301,6 +305,8 @@ pub struct Live<'a> {
     pub executor: Option<&'a dyn Decider>,
     /// Experience memory and repeats.
     pub memory: MemoryOpts<'a>,
+    /// `--browser`: run each task in a fresh browser lane; `Some(headless)`.
+    pub browser: Option<bool>,
 }
 
 pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run>> {
@@ -310,7 +316,13 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
     let approver = TerminalApprover {
         auto_yes: live.auto_yes,
     };
-    let available = Available::probe();
+    let mut available = Available::probe();
+    if live.browser.is_some()
+        && super::lane::available()
+        && !available.have.iter().any(|h| h == "browser")
+    {
+        available.have.push("browser".into());
+    }
     eprintln!("this machine has: {}", available.have.join(", "));
     let replay = live.client.is_none();
     let mut out = Vec::new();
@@ -338,10 +350,22 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             });
             continue;
         }
-        let setup_failed = match t.setup.here() {
-            Some(cmd) => !sh(cmd, live.bench_dir).await,
+        // `--browser`: a fresh lane per task, so nothing leaks between tasks.
+        let lane = match live.browser {
+            Some(headless) => Some(super::lane::BenchLane::start(headless, &kill).await?),
+            None => None,
+        };
+        let env = lane.as_ref().map(|l| l.env()).unwrap_or_default();
+        let mut setup_failed = match t.setup.here() {
+            Some(cmd) => !sh_env(cmd, live.bench_dir, &env).await,
             None => false,
         };
+        if let Some(l) = &lane
+            && let Err(e) = l.open_requested().await
+        {
+            log::warn!("the browser lane could not open the task's page: {e}");
+            setup_failed = true;
+        }
         if setup_failed {
             log::warn!("setup for {} failed; running anyway", t.id);
             eprintln!("  (setup for {} failed; running anyway)", t.id);
@@ -355,8 +379,12 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         let engine = Engine {
             client: &fast,
             careful: careful.as_ref().map(|c| c as &dyn ModelClient),
-            perceptor: &screen,
-            actuator: &hands,
+            perceptor: lane
+                .as_ref()
+                .map_or(&screen as &dyn kai_core::Perceptor, |l| &l.lane),
+            actuator: lane
+                .as_ref()
+                .map_or(&hands as &dyn kai_core::Actuator, |l| &l.lane),
             approver: &approver,
             interrupt: &kill,
             sink: &Printer,
@@ -385,12 +413,13 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         let took = started.elapsed();
         let calls = std::mem::take(&mut *log.lock().unwrap());
         let check = match t.check.here() {
-            Some(cmd) => Some(sh(cmd, live.bench_dir).await),
+            Some(cmd) => Some(sh_env(cmd, live.bench_dir, &env).await),
             None => None,
         };
         if let Some(cmd) = t.teardown.here() {
-            sh(cmd, live.bench_dir).await;
+            sh_env(cmd, live.bench_dir, &env).await;
         }
+        drop(lane);
         if let Some(r) = &recorder {
             record::finish(r, &trace, check, setup_failed);
         }

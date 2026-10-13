@@ -357,6 +357,33 @@ mod tests {
         assert_eq!(picked.front.name, "write-email-gmail");
     }
 
+    /// A task that names its own site never runs a skill that opens another
+    /// one (found live: a contact form on 127.0.0.1 opened Gmail).
+    #[test]
+    fn a_task_with_its_own_address_does_not_open_another_site() {
+        let gmail = load_from_str(
+            "---\nname: write-email-gmail\ndescription: Compose an email in Gmail in the browser with recipient, subject and body. Use when the user asks to write, draft or send an email or mail someone.\nmetadata:\n  kai: '[{\"do\":\"open_url\",\"url\":\"https://mail.google.com/mail/u/0/\"}]'\n---\nbody\n",
+            Path::new("/tmp/write-email-gmail"),
+        )
+        .unwrap();
+        assert!(!gmail.steps.is_empty());
+        let skills = vec![gmail];
+        let form = "Open http://127.0.0.1:8765/contact.html in the browser and send the \
+                    contact form: name Ravi Kumar, email ravi@example.com";
+        assert!(select_skill(form, &skills).is_none());
+        // Naming the skill's own site, or only an e-mail address, still fits.
+        assert!(select_skill("send an email to bob@uni.edu from my browser", &skills).is_some());
+        assert!(select_skill("send an email in the browser on mail.google.com", &skills).is_some());
+        // A file name is not a site.
+        assert!(
+            select_skill(
+                "send an email in the browser with notes.md attached",
+                &skills
+            )
+            .is_some()
+        );
+    }
+
     #[test]
     fn common_words_alone_do_not_pick_a_skill() {
         let skills = sample_skills();

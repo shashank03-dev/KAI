@@ -26,6 +26,25 @@ lane is just another `Perceptor` + `Actuator` (`crates/kai-os/src/web/`).
 | `open_url` | The OS default browser | Kai's browser, after the address policy below |
 | `shell`, `open_app` | Desktop | Passed to the desktop's hands when there is a desktop; refused in browser-only mode |
 
+## Pages that break naive drivers
+
+Each case has a test against a live headless Chromium
+(`crates/kai-os/tests/browser_edges.rs`):
+
+| Case | What goes wrong otherwise | What the lane does |
+| --- | --- | --- |
+| `alert` / `confirm` / `prompt` | The page freezes: screenshot, tree reads and script calls all hang until the dialog is answered (measured: the click's own release event never returns) | Every protocol call on a page with an open dialog returns at once (`DialogOpen`). The model sees the dialog as marks: `OK (page dialog: "<message>")`, `Cancel`, and an `Answer` field for `prompt()`. The message is in the button's name, so the risk words apply (answering "Delete all files?" is high risk whatever the model says). Enter and Esc answer it; anything else is refused with the reason. A click that opened a dialog counts as done. |
+| Leaving a page with unsaved changes (`beforeunload`) | Navigation silently waits | `Leave page and discard changes` (high risk: "discard") or `Stay on page`. |
+| Stale dialog marks | Clicking an old `OK` mark after the dialog closed would click the page underneath | Refused: "that page dialog is already closed". |
+| Links with `target=_blank`, `window.open` | Kai keeps looking at the old tab | The tab the page opened becomes the working tab; if the working tab closes, the newest remaining one takes over. |
+| Native `<select>` | Its popup is drawn by the browser, outside the page: invisible to the screenshot and the tree | `type` into the dropdown chooses an option by label (exact, prefix, then contains) and fires `input`/`change`. A miss lists the options; a disabled option is refused. The Enter the engine sends after typing into a dropdown is skipped. |
+| `<input type="file">` | A native file dialog blocks the browser | File pickers are intercepted; the click reports "that opened a file picker … ask the user". |
+| Downloads | A headless browser refuses them | Downloads go to the user's Downloads folder (`XDG_DOWNLOAD_DIR` or `~/Downloads`). |
+| A crashed page | Every call fails | The page is reloaded once. |
+| The browser is closed or killed | Calls wait for their timeout | "Kai's browser was closed" at once. |
+| A second Kai browser on the same profile | Chromium hands over to the first and exits; the pipe just closes | "the browser exited at start … is another Kai browser already open with the profile …?" |
+| The page navigates while it is read | The tree and the layout describe different documents | Detected (the two addresses differ) and read again. |
+
 ## Safety
 
 - **Address policy** (`kai_core::web::normalise_url`, before every
@@ -94,6 +113,7 @@ with and without `--browser` on the same model, twice per side.
   web tasks need a lane-aware setup.
 - **Windows and Firefox.** Windows needs the pipe over inherited handles (or
   a port plus a token); Firefox speaks WebDriver BiDi, not CDP.
+- **File uploads.** Detected and handed to the user, not performed.
 - **Iframes.** Only the main document is marked; same-origin iframes are
   separate documents in the snapshot and cross-origin ones separate targets.
   Use the grid (coordinates) there for now.

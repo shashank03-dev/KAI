@@ -633,3 +633,43 @@ only back up procedures, which are off by default.
   **No live model run:** no key in this session.
 - `kai-cli/src/main.rs` reached 500 lines; `run_recorder` moved to
   `runs.rs` with the lane switch.
+
+## Browser lane hardening, Holo locally, live A/B (2026-10-13)
+
+- **Page dialogs freeze the page** (measured: after an `alert`, the click's
+  own `mouseReleased`, screenshots, tree reads and `Runtime.evaluate` all hang
+  until the dialog is answered). The CDP client now tracks dialogs per page
+  session from `Page.javascriptDialogOpening/Closed` and fails any call on a
+  frozen page at once with `DialogOpen`. The model sees the dialog as marks
+  whose names carry the page's message, so the existing risk words decide
+  approval. Rejected: auto-accepting (a `confirm("Delete …?")` is a decision,
+  not noise) and auto-dismissing (blocks legitimate flows).
+- **Stale-mark identity** is role + name + box, not the whole element: the
+  value changes when Kai types, and the lane wrongly treated the dropdown it
+  had just set as a different element (found by the live test).
+- **Skill selection bug (pre-existing, affects the desktop too):** keyword
+  overlap picked the Gmail skill for "Open http://127.0.0.1:8765/contact.html
+  in the browser and send the contact form … email ravi@example.com"
+  (browser, send, email) and its fixed first step opened Gmail before the
+  model looked. A skill whose fixed steps open another site is no longer
+  picked when the task names its own site (e-mail domains and file names do
+  not count as sites). Test: `a_task_with_its_own_address_does_not_open_another_site`.
+- **`discard` is a high-risk word** (leaving a page with unsaved changes;
+  "Discard draft" buttons).
+- **HTTP clients trust the OS certificate store** as well as the built-in
+  roots (`rustls-tls-native-roots`): behind a TLS-inspecting proxy, as in this
+  container and in many companies, Kai could not reach any model API.
+- **`kai bench --browser [--headless]`**: each task in a fresh lane with a
+  throwaway profile; setup scripts see `KAI_BENCH_LANE=1` and
+  `open-browser.sh` hands its URL to the lane. Results are filed as
+  `<backend>+browser`.
+- **Holo3.1 4B / 0.8B** added to the local catalog (community GGUFs pinned to
+  a commit and SHA-256; H Company publishes GGUFs only for the 35B-A3B, 21 GB).
+  `untested` until a bench run. The ranking now enforces that an untested
+  model is never "Best" (it had relied on tie-breaking, which Holo broke).
+- **llama-server lean flags** for every local model: `--no-repack -np 1
+  --cache-ram 0 --ctx-checkpoints 2 --reasoning off`. Holo3.1 4B RSS
+  6.51 → 4.29 GB; a cached-prefix step 9.6 s → 1.1 s (thinking off).
+  Numbers and method: docs/LOCAL_MODELS.md.
+- **Screen capture needs a window manager** under bare Xvfb in this container
+  (`kai smoke` failed with "Connection error" until openbox ran).

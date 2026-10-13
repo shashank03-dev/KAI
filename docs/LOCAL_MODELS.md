@@ -176,6 +176,8 @@ answered a HEAD request with 200 (after Hugging Face's redirect), its
 | `qwen3-vl-4b-instruct-q4` | Qwen official Q4_K_M + mmproj Q8_0 | 2.95 GB | Apache-2.0 | untested |
 | `qwen3-vl-8b-instruct-q4` | Qwen official Q4_K_M + mmproj Q8_0 | 5.78 GB | Apache-2.0 | untested |
 | `ui-tars-1.5-7b-q4` | mradermacher Q4_K_M + mmproj Q8_0 | 5.54 GB | Apache-2.0 (base model) | untested |
+| `holo-3.1-4b-q4` | mradermacher Q4_K_M + mmproj Q8_0 | 3.43 GB | Apache-2.0 | untested |
+| `holo-3.1-0.8b-q4` | mradermacher Q4_K_M + mmproj Q8_0 | 0.79 GB | Apache-2.0 | untested |
 
 The ggml-org Gemma 4 GGUFs are converted from Google's QAT (quantization-aware
 trained) Q4_0 checkpoints, according to the repo card. That is why Q4_0 was
@@ -185,6 +187,43 @@ active, 31B 30.7B. Context is 128K (E-series) and 256K (26B, 31B); Kai asks
 for 16K. UI-TARS uses its own action format, not Kai's JSON replies, so it
 probably needs a prompt adapter before it is useful.
 
+### Holo3.1 (H Company), added 2026-10-13
+
+Computer-use models fine-tuned from Qwen3.5 (H Company's card,
+`Hcompany/Holo-3.1-4B`, Apache-2.0). H Company publishes official GGUFs only
+for the 35B-A3B (Q4 ≈ 21 GB, too big for a 16 GB machine), so the 4B and 0.8B
+entries use mradermacher's community GGUFs, pinned to a commit with their
+SHA-256 (checked by Kai's installer on download). llama.cpp b11429 knows the
+architecture (`qwen35`). Qwen3.5 is hybrid: only every 4th layer keeps a KV
+cache (8 of 32 in the 4B), so `min_ram_gb` counts 0.54 GB of KV at 16K, not
+2.1 GB. They stay `untested` (never "Best") until a bench run says
+otherwise; see the measurements below.
+
+### Server memory settings (measured)
+
+Holo3.1 4B Q4_K_M, llama.cpp b11429 CPU build, 4 vCPU Xeon with AMX,
+16 GB RAM, no GPU; three requests with the same 1280×720 Set-of-Marks
+screenshot (~950 prompt tokens), RSS read from `ps`:
+
+| Flags | RSS after 3 image calls | First call (no cache) | Next calls (cached prefix) | Reply |
+| --- | --- | --- | --- | --- |
+| llama.cpp defaults | 6.51 GB | 42.2 s | 9.6 s | empty: 64 tokens of thinking, no answer |
+| `-np 1 --cache-ram 0` | 6.36 GB | 40.1 s | 9.5 s | empty (thinking) |
+| + `--ctx-checkpoints 2 --no-repack` | **4.29 GB** | 39.4 s | 9.4 s | empty (thinking) |
+| + `--reasoning off` | **4.29 GB** | **29.7 s** | **1.1 s** | `{"target":63}` (correct) |
+
+- **`--no-repack`** is the big one: on CPUs with AMX (and other repack
+  targets) llama.cpp keeps a repacked copy of the weights (2.6 GB here) next
+  to the memory-mapped file. No speed difference was measured.
+- **`--reasoning off`**: Qwen3.5-family models think by default, which spent
+  the whole reply budget before any JSON. Kai wants one short JSON object.
+- **Image budget**: limiting the image to 512 or 320 tokens cut the first
+  call to 14.4 s / 10.0 s but picked the wrong element (#58, #10 instead of
+  #63), so Kai keeps the model's default budget.
+- Kai starts every local server with these flags (`LEAN` in
+  `crates/kai-os/src/local/server.rs`); a server already running with older
+  flags is reused until it is stopped (`kai models stop`).
+
 ## Recommendation rules
 
 `rank(&Catalog, &HardwareSummary)` gives every model a place to run, a speed
@@ -193,6 +232,9 @@ tier, a fit and a reason. Thresholds (`rank.rs`):
 - **Usable RAM** = RAM − OS reserve, where the reserve is 25 % of RAM,
   at least 2 GB and at most 6 GB. **Usable VRAM** = dedicated VRAM − 0.5 GB.
   Integrated GPUs (under 1 GiB dedicated) count as no GPU.
+- **Best** goes to the first fitting model whose `computer_use` is
+  `recommended` or `experimental`; an `untested` model is never Best, and if
+  no tested model fits, nothing is.
 - **GPU**: `min_vram_gb ≤ usable VRAM` → tier 3 ("Runs well").
 - **Split** (GPU + RAM): usable VRAM ≥ 30 % of the need and VRAM + RAM ≥
   need. If VRAM + RAM ≥ 1.25 × need and ≤ 5B parameters work per token

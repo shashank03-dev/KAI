@@ -1,6 +1,8 @@
 #!/bin/sh
 # Start every browser task from a clean browser: close Firefox and drop its
 # saved session, so old tabs and "tab crashed" pages never come back.
+# `kai bench --browser` starts every task in a fresh profile instead.
+[ "$KAI_BENCH_LANE" = 1 ] && exit 0
 pkill -x firefox >/dev/null 2>&1
 pkill -x firefox-bin >/dev/null 2>&1
 i=0

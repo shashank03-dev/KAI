@@ -221,8 +221,9 @@ pub fn select_skill<'a>(task: &str, skills: &'a [Skill]) -> Option<&'a Skill> {
     if task_words.is_empty() {
         return None;
     }
+    let named = named_hosts(task);
     let mut best: Option<(&Skill, usize)> = None;
-    for sk in skills {
+    for sk in skills.iter().filter(|sk| !opens_elsewhere(sk, &named)) {
         let hay = format!(
             "{} {}",
             sk.front.name.replace('-', " "),
@@ -238,6 +239,65 @@ pub fn select_skill<'a>(task: &str, skills: &'a [Skill]) -> Option<&'a Skill> {
         }
     }
     best.filter(|(_, s)| *s >= 2).map(|(sk, _)| sk)
+}
+
+/// Top-level domains that make a bare word with a dot a web address
+/// (`bmsce.ac.in`), as opposed to a file name (`notes.md`, `price.txt`).
+const WEB_TLDS: &[&str] = &[
+    "com", "org", "net", "edu", "gov", "io", "in", "ac", "co", "uk", "de", "fr", "ai", "dev",
+    "app", "info", "me", "us", "eu",
+];
+
+/// The web hosts a task names itself: `http(s)://` addresses, and bare
+/// domains with a common web TLD. Domains in e-mail addresses are not sites.
+fn named_hosts(task: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in task.split_whitespace() {
+        let w = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != ':');
+        if w.contains('@') {
+            continue;
+        }
+        let host = match w.split_once("://") {
+            Some((scheme, rest))
+                if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") =>
+            {
+                rest.split(['/', ':', '?', '#']).next().unwrap_or("")
+            }
+            Some(_) => continue,
+            None => {
+                let h = w.split(['/', '?', '#']).next().unwrap_or("");
+                let tld = h.rsplit('.').next().unwrap_or("");
+                if !h.contains('.') || !WEB_TLDS.contains(&tld.to_ascii_lowercase().as_str()) {
+                    continue;
+                }
+                h
+            }
+        };
+        if !host.is_empty() {
+            out.push(host.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+/// A skill whose fixed steps open a site the task did not name, when the
+/// task names its own site: running it would take the user somewhere else
+/// before the model has looked (a contact form on 127.0.0.1 is not Gmail).
+fn opens_elsewhere(sk: &Skill, named: &[String]) -> bool {
+    if named.is_empty() {
+        return false;
+    }
+    sk.steps.iter().any(|st| match st {
+        DeterministicStep::OpenUrl { url } => {
+            let host = named_hosts(url);
+            !host.iter().any(|h| {
+                named.iter().any(|n| {
+                    h == n || h.ends_with(&format!(".{n}")) || n.ends_with(&format!(".{h}"))
+                })
+            })
+        }
+        _ => false,
+    })
 }
 
 /// Words too common to say which skill fits.

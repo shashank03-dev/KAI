@@ -9,6 +9,7 @@
 
 #[cfg(test)]
 mod executor_tests;
+pub mod lane;
 pub mod machine;
 pub mod record;
 pub mod repeat;
@@ -75,6 +76,10 @@ pub struct BenchArgs {
     /// written back. See `kai memory exam`.
     #[arg(long, value_parser = ["current", "candidate"])]
     pub lessons: Option<String>,
+    /// Run the tasks in Kai's own browser over the DevTools Protocol
+    /// (docs/BROWSER.md); results are filed as `<backend>+browser`.
+    #[command(flatten)]
+    pub lane: crate::runs::LaneArgs,
 }
 
 impl clap::ValueEnum for Kind {
@@ -169,11 +174,19 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         }),
     };
 
-    let backend_name = match b {
+    let mut backend_name = match b {
         // Name what `auto` resolved to.
         BackendArg::Auto => format!("{:?}", s.backend).to_lowercase(),
         _ => b.name().to_string(),
     };
+    let browser = args.lane.browser.then_some(args.lane.headless);
+    if browser.is_some() {
+        anyhow::ensure!(
+            b != BackendArg::OpenaiNative && b != BackendArg::Mock,
+            "--browser works with Kai's own loop on a live or replay backend"
+        );
+        backend_name.push_str("+browser");
+    }
     let model = backend::model_label(b, &s);
     let date = jiff::Zoned::now().date().to_string();
     let recording = (!args.no_record).then(|| {
@@ -235,6 +248,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 record: rec,
                 executor,
                 memory: mem,
+                browser,
             };
             runner::run_live(&list, &live).await?
         }
@@ -252,6 +266,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 record: rec,
                 executor,
                 memory: mem,
+                browser,
             };
             runner::run_live(&list, &live).await?
         }
@@ -270,6 +285,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 record: rec,
                 executor,
                 memory: mem,
+                browser,
             };
             runner::run_live(&list, &live).await?
         }
@@ -280,6 +296,13 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
     // The head-to-head numbers are first runs only.
     let runs: Vec<runner::Run> = runs.into_iter().filter(|r| r.pass == 0).collect();
     let mut bench_note = note(b);
+    if let Some(headless) = browser {
+        bench_note.push_str(if headless {
+            " Browser lane ON (--browser --headless): each task in a fresh headless Kai browser."
+        } else {
+            " Browser lane ON (--browser): each task in a fresh Kai browser window."
+        });
+    }
     if args.memory {
         bench_note.push_str(" Experience memory ON (--memory): a fresh lesson store shared by the tasks of this bench run.");
     }
