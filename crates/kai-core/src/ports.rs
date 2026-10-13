@@ -100,6 +100,27 @@ pub trait Actuator: Send + Sync {
     }
 }
 
+/// Shared hands (the app keeps one actuator for its whole life and lends
+/// it to the browser lane for shell and app launches).
+#[async_trait]
+impl<T: Actuator + ?Sized> Actuator for std::sync::Arc<T> {
+    async fn act(&self, decision: &Decision, grounding: &Grounding) -> anyhow::Result<()> {
+        (**self).act(decision, grounding).await
+    }
+    async fn open_app(&self, app: &str) -> anyhow::Result<()> {
+        (**self).open_app(app).await
+    }
+    async fn open_url(&self, url: &str) -> anyhow::Result<()> {
+        (**self).open_url(url).await
+    }
+    async fn shell(&self, cmd: &str) -> anyhow::Result<String> {
+        (**self).shell(cmd).await
+    }
+    async fn a11y_act(&self, decision: &Decision, grounding: &Grounding) -> anyhow::Result<bool> {
+        (**self).a11y_act(decision, grounding).await
+    }
+}
+
 /// Messages the user sends to a running agent ("steer"). Drained once per
 /// step and folded into the next model turn.
 pub trait Steering: Send + Sync {

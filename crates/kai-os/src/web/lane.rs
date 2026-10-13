@@ -157,6 +157,11 @@ impl BrowserLane {
         })
     }
 
+    /// Whether the browser is still running (the user may close it).
+    pub fn is_open(&self) -> bool {
+        self.cdp.alive()
+    }
+
     pub(super) fn current(&self) -> PageRef {
         self.page.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -347,6 +352,16 @@ fn args(o: &LaneOptions) -> Vec<String> {
     }
     a.push("about:blank".into());
     a
+}
+
+/// The user's Downloads folder: `XDG_DOWNLOAD_DIR` when set, else
+/// `~/Downloads` (`%USERPROFILE%\Downloads` on Windows).
+pub fn downloads_dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("XDG_DOWNLOAD_DIR").filter(|d| !d.is_empty()) {
+        return Some(d.into());
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+    Some(PathBuf::from(home).join("Downloads"))
 }
 
 /// Where the lane keeps its profile by default.

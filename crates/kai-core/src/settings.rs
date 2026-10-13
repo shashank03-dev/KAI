@@ -128,6 +128,10 @@ pub struct Settings {
     /// When two steps change nothing, diagnose why and change course once
     /// before asking. Off until measured.
     pub recover: bool,
+    /// Do tasks in Kai's own browser over the DevTools Protocol instead of
+    /// on the desktop (docs/BROWSER.md): background input, the page's own
+    /// tree. Off by default; Linux for now.
+    pub use_browser: bool,
     /// Catalog id of the model on this computer (`BackendChoice::Local`).
     pub local_model: String,
     /// Port of the local `llama-server` (127.0.0.1 only).
@@ -171,6 +175,7 @@ impl Default for Settings {
             use_procedures: false,
             best_of_plans: false,
             recover: false,
+            use_browser: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
             learn: true,

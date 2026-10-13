@@ -12,4 +12,4 @@ mod lane;
 mod look;
 pub mod snapshot;
 
-pub use lane::{BrowserLane, LaneOptions, default_profile, find_browser};
+pub use lane::{BrowserLane, LaneOptions, default_profile, downloads_dir, find_browser};

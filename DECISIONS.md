@@ -684,3 +684,12 @@ only back up procedures, which are off by default.
 - **`kai bench --backend local`** now starts the model's server, as
   `kai run` does (it failed unless a server was already running).
 - The lane stays opt-in (`--browser`): the A/B is two runs on four tasks.
+- **`read_page`** (2026-10-13): page text for reading tasks as one optional
+  reply flag, not a new action or tool, offered only by eyes that can read
+  pages so the desktop prompt is unchanged; hostile text withheld; 4,000
+  characters at most. Not yet measured live (keys revoked).
+- **App switch** (Settings › "Do tasks in Kai's own browser"): one browser
+  per app session, reused across runs (closing it at the end of each run
+  would take away what Kai just opened), reopened if the user closed it.
+  `friendly()` moved to `kai-app/src/errors.rs` (agent.rs was past 500
+  lines) and passes the browser's own error messages through unchanged.

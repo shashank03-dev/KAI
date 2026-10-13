@@ -1,9 +1,37 @@
 # The browser lane
 
-`kai run --browser "…"` does a web task in **Kai's own Chromium**, driven
-over the Chrome DevTools Protocol (CDP), instead of through the desktop.
-Why, and what was rejected: [RESEARCH_2026_10_VENDORS.md](RESEARCH_2026_10_VENDORS.md) §5.1.
-Off unless asked for (`--browser`); Linux for now.
+`kai run --browser "…"` (or, in the app, Settings › "Do tasks in Kai's own
+browser") does a task in **Kai's own Chromium**, driven over the Chrome
+DevTools Protocol (CDP), instead of through the desktop. Why, and what was
+rejected: [RESEARCH_2026_10_VENDORS.md](RESEARCH_2026_10_VENDORS.md) §5.1.
+Off unless asked for; Linux for now.
+
+## In the app
+
+The switch in Settings › Behaviour turns it on for every run. The app keeps
+one browser for its whole session: it starts with the first run that wants
+it and stays open between runs, so what Kai opened (a page, a video) is
+still there when the run ends. Close its window any time; the next run
+opens it again. Shell commands and app launches in such a run still go to
+the desktop (`crates/kai-app/src/browser.rs`).
+
+## Reading a page (`read_page`)
+
+Reading tasks ("what does the Blue Kettle cost?") fail when the answer is
+in plain text the element list does not carry: the list holds controls,
+and the small screenshot is hard to read. Anthropic's browser tool has
+`get_page_text` for this. Kai keeps the model's job small instead of adding
+a tool: in the lane the system prompt offers one optional reply field,
+`read_page`, like `need_screen`. The next turn then carries the page's
+visible text (`innerText`, so no hidden elements and no field values), at
+most 4,000 characters, fenced as `<<<page … >>>page` and labelled as data.
+
+- Text with prompt-injection or phishing phrases is withheld, with the same
+  phrase lists as screen text (`kai_core::untrusted::suspicious_text`).
+- The page cannot close the fence early.
+- On the desktop the rule and the schema field are absent, so the desktop
+  prompt is byte-for-byte unchanged (`crates/kai-core/tests/read_page_e2e.rs`).
+- Not yet measured on a live model.
 
 ## What changes and what doesn't
 
@@ -126,12 +154,9 @@ local-price-lookup --only download-file --yes`.
 
 ## Not built yet
 
-- **Page text for reading tasks** (Anthropic's `get_page_text`):
-  RESEARCH_2026_10_VENDORS.md §5.2.
 - **Windows and Firefox.** Windows needs the pipe over inherited handles (or
   a port plus a token); Firefox speaks WebDriver BiDi, not CDP.
 - **File uploads.** Detected and handed to the user, not performed.
 - **Iframes.** Only the main document is marked; same-origin iframes are
   separate documents in the snapshot and cross-origin ones separate targets.
   Use the grid (coordinates) there for now.
-- **The app** (`kai-app`) has no switch for the lane yet; it is CLI only.

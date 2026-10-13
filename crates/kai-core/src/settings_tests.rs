@@ -10,6 +10,7 @@ fn defaults_are_safe() {
     assert_eq!(s.fast_model, "gemma-4-26b-a4b-it");
     assert_eq!(s.executor_endpoint, "http://127.0.0.1:8017");
     assert_eq!(s.executor_client().base(), "http://127.0.0.1:8017");
+    assert!(!s.use_browser, "the browser lane is opt-in");
 }
 
 #[test]

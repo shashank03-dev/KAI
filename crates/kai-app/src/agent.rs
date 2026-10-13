@@ -5,6 +5,7 @@
 //! screen or the model.
 
 use crate::control::RunControl;
+pub use crate::errors::friendly;
 use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
 use kai_core::engine::{ApprovalChoice, Approver, EngineEvent, EventSink};
@@ -75,6 +76,8 @@ pub struct Agent {
     pub perceptor: Arc<DesktopPerceptor>,
     actuator: Option<Arc<DesktopActuator>>,
     pub running: Arc<AtomicBool>,
+    /// Kai's own browser, when Settings › use_browser is on.
+    lanes: Arc<crate::browser::Lanes>,
 }
 
 impl Agent {
@@ -98,6 +101,7 @@ impl Agent {
             perceptor: Arc::new(DesktopPerceptor::new()),
             actuator,
             running: Arc::new(AtomicBool::new(false)),
+            lanes: Arc::default(),
         })
     }
 
@@ -140,24 +144,41 @@ impl Agent {
             }
         });
         let (perceptor, running) = (self.perceptor.clone(), self.running.clone());
+        let lanes = self.lanes.clone();
         self.runtime.spawn(kai_os::kill::watch_corner(
             self.kill.clone(),
             actuator.input.clone(),
             running.clone(),
         ));
         self.runtime.spawn(async move {
-            let result = drive(
-                task,
-                team,
-                settings,
-                keys,
-                skills,
-                &tx,
-                control.as_ref(),
-                perceptor.as_ref(),
-                actuator.as_ref(),
-            )
-            .await;
+            // Kai's own browser (Settings): its eyes and hands for this run.
+            let lane = match settings.use_browser {
+                true => Some(lanes.get(actuator.clone()).await),
+                false => None,
+            };
+            let result = match &lane {
+                Some(Err(e)) => Err(anyhow::anyhow!("{e:#}")),
+                Some(Ok(l)) => {
+                    let (t, c) = (&tx, control.as_ref());
+                    drive(
+                        task,
+                        team,
+                        settings,
+                        keys,
+                        skills,
+                        t,
+                        c,
+                        l.as_ref(),
+                        l.as_ref(),
+                    )
+                    .await
+                }
+                None => {
+                    let (t, c) = (&tx, control.as_ref());
+                    let (p, a) = (perceptor.as_ref(), actuator.as_ref());
+                    drive(task, team, settings, keys, skills, t, c, p, a).await
+                }
+            };
             // Close the pause reporter so the UI's receiver ends with the run.
             control.detach_reporter();
             running.store(false, Ordering::SeqCst);
@@ -221,8 +242,8 @@ async fn drive(
     skills: Vec<Skill>,
     tx: &mpsc::UnboundedSender<Ui>,
     control: &RunControl,
-    perceptor: &DesktopPerceptor,
-    actuator: &DesktopActuator,
+    perceptor: &dyn kai_core::Perceptor,
+    actuator: &dyn kai_core::Actuator,
 ) -> anyhow::Result<()> {
     let (fast, careful) = settings.clients(&keys)?;
     let config = settings.engine_config();
@@ -456,54 +477,7 @@ fn probe_jpeg() -> Vec<u8> {
     kai_os::frame::encode_jpeg(&img)
 }
 
-/// Turn an error into words a person can act on.
-pub fn friendly(e: &anyhow::Error) -> String {
-    let s = format!("{e:#}");
-    let l = s.to_ascii_lowercase();
-    if l.contains("401")
-        || l.contains("403")
-        || l.contains("api key not valid")
-        || l.contains("unauthorized")
-    {
-        "The key was refused (401/403). Check the API key in Settings › Model & server.".into()
-    } else if l.contains("timed out") || l.contains("timeout") {
-        "The model didn't answer in time. Is the Droplet up? Run deploy/digitalocean/up.sh, or add a Gemini key so Kai can fall back.".into()
-    } else if l.contains("dns") || l.contains("connect") || l.contains("transport") {
-        "Kai couldn't reach the model server. Check the address and your internet connection."
-            .into()
-    } else if l.contains("no digitalocean")
-        || l.contains("no gemini")
-        || l.contains("set up the digitalocean")
-    {
-        "No model is set up yet. Add the DigitalOcean server or a Gemini key in Settings › Model & server.".into()
-    } else if l.contains("404") {
-        "The server answered 404: the model name or address is wrong. The address should end in /v1.".into()
-    } else {
-        format!("Something went wrong: {s}")
-    }
-}
-
 /// Kai's windows, so Linux can mask them out of every frame.
 pub fn exclude(perceptor: &DesktopPerceptor, rects: Vec<Rect>) {
     perceptor.set_excluded(rects);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn errors_read_as_next_steps() {
-        assert!(
-            friendly(&anyhow::anyhow!("backend returned status 401: nope"))
-                .contains("key was refused")
-        );
-        assert!(friendly(&anyhow::anyhow!("backend timed out after 45s")).contains("Droplet up"));
-        assert!(
-            friendly(&anyhow::anyhow!(
-                "set up the DigitalOcean server or a Gemini key"
-            ))
-            .contains("No model is set up")
-        );
-    }
 }
