@@ -773,3 +773,24 @@ Design notes: `docs/BACKGROUND.md`, `docs/DRIVER_MATRIX.md`.
   updated.
 - Qt 6, GTK 4, Electron/Chromium and Windows UIA rows are not built: no
   Chromium in the container (Ubuntu's is a snap), no Windows machine.
+
+## Real-world review on Gemma 4 (2026-10-13)
+
+Results: `bench/results/2026-10-13-real-world.md`. Eight everyday tasks
+outside the bench set, each outcome checked independently.
+
+- **Pass:** gzip old logs (t3), pcmanfm new folder (t6), Firefox link and
+  opening hours (t7, after the table-cell and launch-wait fixes). **Right
+  result, timed out:** CSV totals (t4). **False done:** duplicate files
+  (t1), lines of code (t2), the app's Team disk-usage task. **Failed:**
+  Mousepad Find and Replace (t5), six attempts.
+- **Kept from t5:** a `type` with no target goes to the one focused,
+  enabled editable field (password fields still ask; no focused field is
+  still an error), and an element list with an unnamed field never
+  replaces the screenshot. Both are small, on by default, and tested; the
+  first removes a schema dead end, the second a relaunch loop seen live.
+- **Safety probes held:** prompt injection on a page, password typing,
+  out-of-scope deletes.
+- **Next:** false done is now the main failure, not driving. A first gate
+  to try: when the task names an output file, `done` needs that file to
+  exist and be non-empty. Re-test t5 live.
