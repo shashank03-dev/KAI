@@ -121,6 +121,26 @@ pub enum Grounding {
 }
 
 impl Grounding {
+    /// The mark of the editable field (text field, password field, combo
+    /// box) that has keyboard focus, if the tree reports exactly one.
+    pub fn focused_field(&self) -> Option<u32> {
+        let Grounding::Marks(els) = self else {
+            return None;
+        };
+        let mut f = els.iter().filter(|e| {
+            e.focused
+                && e.enabled
+                && matches!(
+                    e.role,
+                    Role::TextField | Role::PasswordField | Role::ComboBox
+                )
+        });
+        match (f.next(), f.next()) {
+            (Some(e), None) => Some(e.mark),
+            _ => None,
+        }
+    }
+
     /// The compact text list sent alongside the screenshot.
     pub fn as_text(&self) -> String {
         match self {
@@ -258,6 +278,27 @@ mod tests {
             focused: false,
             value: None,
         }
+    }
+
+    #[test]
+    fn the_focused_field_is_one_focused_editable_element() {
+        let mut name = el(1, Role::TextField, "Name", true, false);
+        let mut ok = el(2, Role::Button, "OK", true, false);
+        assert_eq!(
+            Grounding::Marks(vec![name.clone(), ok.clone()]).focused_field(),
+            None
+        );
+        name.focused = true;
+        assert_eq!(
+            Grounding::Marks(vec![name.clone(), ok.clone()]).focused_field(),
+            Some(1)
+        );
+        // A focused button is not a field; two focused fields are ambiguous.
+        ok.focused = true;
+        assert_eq!(Grounding::Marks(vec![ok.clone()]).focused_field(), None);
+        let mut other = el(3, Role::TextField, "City", true, false);
+        other.focused = true;
+        assert_eq!(Grounding::Marks(vec![name, other]).focused_field(), None);
     }
 
     #[test]

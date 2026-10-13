@@ -269,7 +269,15 @@ impl Engine<'_> {
         let (schema, extra) = first.as_ref().map_or((schema, 0), |(s, n)| (s, *n));
         let max_tokens = self.config.max_tokens + extra;
         let decided = self
-            .decide(client, system, &user_text, &obs.images, schema, max_tokens)
+            .decide(
+                client,
+                system,
+                &user_text,
+                &obs.images,
+                schema,
+                max_tokens,
+                obs.grounding.focused_field(),
+            )
             .await;
         r.step += 1;
         let decided = match decided {

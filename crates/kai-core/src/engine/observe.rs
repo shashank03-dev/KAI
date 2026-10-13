@@ -56,8 +56,23 @@ pub(super) struct Seen {
     pub timings: Timings,
 }
 
+/// Can the element list stand in for the screenshot? Long enough, and no
+/// unnamed field: `textfield ""` twice cannot be told apart without
+/// pixels. Seen live in Mousepad's Find and Replace: on every tree-only
+/// step Gemma read four nameless fields, decided the editor was not open
+/// and launched it again.
 pub(super) fn rich(g: &Grounding) -> bool {
-    g.mark_count() >= MIN_RICH_ELEMENTS
+    use crate::element::Role;
+    let Grounding::Marks(els) = g else {
+        return false;
+    };
+    els.len() >= MIN_RICH_ELEMENTS
+        && !els.iter().any(|e| {
+            matches!(
+                e.role,
+                Role::TextField | Role::ComboBox | Role::PasswordField
+            ) && e.name.trim().is_empty()
+        })
 }
 
 /// Can the text of the element list confirm what `action` expected?
@@ -350,6 +365,33 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_list_with_an_unnamed_field_is_not_enough_to_go_without_pixels() {
+        use crate::element::{Element, Rect, Role};
+        let el = |mark: u32, role: Role, name: &str| Element {
+            mark,
+            role,
+            name: name.into(),
+            bounds: Rect::new(0.0, 10.0 * mark as f32, 5.0, 5.0),
+            enabled: true,
+            secure: false,
+            focused: false,
+            value: None,
+        };
+        let named: Vec<Element> = (1..=8).map(|i| el(i, Role::Button, "Find")).collect();
+        assert!(rich(&Grounding::Marks(named.clone())));
+        let mut dialog = named.clone();
+        dialog.push(el(9, Role::TextField, ""));
+        assert!(
+            !rich(&Grounding::Marks(dialog)),
+            "two such fields look the same"
+        );
+        let mut labelled = named;
+        labelled.push(el(9, Role::TextField, "Search for"));
+        assert!(rich(&Grounding::Marks(labelled)));
+        assert!(!rich(&Grounding::Marks(vec![el(1, Role::Button, "OK")])));
+    }
 
     #[test]
     fn visual_expectations_need_a_screenshot() {

@@ -162,3 +162,35 @@ async fn a_replay_reads_the_screen_before_an_untargeted_first_step() {
     assert!(hands.log().is_empty(), "replayed blind: {:?}", hands.log());
     assert_eq!(t.outcome, Some(Outcome::AskedUser));
 }
+
+/// One model run on the login screen (focus on the password field from
+/// frame `pw_from`): returns what the hands did and what was approved.
+async fn model_run(pw_from: usize, replies: &[&str]) -> (Vec<String>, Vec<Decision>) {
+    let screen = Screen::marks();
+    let hands = Hands::new(&screen);
+    let model = Counting::new(replies);
+    let (approver, stop) = (Recording::default(), flag());
+    let login = Login(&screen, pw_from);
+    let mut e = engine(&model, &screen, &hands, &approver, &stop);
+    e.perceptor = &login;
+    e.config.approval = ApprovalLevel::Autopilot;
+    e.run("sign in").await;
+    let asked = approver.0.lock().unwrap().clone();
+    (hands.log(), asked)
+}
+
+#[tokio::test]
+async fn a_type_with_no_target_goes_to_the_focused_field_and_keeps_its_checks() {
+    // Seen live: after clicking into "Replace with", Gemma answered
+    // {"action":"type","target":null,"text":"Friday"}.
+    let typ = r#"{"thought":"enter it","action":"type","target":null,"text":"alice","risk":"none","expect":"typed"}"#;
+    // Username focused: typed there, nothing to approve.
+    let (acted, asked) = model_run(usize::MAX, &[typ, DONE]).await;
+    assert!(acted.iter().any(|a| a == "Type Some(1) []"), "{acted:?}");
+    assert!(asked.is_empty(), "{asked:?}");
+    // Password focused: it becomes a password step, asked even on autopilot.
+    let (acted, asked) = model_run(0, &[typ, DONE]).await;
+    assert!(acted.iter().any(|a| a == "Type Some(2) []"), "{acted:?}");
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].target, Some(2));
+}
