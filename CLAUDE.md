@@ -40,6 +40,9 @@ MIT. Start with `README.md`; decisions and their evidence are in
    sure nothing is left unused on the other OS (CI uses `-D warnings`). No
    macOS work.
 
+6. Before running any build command which takes time i need you to think before and make me build ship and proceed faster rather than just waiting for the build to complete
+   7. code faster and ship better and make sure you everything in here is production quality 
+
 ## Layout
 
 ```
