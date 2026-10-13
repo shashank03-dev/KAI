@@ -35,6 +35,8 @@ pub(super) struct Run<'t> {
     /// The element-list hash of the observation before that one, to see a
     /// pair of steps that only leads back to where it started.
     pub(super) list_before: Option<u64>,
+    /// History length when such a pair was last called out.
+    pub(super) cycle_seen_at: Option<usize>,
     pub(super) no_progress_streak: u32,
     pub(super) failure_streak: u32,
     /// The next observation must include a screenshot.
@@ -101,6 +103,7 @@ impl<'t> Run<'t> {
             step: 0,
             last_sig: None,
             list_before: None,
+            cycle_seen_at: None,
             no_progress_streak: 0,
             failure_streak: 0,
             force_full: true,

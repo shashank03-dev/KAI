@@ -253,8 +253,20 @@ impl Engine<'_> {
         // (seen live: open the Search menu, pick the wrong item, which
         // closes it; 19 times over) change something every step, so the
         // check above never fires.
-        let cycling = r.list_before == Some(th) && super::act::cycling(&r.history);
+        // A new cycle only: re-opening the menu right after the note is how
+        // the model corrects itself, not a second loop.
+        let cycling = r.list_before == Some(th)
+            && super::act::cycling(&r.history)
+            && r.cycle_seen_at.is_none_or(|n| r.history.len() >= n + 4);
         if cycling {
+            // The second one stops (or recovers) like two steps without
+            // change: steps in between changed the screen and reset that
+            // streak.
+            if r.cycle_seen_at.is_some() {
+                r.no_progress_streak = r.no_progress_streak.max(1);
+            }
+            r.cycle_seen_at = Some(r.history.len());
+            r.careful_next = true;
             r.notes.push(
                 "Your last two steps, done twice, only led back to the same screen. Do not \
                  repeat them: read the element names again (the item you want may have \
