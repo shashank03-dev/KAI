@@ -312,6 +312,12 @@ impl Actuator for BrowserLane {
                 _ => {
                     if let Some(mark) = d.target {
                         self.click(self.point(mark, g).await?, "left", 1).await?;
+                        // Typing a value into a field means the field should
+                        // hold that value: replace what is there instead of
+                        // appending to it (measured live: an e-mail typed
+                        // twice failed the form's validation and every click
+                        // on Send did nothing).
+                        self.press(&["ctrl".to_string(), "a".to_string()]).await?;
                     }
                     let text = d.text.as_deref().unwrap_or("");
                     self.page("Input.insertText", json!({"text": text}))

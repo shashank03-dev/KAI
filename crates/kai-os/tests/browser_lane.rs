@@ -156,6 +156,14 @@ async fn page_marks_typing_submit_policy_and_back() {
     assert!(after.images.screenshot_jpeg.is_empty());
     let field = after.grounding.element(name).unwrap();
     assert_eq!(field.value.as_deref(), Some("Bob"));
+    // Typing into a filled field replaces its value; it never appends.
+    lane.act(&typed("Alice"), &g).await.unwrap();
+    lane.act(&typed("Bob"), &g).await.unwrap();
+    let again = lane.observe_tree_only().await.unwrap();
+    assert_eq!(
+        again.grounding.element(name).unwrap().value.as_deref(),
+        Some("Bob")
+    );
 
     // Enter submits the form; the lane reports the real address and title.
     lane.act(
