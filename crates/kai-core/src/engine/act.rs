@@ -47,17 +47,14 @@ pub(super) fn repeat_guard(history: &[HistoryItem], d: &Decision) -> Option<Stri
     if d.action != Action::Shell {
         return None;
     }
-    let summary = HistoryItem::from_decision(d).summary;
+    let this = HistoryItem::from_decision(d);
     let same: Vec<&HistoryItem> = history
         .iter()
         .rev()
-        .take_while(|h| h.summary == summary)
+        .take_while(|h| h.same_step(&this))
         .collect();
-    let looping = same.iter().any(|h| {
-        h.output
-            .as_deref()
-            .is_some_and(|o| o.starts_with(NOT_AGAIN))
-    }) || (same.len() >= 2 && same[0].output == same[1].output);
+    let looping =
+        same.iter().any(|h| refused(h)) || (same.len() >= 2 && same[0].output == same[1].output);
     looping.then(|| {
         format!(
             "{NOT_AGAIN} this exact command already ran twice in a row with the same result \
@@ -65,6 +62,23 @@ pub(super) fn repeat_guard(history: &[HistoryItem], d: &Decision) -> Option<Stri
              something different."
         )
     })
+}
+
+/// A step [`repeat_guard`] did not run.
+fn refused(h: &HistoryItem) -> bool {
+    h.output
+        .as_deref()
+        .is_some_and(|o| o.starts_with(NOT_AGAIN))
+}
+
+/// The last shell step repeats the one before it with the same result, or
+/// was refused as a repeat: the run is looping, not progressing.
+pub(super) fn looping(history: &[HistoryItem]) -> bool {
+    match history {
+        [.., b] if refused(b) => true,
+        [.., a, b] => a.same_step(b) && a.output == b.output,
+        _ => false,
+    }
 }
 
 impl Engine<'_> {
@@ -316,5 +330,33 @@ mod tests {
         let mut other = twice.to_vec();
         other.push(HistoryItem::note("click #3"));
         assert!(repeat_guard(&other, &echo).is_none());
+    }
+
+    #[test]
+    fn long_scripts_that_only_start_alike_are_not_a_repeat() {
+        // The summary keeps a long script's first line and line count only.
+        let script = |n: u32| {
+            let body: String = (0..12)
+                .map(|i| format!("echo step {i} of a long setup script for file {n}\n"))
+                .collect();
+            let json = serde_json::json!({"thought": "x", "action": "shell",
+                "text": format!("set -e\n{body}"), "risk": "low"});
+            Decision::parse_checked(&json.to_string()).unwrap()
+        };
+        let (a, b, c) = (script(1), script(2), script(3));
+        assert_eq!(
+            HistoryItem::from_decision(&a).summary,
+            HistoryItem::from_decision(&b).summary
+        );
+        let ran = |d: &Decision| {
+            let mut h = HistoryItem::from_decision(d);
+            h.push_output("[exit 0]");
+            h
+        };
+        let history = [ran(&a), ran(&b)];
+        assert!(repeat_guard(&history, &c).is_none());
+        assert!(!looping(&history));
+        assert!(repeat_guard(&[ran(&c), ran(&c)], &c).is_some());
+        assert!(looping(&[ran(&c), ran(&c)]));
     }
 }

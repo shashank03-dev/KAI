@@ -241,8 +241,7 @@ impl Engine<'_> {
             .pending
             .as_ref()
             .is_some_and(|p| p.action == Action::Shell);
-        let repeated = after_shell
-            && matches!(r.history.as_slice(), [.., a, b] if a.summary == b.summary && a.output == b.output);
+        let repeated = after_shell && super::act::looping(&r.history);
         if repeated {
             r.notes.push(
                 "You just ran the same command twice and got the same result. Do not run it \

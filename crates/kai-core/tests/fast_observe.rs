@@ -109,6 +109,23 @@ async fn the_same_shell_command_twice_is_called_out_as_a_loop() {
     assert!(third.contains("has not changed"), "{third}");
 }
 
+#[tokio::test]
+async fn a_model_that_keeps_asking_for_a_refused_repeat_is_stopped() {
+    // A refused repeat prints a note, which used to count as terminal
+    // progress: the run went on until its step limit.
+    let echo = r#"{"thought":"write it","action":"shell","text":"echo 101.52 > ~/tip.txt","risk":"low","expect":"written"}"#;
+    let screen = Screen::marks();
+    let mut hands = Hands::new(&screen);
+    hands.frozen = true;
+    let (ap, stop) = (approve_all(), flag());
+    let client = Counting::new(&[echo; 30]);
+    let mut e = engine(&client, &screen, &hands, &ap, &stop);
+    e.config.max_steps = 30;
+    let trace = e.run("x").await;
+    assert_eq!(trace.outcome, Some(Outcome::AskedUser));
+    assert!(client.count() <= 8, "{} model calls", client.count());
+}
+
 struct FixedVerifier(f32);
 #[async_trait]
 impl Verifier for FixedVerifier {

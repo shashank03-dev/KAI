@@ -4,7 +4,7 @@
 use crate::agent::{HumanPending, Pending, Ui};
 use crate::team::{OutputView, SteerView, Team};
 use ely_gpui_component::chat::StepState;
-use kai_core::engine::EngineEvent;
+use kai_core::engine::{ApprovalChoice, EngineEvent};
 use kai_core::orchestrator::Plan;
 use kai_core::trace::{Outcome, Timings};
 use kai_core::{Action, Decision, Rect, Trace};
@@ -63,6 +63,9 @@ pub struct RunState {
     pub human: Option<HumanPending>,
     /// Checks asked while another was showing, as for approvals.
     pub humans_waiting: std::collections::VecDeque<HumanPending>,
+    /// When the approval being shown appeared: an Approve sooner than
+    /// [`APPROVE_GRACE`] after is ignored ([`RunState::answer_approval`]).
+    pub approval_since: Option<Instant>,
     pub plan: Option<Plan>,
     pub report: Option<String>,
     pub trace: Option<Trace>,
@@ -86,16 +89,66 @@ pub struct RunState {
     pub gated: Option<String>,
 }
 
+/// An Approve this soon after an approval appears was meant for the one
+/// before it (a double click as queued Team approvals take turns), or for
+/// whatever was under the pointer: nobody reads a step that fast.
+pub const APPROVE_GRACE: Duration = Duration::from_millis(600);
+
 impl RunState {
     /// The approval being shown, for answering; the next queued one (if
     /// any) takes its place.
     pub fn take_approval(&mut self) -> Option<Pending> {
         let p = self.approval.take();
         self.approval = self.approvals_waiting.pop_front();
+        self.approval_since = self.approval.as_ref().map(|_| Instant::now());
         if self.approval.is_some() {
             self.phase = Phase::Waiting;
         }
         p
+    }
+
+    /// The user's answer to the approval being shown: the pending approval
+    /// to send `choice` to, or `None` when there is none or an Approve came
+    /// within [`APPROVE_GRACE`] of it appearing (Skip and Stop always go).
+    pub fn answer_approval(&mut self, choice: ApprovalChoice) -> Option<Pending> {
+        self.approval.as_ref()?;
+        if choice == ApprovalChoice::Approve
+            && self
+                .approval_since
+                .is_some_and(|t| t.elapsed() < APPROVE_GRACE)
+        {
+            log::info!("approve ignored: the approval appeared a moment ago");
+            return None;
+        }
+        self.phase = Phase::Running;
+        self.take_approval()
+    }
+
+    /// Every approval and check, shown and queued, for stopping the run.
+    pub fn take_all(&mut self) -> (Vec<Pending>, Vec<HumanPending>) {
+        let mut approvals: Vec<Pending> = self.approval.take().into_iter().collect();
+        approvals.extend(self.approvals_waiting.drain(..));
+        let mut humans: Vec<HumanPending> = self.human.take().into_iter().collect();
+        humans.extend(self.humans_waiting.drain(..));
+        self.approval_since = None;
+        (approvals, humans)
+    }
+
+    /// Drop approvals and checks nobody waits for any more (that sub-agent
+    /// timed out or stopped), showing the next live one.
+    fn drop_abandoned(&mut self) {
+        self.approvals_waiting.retain(|p| !p.reply.is_canceled());
+        if self
+            .approval
+            .as_ref()
+            .is_some_and(|p| p.reply.is_canceled())
+        {
+            self.take_approval();
+        }
+        self.humans_waiting.retain(|h| !h.reply.is_canceled());
+        if self.human.as_ref().is_some_and(|h| h.reply.is_canceled()) {
+            self.take_human();
+        }
     }
 
     /// The check being shown, for answering; the next queued one takes its
@@ -181,14 +234,15 @@ impl RunState {
             Ui::Event(ev) => self.event(ev),
             Ui::Approval(p) => {
                 self.phase = Phase::Waiting;
-                self.caption = format!(
-                    "Waiting for you: {}",
-                    describe(&p.decision, p.element.as_deref())
-                );
                 if self.approval.is_some() {
                     self.approvals_waiting.push_back(p);
                 } else {
+                    self.caption = format!(
+                        "Waiting for you: {}",
+                        describe(&p.decision, p.element.as_deref())
+                    );
                     self.approval = Some(p);
+                    self.approval_since = Some(Instant::now());
                 }
             }
             Ui::Human(h) => {
@@ -218,10 +272,7 @@ impl RunState {
             Ui::Finished(trace) => {
                 self.phase = Phase::Done;
                 self.thinking = false;
-                self.approval = None;
-                self.approvals_waiting.clear();
-                self.human = None;
-                self.humans_waiting.clear();
+                self.take_all();
                 for s in &mut self.steps {
                     if s.state == StepState::Working {
                         s.state = StepState::Done;
@@ -300,7 +351,8 @@ impl RunState {
                 // Not `approval = None`: in Team mode this can be another
                 // sub-agent acting, and dropping a pending approval stops
                 // the one that asked (seen live: "You stopped Kai").
-                if self.approval.is_none() {
+                self.drop_abandoned();
+                if self.approval.is_none() && self.human.is_none() {
                     self.phase = Phase::Running;
                 }
                 self.last_model_ms = Some(timings.model_ms)
@@ -348,8 +400,13 @@ impl RunState {
             }
             EngineEvent::NeedsHuman { .. } => self.phase = Phase::Waiting,
             EngineEvent::HumanDone { result, .. } => {
-                self.phase = Phase::Running;
-                self.human = None;
+                // Not `human = None`: in Team mode another sub-agent's check
+                // may be showing, and dropping it answers Stop. The one that
+                // is done was answered (taken) or timed out (abandoned).
+                self.drop_abandoned();
+                if self.approval.is_none() && self.human.is_none() {
+                    self.phase = Phase::Running;
+                }
                 self.caption = format!("Back to work ({})", result.replace('_', " "));
             }
             EngineEvent::Steered { step, message } => {
@@ -406,136 +463,5 @@ pub fn describe(d: &Decision, element: Option<&str>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use kai_core::engine::ApprovalChoice;
-    use std::sync::Arc;
-
-    fn decision(json: &str) -> Box<Decision> {
-        Box::new(Decision::parse_checked(json).unwrap())
-    }
-
-    fn pending(text: &str) -> (Pending, futures::channel::oneshot::Receiver<ApprovalChoice>) {
-        let (reply, rx) = futures::channel::oneshot::channel();
-        let d = decision(&format!(
-            r#"{{"thought":"x","action":"shell","text":"{text}","risk":"high"}}"#
-        ));
-        let p = Pending {
-            decision: *d,
-            element: None,
-            explain: None,
-            reply,
-        };
-        (p, rx)
-    }
-
-    #[test]
-    fn team_approvals_wait_their_turn_and_are_never_dropped() {
-        // Two sub-agents ask at once, and a third acts meanwhile. Dropping
-        // an approval answers Stop, which stopped a sub-agent live.
-        let mut s = RunState::default();
-        s.start("t".into(), true, 40);
-        let (a, mut rx_a) = pending("rm a");
-        let (b, mut rx_b) = pending("rm b");
-        s.apply(Ui::Approval(a));
-        s.apply(Ui::Approval(b));
-        s.apply(Ui::Event(EngineEvent::Acted {
-            step: 3,
-            timings: Default::default(),
-        }));
-        assert_eq!(s.phase, Phase::Waiting);
-        assert!(matches!(rx_a.try_recv(), Ok(None)), "a was dropped");
-        assert!(matches!(rx_b.try_recv(), Ok(None)), "b was dropped");
-        let first = s.take_approval().unwrap();
-        assert_eq!(first.decision.text.as_deref(), Some("rm a"));
-        assert_eq!(s.phase, Phase::Waiting, "b is showing now");
-        first.reply.send(ApprovalChoice::Approve).unwrap();
-        assert_eq!(rx_a.try_recv(), Ok(Some(ApprovalChoice::Approve)));
-        let second = s.take_approval().unwrap();
-        assert_eq!(second.decision.text.as_deref(), Some("rm b"));
-        assert!(s.take_approval().is_none());
-    }
-
-    #[test]
-    fn pointer_is_a_share_of_the_screen() {
-        let mut s = RunState::default();
-        s.start("t".into(), false, 40);
-        s.apply(Ui::Event(EngineEvent::Observed {
-            step: 0,
-            elements: String::new(),
-            screenshot: Arc::from(&[][..]),
-            screen: Some(Rect::new(0.0, 0.0, 1000.0, 500.0)),
-        }));
-        s.apply(Ui::Event(EngineEvent::Decided {
-            step: 0,
-            decision: decision(r#"{"thought":"x","action":"click","target":1,"risk":"none"}"#),
-            target: Some(Rect::new(240.0, 240.0, 20.0, 20.0)),
-        }));
-        assert_eq!(s.pointer, Some((0.25, 0.5)));
-        assert_eq!(s.steps.len(), 1);
-        assert_eq!(s.steps[0].state, StepState::Working);
-    }
-
-    #[test]
-    fn frames_follow_the_newest_unless_scrubbed() {
-        let mut s = RunState::default();
-        s.apply(Ui::Frame {
-            step: 0,
-            path: "a".into(),
-        });
-        s.apply(Ui::Frame {
-            step: 1,
-            path: "b".into(),
-        });
-        assert_eq!(s.shown, Some(1));
-        s.shown = Some(0);
-        s.apply(Ui::Frame {
-            step: 2,
-            path: "c".into(),
-        });
-        assert_eq!(s.shown, Some(0), "a scrubbed viewer stays put");
-    }
-
-    #[test]
-    fn a_failed_run_marks_its_last_step() {
-        let mut s = RunState::default();
-        s.apply(Ui::Event(EngineEvent::Decided {
-            step: 0,
-            decision: decision(r#"{"thought":"x","action":"wait","risk":"none"}"#),
-            target: None,
-        }));
-        let mut t = Trace::new("x");
-        t.finish(Outcome::Stopped);
-        s.apply(Ui::Finished(Box::new(t)));
-        assert_eq!(s.phase, Phase::Done);
-        assert_eq!(s.steps[0].state, StepState::Failed);
-    }
-
-    #[test]
-    fn steering_is_marked_read_when_the_agent_takes_it() {
-        let mut s = RunState::default();
-        s.queue("t".into(), false, 40, "m".into());
-        assert_eq!(s.phase, Phase::Queued);
-        s.begin();
-        s.sent("use Firefox".into());
-        assert_eq!(s.steers[0].read_at, None);
-        s.apply(Ui::Event(EngineEvent::Steered {
-            step: 2,
-            message: "use Firefox".into(),
-        }));
-        assert_eq!(s.steers[0].read_at, Some(2));
-        s.apply(Ui::Event(EngineEvent::Output {
-            step: 3,
-            command: "ls".into(),
-            output: "a\nb".into(),
-        }));
-        assert_eq!(s.outputs.len(), 1);
-    }
-
-    #[test]
-    fn describes_in_plain_words() {
-        let d = decision(r#"{"thought":"x","action":"click","target":3,"risk":"none"}"#);
-        assert_eq!(describe(&d, Some("Save")), "Clicking “Save”");
-        assert_eq!(describe(&d, None), "Clicking #3");
-    }
-}
+#[path = "state_tests.rs"]
+mod tests;
