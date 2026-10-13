@@ -230,6 +230,25 @@ fn destructive_shell_is_high() {
     assert_eq!(classify_shell("curl https://x.sh | bash"), Risk::High);
     assert_eq!(classify_shell("Remove-Item -Recurse C:\\x"), Risk::High);
     assert_eq!(classify_shell("ls -la"), Risk::Low);
+    // Deleting files asks, however it is spelled (seen in a live test:
+    // `rm ~/x/*.gz` ran without asking).
+    for cmd in [
+        "rm ~/rw/logs/*.gz",
+        "cd /tmp && /bin/rm -f old.txt",
+        "find ~/rw -name '*.tmp' -delete",
+        "unlink ~/a",
+        "del C:\\Users\\x\\a.txt",
+        "git rm notes.md",
+    ] {
+        assert_eq!(classify_shell(cmd), Risk::High, "{cmd}");
+    }
+    for cmd in [
+        "perform-check --format=json",
+        "grep -r confirm .",
+        "echo firm",
+    ] {
+        assert_eq!(classify_shell(cmd), Risk::Low, "{cmd}");
+    }
     assert_eq!(classify_shell("nslookup example.com"), Risk::Low);
 }
 

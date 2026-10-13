@@ -86,10 +86,29 @@ const DESTRUCTIVE_SHELL: &[&str] = &[
     "drop table",
 ];
 
+/// Commands that delete files, matched as whole words of the command (so
+/// `rm old.log` asks like `rm -r` does, and "perform" or "format" do not).
+const DELETE_COMMANDS: &[&str] = &[
+    "rm",
+    "rmdir",
+    "unlink",
+    "shred",
+    "del",
+    "erase",
+    "rd",
+    "trash",
+    "trash-put",
+    "-delete",
+];
+
 /// Risk of a shell command: destructive or privileged is high, the rest low.
 pub fn classify_shell(cmd: &str) -> Risk {
     let c = cmd.to_ascii_lowercase();
-    if DESTRUCTIVE_SHELL.iter().any(|p| c.contains(p)) {
+    let deletes = c
+        .split(|ch: char| ch.is_whitespace() || ";|&()`'\"".contains(ch))
+        .map(|w| w.rsplit(['/', '\\']).next().unwrap_or(w))
+        .any(|w| DELETE_COMMANDS.contains(&w));
+    if deletes || DESTRUCTIVE_SHELL.iter().any(|p| c.contains(p)) {
         Risk::High
     } else {
         Risk::Low
