@@ -31,13 +31,22 @@ const DIGITS: [[u8; 5]; 10] = [
 pub fn draw(img: &mut RgbImage, grounding: &Grounding, scale: f32) {
     match grounding {
         Grounding::Marks(els) => {
-            for e in els {
-                let r = to_frame(e.bounds, scale);
+            let frames: Vec<Rect> = els.iter().map(|e| to_frame(e.bounds, scale)).collect();
+            for (i, e) in els.iter().enumerate() {
+                let r = frames[i];
                 outline(img, r, BOX, 2);
                 // Above the box's top-left corner, so the label stays readable;
-                // inside only when the box touches the top edge.
+                // inside when the box touches the top edge, or when the space
+                // above is another box: in a menu or list a tag above sits on
+                // the row before and reads as its number (seen live: "Find
+                // and Replace" taken for the next item, 19 times).
                 let th = tag_height() as i64;
-                let y = if r.y as i64 >= th {
+                let above = Rect::new(r.x, r.y - th as f32, tag_width(e.mark) as f32, th as f32);
+                let crowded = frames
+                    .iter()
+                    .enumerate()
+                    .any(|(j, o)| j != i && overlaps(*o, above));
+                let y = if r.y as i64 >= th && !crowded {
                     r.y as i64 - th
                 } else {
                     r.y as i64
@@ -58,6 +67,11 @@ pub fn draw(img: &mut RgbImage, grounding: &Grounding, scale: f32) {
             }
         }
     }
+}
+
+/// The two rects share some area (touching edges do not count).
+fn overlaps(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
 fn to_frame(r: Rect, scale: f32) -> Rect {
@@ -153,6 +167,21 @@ mod tests {
         assert_eq!(*img.get_pixel(70, 55), BOX);
         // Outside untouched.
         assert_eq!(*img.get_pixel(150, 150), Rgb([0, 0, 0]));
+    }
+
+    #[test]
+    fn in_a_stacked_list_each_tag_sits_in_its_own_row() {
+        // Two menu rows, 20 px each, one under the other: the lower one's
+        // tag goes inside its own box, not onto the row above.
+        let mut img = RgbImage::new(200, 200);
+        let rows = vec![el(10, 20.0, 60.0), el(11, 20.0, 80.0)];
+        draw(&mut img, &Grounding::Marks(rows), 1.0);
+        // Row 10 has free space above it: its tag is there.
+        assert_eq!(*img.get_pixel(21, 60 - tag_height() + 1), TAG_BG);
+        // Row 11's tag starts inside row 11 (y 80..100)...
+        assert_eq!(*img.get_pixel(21, 81), TAG_BG);
+        // ...and nothing of it is drawn inside row 10 (y 60..80).
+        assert_eq!(*img.get_pixel(23, 75), Rgb([0, 0, 0]));
     }
 
     #[test]
