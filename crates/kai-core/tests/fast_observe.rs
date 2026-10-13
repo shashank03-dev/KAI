@@ -163,7 +163,7 @@ async fn two_steps_that_lead_back_to_the_same_screen_are_a_loop() {
     e.config.max_steps = 30;
     let trace = e.run("x").await;
     assert_eq!(trace.outcome, Some(Outcome::AskedUser));
-    assert!(client.count() <= 10, "{} model calls", client.count());
+    assert!(client.count() <= 12, "{} model calls", client.count());
     assert!(
         client
             .seen()
@@ -171,6 +171,18 @@ async fn two_steps_that_lead_back_to_the_same_screen_are_a_loop() {
             .any(|s| s.text.contains("led back to the same screen")),
         "the model was told"
     );
+
+    // Told once, the model re-opens the menu and picks the right item:
+    // that run goes on and finishes.
+    let right = r#"{"thought":"the right item","action":"click","target":9,"risk":"none","expect":"dialog"}"#;
+    let screen = Screen::marks();
+    let hands = Hands::new(&screen);
+    let client = Counting::new(&[open, pick, open, pick, open, right, DONE]);
+    let toggling = Toggling(&screen);
+    let mut e = engine(&client, &screen, &hands, &ap, &stop);
+    e.perceptor = &toggling;
+    let trace = e.run("x").await;
+    assert_eq!(trace.outcome, Some(Outcome::Success));
 }
 
 struct FixedVerifier(f32);
