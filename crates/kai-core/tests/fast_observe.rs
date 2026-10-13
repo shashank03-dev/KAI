@@ -74,6 +74,25 @@ async fn no_progress_means_a_full_look_next() {
     assert!(!trace.steps[0].verified, "nothing changed after the click");
 }
 
+#[tokio::test]
+async fn a_silent_shell_step_is_not_reported_as_a_stalled_screen() {
+    // A command that writes a file changes no pixels. The model must not be
+    // told "the screen has not changed, try a different approach": it then
+    // throws away a command that worked (seen live: a screenshot task took
+    // 40 steps).
+    let shell = r#"{"thought":"save it","action":"shell","text":"import -window root ~/s.png","risk":"low","expect":"saved"}"#;
+    let screen = Screen::marks();
+    let mut hands = Hands::new(&screen);
+    hands.frozen = true;
+    let (ap, stop) = (approve_all(), flag());
+    let client = Counting::new(&[shell, shell, DONE]);
+    let trace = engine(&client, &screen, &hands, &ap, &stop).run("x").await;
+    assert_eq!(trace.outcome, Some(Outcome::Success));
+    for seen in client.seen() {
+        assert!(!seen.text.contains("has not changed"), "{}", seen.text);
+    }
+}
+
 struct FixedVerifier(f32);
 #[async_trait]
 impl Verifier for FixedVerifier {

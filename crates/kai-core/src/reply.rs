@@ -45,7 +45,8 @@ impl StepReply {
         let obj = v
             .as_object_mut()
             .ok_or_else(|| SchemaError::Parse("reply is not a JSON object".to_string()))?;
-        let then_raw = obj.remove("then");
+        let mut then_raw = obj.remove("then");
+        hoist_empty_shell(obj, &mut then_raw);
         let plan_raw = obj.remove("plan");
         let outcomes = match obj.remove("outcomes") {
             Some(Value::Array(items)) => items,
@@ -146,6 +147,33 @@ impl StepReply {
     }
 }
 
+/// Gemma sometimes names `shell` with no command and puts the command in
+/// its first follow-up (`"action":"shell","then":[{"action":"shell","text":
+/// "mousepad &"}]`). That follow-up is the step it meant: make it the main
+/// action instead of spending a repair call. Only an exact match moves.
+fn hoist_empty_shell(obj: &mut serde_json::Map<String, Value>, then: &mut Option<Value>) {
+    let is_shell = |o: &serde_json::Map<String, Value>| o.get("action") == Some(&"shell".into());
+    let has_text = |o: &serde_json::Map<String, Value>| {
+        o.get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|t| !t.trim().is_empty())
+    };
+    if !is_shell(obj) || has_text(obj) {
+        return;
+    }
+    let Some(Value::Array(items)) = then else {
+        return;
+    };
+    let Some(Value::Object(first)) = items.first() else {
+        return;
+    };
+    if !is_shell(first) || !has_text(first) {
+        return;
+    }
+    obj.insert("text".into(), first["text"].clone());
+    items.remove(0);
+}
+
 /// One follow-up; `thought` is optional there. Terminal actions (`done`,
 /// `ask_user`) never run unverified, so they end the batch.
 fn follow_up(mut item: Value) -> Option<Decision> {
@@ -165,6 +193,36 @@ fn follow_up(mut item: Value) -> Option<Decision> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_shell_takes_the_command_from_its_first_follow_up() {
+        let r = StepReply::parse_checked(
+            r#"{"thought":"open it","action":"shell","risk":"low","expect":"editor open",
+                "then":[{"action":"shell","text":"mousepad &","risk":"low"},
+                        {"action":"key","keys":["ctrl","s"]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.decision.action, Action::Shell);
+        assert_eq!(r.decision.text.as_deref(), Some("mousepad &"));
+        assert_eq!(r.then.len(), 1);
+        assert_eq!(r.then[0].action, Action::Key);
+        // Anything else is still an error (the repair retry asks again).
+        for raw in [
+            r#"{"thought":"x","action":"shell","risk":"low"}"#,
+            r#"{"thought":"x","action":"shell","then":[{"action":"key","keys":["a"]}]}"#,
+            r#"{"thought":"x","action":"shell","then":[{"action":"shell","text":" "}]}"#,
+        ] {
+            assert!(StepReply::parse_checked(raw).is_err(), "{raw}");
+        }
+        // A shell step with its own command keeps it.
+        let r = StepReply::parse_checked(
+            r#"{"thought":"x","action":"shell","text":"ls","then":[{"action":"shell","text":"pwd"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.decision.text.as_deref(), Some("ls"));
+        assert_eq!(r.then[0].text.as_deref(), Some("pwd"));
+    }
 
     #[test]
     fn repeated_click_ends_the_batch() {
@@ -175,8 +233,6 @@ mod tests {
         .unwrap();
         assert!(r.then.is_empty());
     }
-
-    use super::*;
 
     #[test]
     fn old_single_object_still_parses() {
