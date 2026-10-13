@@ -157,7 +157,16 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         .map(Path::to_path_buf)
         .unwrap_or_default();
 
-    let s = backend::settings_for(b, args.backend.model.as_deref())?;
+    let mut s = backend::settings_for(b, args.backend.model.as_deref())?;
+    // `--backend local`: start the model's server for this bench run (kept
+    // running if it already was).
+    let _local = if b == BackendArg::Local
+        || (b == BackendArg::Auto && s.backend == kai_core::settings::BackendChoice::Local)
+    {
+        crate::models::ensure_local(&mut s).await?
+    } else {
+        None
+    };
     let (mut config, applied) = backend::config(&s, &args.backend.ab)?;
     // Recorded replies hold no plan answers: sampling plans would only eat
     // the step replies. Best-of needs a live model.
