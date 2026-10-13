@@ -68,12 +68,15 @@ pub fn list() -> Vec<Win> {
 /// What the window list looks like: (id, title, focused) per window.
 pub type Shot = Vec<(u32, String, bool)>;
 
-/// The window list now (empty on Wayland or when it cannot be read).
-pub fn shot() -> Shot {
-    let Ok(all) = xcap::Window::all() else {
-        return Vec::new();
-    };
-    all.iter()
+/// The window list now; `None` when it cannot be read (Wayland lists no
+/// windows, so an empty list there says nothing). An empty desktop on X11
+/// or Windows is `Some(empty)`.
+pub fn shot() -> Option<Shot> {
+    #[cfg(target_os = "linux")]
+    std::env::var_os("DISPLAY")?;
+    let all = xcap::Window::all().ok()?;
+    let shot = all
+        .iter()
         .filter_map(|w| {
             Some((
                 w.id().ok()?,
@@ -81,14 +84,14 @@ pub fn shot() -> Shot {
                 w.is_focused().unwrap_or(false),
             ))
         })
-        .collect()
+        .collect();
+    Some(shot)
 }
 
 /// Should a launch wait on? Only when the windows can be listed at all
-/// (`before` not empty) and nothing opened, closed, got focus or changed
-/// title since.
-pub fn unchanged(before: &Shot, now: &Shot) -> bool {
-    !before.is_empty() && before == now
+/// and nothing opened, closed, got focus or changed title since.
+pub fn unchanged(before: &Option<Shot>, now: &Option<Shot>) -> bool {
+    before.is_some() && before == now
 }
 
 /// After starting an app or opening a link: wait (at most `max`) until the
@@ -96,7 +99,7 @@ pub fn unchanged(before: &Shot, now: &Shot) -> bool {
 /// it is still starting on (seen live: a cold Firefox took longer than the
 /// screen settle, the model saw a black screen and opened it three more
 /// times).
-pub fn wait_for_change(before: &Shot, max: std::time::Duration) {
+pub fn wait_for_change(before: &Option<Shot>, max: std::time::Duration) {
     let deadline = std::time::Instant::now() + max;
     while std::time::Instant::now() < deadline && unchanged(before, &shot()) {
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -161,17 +164,19 @@ mod tests {
 
     #[test]
     fn a_launch_waits_only_while_nothing_changed_and_windows_are_listed() {
-        let before: Shot = vec![(1, "Terminal".into(), true)];
+        let term = |focused| (1, "Terminal".to_string(), focused);
+        let before: Option<Shot> = Some(vec![term(true)]);
         assert!(unchanged(&before, &before.clone()));
-        let opened = vec![(1, "Terminal".into(), false), (2, "Firefox".into(), true)];
+        let opened = Some(vec![term(false), (2, "Firefox".into(), true)]);
         assert!(!unchanged(&before, &opened));
-        let titled = vec![(1, "Opening hours - Firefox".into(), true)];
-        assert!(!unchanged(
-            &vec![(1, "New Tab - Firefox".into(), true)],
-            &titled
-        ));
-        // Wayland lists no windows: never wait.
-        assert!(!unchanged(&Vec::new(), &Vec::new()));
+        let tab = |title: &str| Some(vec![(1, title.to_string(), true)]);
+        assert!(!unchanged(&tab("New Tab"), &tab("Opening hours")));
+        // An empty X11 desktop waits for the first window (seen live: no
+        // wait there, and the model saw a black screen).
+        assert!(unchanged(&Some(Vec::new()), &Some(Vec::new())));
+        assert!(!unchanged(&Some(Vec::new()), &opened));
+        // No window list at all (Wayland): never wait.
+        assert!(!unchanged(&None, &None));
     }
 
     #[test]
