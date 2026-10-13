@@ -97,11 +97,14 @@ verified.
 - **Outcome probes per step.** Only the run's final outcomes decide whether
   a procedure is active. A failing step is caught by the target lookup and
   by the final model check, not by a probe after each step.
-- **Measured gain.** No live model was available. The paper's numbers (about
-  96% fewer tokens and 60% less time on repeats) are not Kai's. To measure,
-  run `kai bench --backend gemini --procedures --repeat 3` against the same
-  run without `--procedures`, and compare model calls, seconds per task and
-  the pass rate.
+- **Measured gain: none shown yet.** Live on 2026-10-12 (Gemma 4 26B, six
+  tasks, `--repeat 3`, one run per side): 5/6 passed either way; model calls
+  per task fell from 11.5 on the first pass to 9.8 on the third with
+  procedures, and stayed 8.5 → 8.8 without. One run per side cannot separate
+  that from noise, and no replay was seen failing on a renamed target, so
+  visual re-aim is not built. The paper's numbers (about 96% fewer tokens
+  and 60% less time on repeats) are not Kai's.
+  [`bench/results/2026-10-12-live.md`](../bench/results/2026-10-12-live.md)
 
 `kai memory procedures` lists them. `kai memory procedures --forget N`
 deletes one.

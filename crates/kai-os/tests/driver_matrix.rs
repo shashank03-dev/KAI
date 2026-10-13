@@ -59,11 +59,14 @@ const TOOLKITS: &[Toolkit] = &[
         // accessible root, so there is no tree to read (Kai uses the grid).
         known_gap: Some("Qt 5 publishes no accessibility tree here"),
     },
-    // Gecko reports EditableText edits on page inputs as done without
-    // applying them, so Kai types those with the keyboard (`linux_act.rs`).
+    // Measured 2026-10-12 on Firefox ESR: a page's push buttons expose no
+    // AT-SPI action at all (`<button>` with an onclick attribute, a listener
+    // or type=submit alike), so Kai presses them with the mouse. Gecko also
+    // reports EditableText edits on page inputs as done without applying
+    // them, so Kai types those with the keyboard (`linux_act.rs`).
     Toolkit {
         name: "web",
-        expect: [Path::A11y, Path::A11y, Path::Mouse],
+        expect: [Path::Mouse, Path::A11y, Path::Mouse],
         known_gap: None,
     },
 ];

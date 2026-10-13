@@ -44,7 +44,7 @@ container `python3` is 3.13 and the distribution's bindings are for 3.12).
 |---|---|---|---|
 | GTK 3.24 | a11y, changed | a11y, changed | a11y, changed |
 | Qt 5.15.13 | **known gap** | **known gap** | **known gap** |
-| Firefox ESR (web page) | see `bench/results/2026-10-12-live.md` | | Kai declines (mouse), as designed |
+| Firefox ESR 140 (web page) | **mouse** (no action exposed) | a11y, changed | Kai declines (mouse), as designed |
 
 - **Qt 5 is a real gap.** The Qt app connects to the accessibility bus but
   publishes no accessible root object (`/org/a11y/atspi/accessible/root`
@@ -54,6 +54,11 @@ container `python3` is 3.13 and the distribution's bindings are for 3.12).
   expectation gets updated. Not yet known: whether this is the container
   (no session manager, no `QT_QPA_PLATFORMTHEME`) or Qt 5.15 with AT-SPI
   2.52 in general; a KDE desktop would answer it.
+- **Firefox page buttons** expose no AT-SPI action at all (measured with an
+  `onclick` attribute, an event listener and `type=submit`; checkboxes do
+  expose `check`), so Kai presses them with the mouse. Expected `Mouse` in
+  the matrix; it fails, and should be updated, if Firefox starts exposing
+  `press`.
 - **Gecko fills** are declined on purpose: Firefox reports EditableText edits
   on page inputs as done without applying them (`linux_act.rs`,
   `NO_FILL_TOOLKITS`), so Kai types there with the keyboard.

@@ -131,6 +131,14 @@ request; on the same 14 tasks (one run each) Gemma alone passed 13/14 and Gemma
 shows no measurable benefit yet, and the gap is run-to-run noise (rate limits,
 one early "done"). Turn it on with `kai bench --executor` to try it.
 
+**Live re-run (2026-10-12, Gemma 4 26B on the Gemini API, same 14 tasks,
+two runs per side).** Fixes from watching Gemma's live runs (empty shell
+replies, repeated commands, a misleading "screen has not changed" after
+silent commands, honouring the API's retry delay) cut steps by 25%, model
+calls by 34% and input tokens by 36% (27/28 vs 28/28 passed). No
+experimental switch earned a default; details in
+[bench/results/2026-10-12-live.md](bench/results/2026-10-12-live.md).
+
 **Not measured:** Gemma on our own DigitalOcean Droplet (no GPU here); GPT-6
 Astra and Gemma 4 31B on the Gateway (free tier: 403); OpenAI's native
 computer-use loop (needs a direct OpenAI key — implemented, tested only against
