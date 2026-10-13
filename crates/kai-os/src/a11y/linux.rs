@@ -96,9 +96,14 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
         if role != Role::Other
             && let Some(bounds) = extents(&p).await
         {
+            let name = label(&p).await;
+            // A web table cell or list item has no name; its text is what
+            // it says (seen live: Firefox opening hours read as `cell ""`,
+            // and the model misread the screenshot).
+            let shows_text = matches!(role, Role::Cell | Role::ListItem) && name.trim().is_empty();
             out.push(RawNode {
                 role,
-                name: label(&p).await,
+                name,
                 bounds,
                 enabled: state.contains(State::Enabled) || state.contains(State::Sensitive),
                 visible: state.contains(State::Visible),
@@ -106,6 +111,8 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
                 focused: state.contains(State::Focused),
                 value: if role == Role::TextField && arole != A::Terminal {
                     field_text(&p).await
+                } else if shows_text {
+                    field_text(&p).await.and_then(|t| content_text(&t))
                 } else {
                     None
                 },
@@ -144,6 +151,18 @@ async fn field_text(p: &AccessibleProxy<'_>) -> Option<String> {
     (!t.trim().is_empty()).then_some(t)
 }
 
+/// The readable part of an element's text: embedded-object marks (U+FFFC,
+/// where a child element sits) dropped, whitespace collapsed; `None` when
+/// nothing is left.
+fn content_text(raw: &str) -> Option<String> {
+    let t = raw
+        .replace('\u{fffc}', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!t.is_empty()).then_some(t)
+}
+
 async fn label(p: &AccessibleProxy<'_>) -> String {
     let name = p.name().await.unwrap_or_default();
     if !name.trim().is_empty() {
@@ -170,5 +189,22 @@ pub(super) fn map_role(r: A) -> Role {
         A::TableCell => Role::Cell,
         A::Icon | A::DesktopIcon => Role::Button,
         _ => Role::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_cells_text_drops_child_marks_and_extra_space() {
+        assert_eq!(
+            super::content_text("8:00 - 13:30").as_deref(),
+            Some("8:00 - 13:30")
+        );
+        assert_eq!(
+            super::content_text("\u{fffc} Saturday\n  hours").as_deref(),
+            Some("Saturday hours")
+        );
+        assert_eq!(super::content_text("\u{fffc}"), None);
+        assert_eq!(super::content_text("  "), None);
     }
 }
