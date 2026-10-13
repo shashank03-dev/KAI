@@ -194,6 +194,18 @@ fn parse_reply(check: &HumanCheck, line: &str) -> Option<HumanReply> {
     Some(HumanReply::Resolved)
 }
 
+/// Terminal setup, first thing in `main`: warnings-level logging (to
+/// stderr), and on Unix the default SIGPIPE, so `kai models list | head`
+/// ends quietly when the reader goes away instead of panicking.
+pub fn init() {
+    // SAFETY: SIG_DFL is a valid disposition for SIGPIPE; no handler runs.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

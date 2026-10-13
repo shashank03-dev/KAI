@@ -149,6 +149,65 @@ into the trace, the UI or the model. Every reason and every probe argument
 passes through the same one-time-code redaction as the element list, so a
 code Kai typed for the user never appears.
 
+## Task checks: outcomes from the task's own words (2026-10-13)
+
+`--task-checks`, Settings › *Check the file or folder a task asks for
+before accepting done*. **Off by default** until measured.
+
+**Why.** Gemma's main live failure is a false `done`
+(`DECISIONS.md`, real-world review). The gate above only works when the
+model names outcomes (`--outcomes`), and a model that is wrong about being
+done is also unreliable at naming what "done" means. Many tasks already say
+it in words: "write the price into kai-bench/price.txt in my home folder",
+"show me the photos folder in the file manager".
+
+**What.** At the start of a run `task_checks::derive` reads the task. It
+makes no model call. It seeds the ledger with up to 4 outcomes, placed
+before any the model names:
+
+- **An output file or folder**, after *into / as / to / called / named*,
+  with an output extension (txt, csv, zip, png, ods, eml, ics, …; not
+  `.html`, because "go to x.com/a.html" is a visit), or "into a new folder
+  X/Y". The path resolves to `~/…` only when the task says where: "in my
+  home folder" anywhere in the task (Kai's shell starts there), or a place
+  right after the name ("on my Desktop", "in my Downloads"). An absolute
+  path is used as written. Probe: `file_not_empty`, a new OS probe (a
+  folder, or a file with at least one byte). The model's menu does not
+  offer it.
+- **A folder shown in the file manager:** "show/open (the) X folder … file
+  manager / file explorer" → `window_title(X)`, matched literally.
+
+Everything else adds nothing. The rule is that a misread task must never
+refuse a correct `done`. So "In ~/projects, save it as notes.txt" (a bare
+name with no place after it) and "write the total into kai-bench/total.txt"
+(a relative path, home never mentioned) are left unchecked. The gate itself
+is unchanged: a refused `done` tells the model why, and after
+`MAX_GATE_REJECTIONS` Kai asks the user.
+
+**Known edge.** "Save what the script prints into x.log" when the script
+prints nothing leaves an empty file, and `file_not_empty` refuses it. After
+three refusals Kai asks the user, who answers "I did it", so the run is
+held up but not lost.
+
+**Rejected.** Guessing the folder of a bare file name (the run's cwd, the
+last folder mentioned). One wrong guess is a false refusal on a task that
+was done. Also rejected: content checks ("the price"). The task does not
+say what the content is, and the model's own `file_contains` covers it
+when `--outcomes` is on.
+
+**Tests.** `task_checks_tests.rs` runs on the bench's own prompts: 11
+outputs found, and 12 phrasings that must add nothing.
+`tests/task_checks_e2e.rs` drives the real engine: an early `done` is
+refused until the file exists and the model is told which file; with the
+switch off, `done` is accepted as before; a file that never appears ends
+in asking the user, not success. The first test fails when the seeding is
+removed (checked).
+
+**To measure.** `kai bench --task-checks` vs off, two runs per side, on
+live Gemma. Watch passes and false dones. 17 of the 30 bench prompts get a
+check (16 output files or folders, 1 file-manager window), and every one
+matches what the task asks for (checked by listing them, 2026-10-13).
+
 ## Per-action effect (stage 2)
 
 After each action, the next observation labels it. No model is called.

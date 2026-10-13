@@ -831,3 +831,32 @@ this session, so nothing below is a Kai bench number.
 - **500-line rule restored** with no behaviour change: `prompt.rs` tests →
   `prompt_tests.rs`, human-check phrase tables → `human_phrases.rs`, Skills
   page tests → `skills_tests.rs`, and pages and shortcuts → `kai-app/src/nav.rs`.
+
+## Task checks, the store in the app, a self-checking release (2026-10-13)
+
+Still no model key and no GPU in this session, so there are no live numbers.
+
+- **Task checks** (`--task-checks`, **off**; `docs/VERIFICATION.md`): the
+  DONE gate seeds outcomes from the task's own words, with no model call.
+  An output file or folder → `file_not_empty` (new OS probe, not on the
+  model's menu); "show the X folder in the file manager" → `window_title(X)`.
+  The rule is conservative: a misread task must never refuse a correct
+  `done`, so a bare file name with no place, or a relative path when the
+  task never mentions home, adds nothing. On the 30 bench prompts, 17 get a
+  check and every one is right (listed). The e2e guard test fails without
+  the seeding (checked). The model's own outcomes (`--outcomes`) now come
+  after the seeded ones instead of replacing them.
+- **Store in the app:** Models › More from Hugging Face, with search, Pull,
+  and the same `add_pulled` (dedupe by SHA-256) as the CLI. A *Made for
+  computer use* badge was added to the cards. Rendered under Xvfb with
+  lavapipe (`KAI_CAPTURE_ONLY=models-store`, shot `93-models-store`), light
+  and dark.
+- **Release workflow:** `cargo test --workspace --release` before
+  packaging, a `.sha256` next to each archive, a smoke test of the unpacked
+  CLI on both OSes (skill validate, models list, mock bench), and "Run
+  workflow" as a dry run that does not publish. The Linux package and smoke
+  were simulated here with the debug build: checksum OK, 10 skills valid,
+  mock bench 30/30.
+- **Found while smoke-testing:** `kai models list | head` panicked on the
+  closed pipe. Unix now gets the default SIGPIPE (exit 141, quiet), as
+  other CLIs do (`console::init`).

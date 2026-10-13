@@ -302,6 +302,10 @@ pub struct Config {
     /// Offer the model a run memo, a scratchpad shown back every step, so
     /// long runs keep what they read (`memo.rs`). Off until measured.
     pub memo: bool,
+    /// Gate `done` on the outcomes the task's own words name (an output
+    /// file, a folder shown in the file manager; `task_checks.rs`), with
+    /// no model call. Off until measured.
+    pub task_checks: bool,
 }
 
 impl Default for Config {
@@ -328,6 +332,7 @@ impl Default for Config {
             best_of: 0,
             recover: false,
             memo: false,
+            task_checks: false,
         }
     }
 }

@@ -3968,6 +3968,7 @@ dependencies = [
  "kai-core",
  "kai-os",
  "keyring",
+ "libc",
  "log",
  "serde",
  "serde_json",

@@ -274,6 +274,16 @@ impl Catalog {
             .find(|m| m.model_file().and_then(|f| f.sha256.as_deref()) == Some(sha))
     }
 
+    /// Add a pulled entry to the user catalog at `path`, unless these
+    /// weights are already in this catalog under another id.
+    pub fn add_pulled(&self, path: &Path, e: &ModelEntry) -> anyhow::Result<Pulled> {
+        if let Some(same) = self.same_weights(e).filter(|s| s.id != e.id) {
+            return Ok(Pulled::AlreadyHave(same.id.clone()));
+        }
+        Self::save_user_entry(path, e)?;
+        Ok(Pulled::Added)
+    }
+
     /// The user's own catalog file, merged on top of the built-in one.
     pub fn user_file() -> std::path::PathBuf {
         crate::settings::Settings::dir().join("models.json")
@@ -301,6 +311,14 @@ impl Catalog {
         std::fs::rename(&tmp, path)?;
         Ok(())
     }
+}
+
+/// What [`Catalog::add_pulled`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pulled {
+    Added,
+    /// The same weights are already in the catalog under this id.
+    AlreadyHave(String),
 }
 
 /// The OpenAI-compatible base URL of the local server.

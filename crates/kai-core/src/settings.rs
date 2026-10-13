@@ -132,6 +132,9 @@ pub struct Settings {
     /// so long runs keep what they read (docs/LONG_RUNS.md). Off until
     /// measured.
     pub memo: bool,
+    /// Check the task's named output (a file, a folder in the file manager)
+    /// before accepting "done" (docs/VERIFICATION.md). Off until measured.
+    pub task_checks: bool,
     /// Do tasks in Kai's own browser over the DevTools Protocol instead of
     /// on the desktop (docs/BROWSER.md): background input, the page's own
     /// tree. Off by default; Linux for now.
@@ -180,6 +183,7 @@ impl Default for Settings {
             best_of_plans: false,
             recover: false,
             memo: false,
+            task_checks: false,
             use_browser: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
@@ -318,6 +322,7 @@ impl Settings {
             best_of: if self.best_of_plans { 3 } else { 0 },
             recover: self.recover,
             memo: self.memo,
+            task_checks: self.task_checks,
             learn: self.learn,
             reflect: self.reflect,
             ..crate::Config::default()

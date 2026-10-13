@@ -65,7 +65,7 @@ impl Engine<'_> {
             return;
         }
         r.ledger.asked = true;
-        r.ledger.ledger = Ledger::from_raw(raw);
+        r.ledger.ledger.extend_raw(raw);
         if !r.ledger.ledger.is_empty() {
             log::info!(
                 "outcome ledger: {} outcome(s), gated: {}",
@@ -74,6 +74,22 @@ impl Engine<'_> {
             );
             self.emit_outcomes(r, step);
         }
+    }
+
+    /// At the start of a run with `Config::task_checks`: the outcomes the
+    /// task's own words name ([`crate::task_checks`]), before any the model
+    /// adds.
+    pub(super) fn ledger_seed(&self, r: &mut Run<'_>) {
+        if !self.config.task_checks {
+            return;
+        }
+        let checks = crate::task_checks::derive(r.task);
+        if checks.is_empty() {
+            return;
+        }
+        log::info!("task checks: {}", checks.len());
+        r.ledger.ledger.seed(checks);
+        self.emit_outcomes(r, 0);
     }
 
     /// Observation probes on every observation; no OS call.

@@ -45,6 +45,11 @@ impl kai_core::Probe for DesktopProbe {
                 Ok(_) => ProbeVerdict::pass("exists"),
                 Err(_) => ProbeVerdict::fail("not found"),
             },
+            ProbeSpec::FileNotEmpty { path } => match tokio::fs::metadata(expand(path)).await {
+                Ok(m) if m.is_dir() || m.len() > 0 => ProbeVerdict::pass("exists"),
+                Ok(_) => ProbeVerdict::fail("empty"),
+                Err(_) => ProbeVerdict::fail("not found"),
+            },
             ProbeSpec::FileContains { path, text } => file_contains(&expand(path), text).await,
             ProbeSpec::ShellRo { cmd } => run_read_only(cmd).await,
             _ => anyhow::bail!("not an OS probe"),

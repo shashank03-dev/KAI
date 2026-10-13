@@ -102,6 +102,13 @@ impl LocalState {
         self.hardware = Some(hw);
     }
 
+    /// Re-read the catalog (a model was pulled) and rank it again.
+    pub fn refresh_catalog(&mut self) {
+        if let Some(hw) = &self.hardware {
+            self.ranked = rank(&load_catalog(), hw);
+        }
+    }
+
     pub fn entry(&self, id: &str) -> Option<&ModelEntry> {
         self.ranked.iter().map(|r| &r.entry).find(|e| e.id == id)
     }

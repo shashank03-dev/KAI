@@ -95,6 +95,29 @@ struct Required {
     probe: Option<ProbeSpec>,
 }
 
+impl Required {
+    fn new(
+        id: String,
+        description: String,
+        probe: Option<ProbeSpec>,
+        refused: Option<String>,
+    ) -> Self {
+        Self {
+            rec: OutcomeRecord {
+                id,
+                description,
+                probe: probe.as_ref().map(ProbeSpec::label),
+                probe_refused: refused,
+                status: Status::Pending,
+                verified_at: None,
+                by: None,
+                evidence: Vec::new(),
+            },
+            probe,
+        }
+    }
+}
+
 /// The run's required outcomes.
 #[derive(Debug, Clone, Default)]
 pub struct Ledger {
@@ -140,8 +163,32 @@ impl Ledger {
     /// never drops its outcome: the outcome is kept without a probe and the
     /// reason is recorded, so a refused probe cannot switch the gate off.
     pub fn from_raw(raw: &[Value]) -> Self {
-        let mut items: Vec<Required> = Vec::new();
-        for v in raw.iter().take(MAX_OUTCOMES) {
+        let mut l = Self::default();
+        l.extend_raw(raw);
+        l
+    }
+
+    /// Outcomes Kai derived from the task itself (`crate::task_checks`):
+    /// (id, description, probe). They come first, so they always fit.
+    pub fn seed(&mut self, checks: Vec<(String, String, ProbeSpec)>) {
+        for (id, description, probe) in checks.into_iter().take(MAX_OUTCOMES) {
+            let taken: Vec<String> = self.items.iter().map(|i| i.rec.id.clone()).collect();
+            let id = clean_id(Some(&id), &taken, self.items.len() + 1);
+            self.items.push(Required::new(
+                id,
+                clip(&description, MAX_DESCRIPTION),
+                Some(probe),
+                None,
+            ));
+        }
+    }
+
+    /// Add the first reply's raw `outcomes` after any seeded ones, up to
+    /// [`MAX_OUTCOMES`] in all.
+    pub fn extend_raw(&mut self, raw: &[Value]) {
+        let room = MAX_OUTCOMES.saturating_sub(self.items.len());
+        let items = &mut self.items;
+        for v in raw.iter().take(room) {
             let Some(obj) = v.as_object() else { continue };
             let o: RawOutcome = serde_json::from_value(v.clone()).unwrap_or_default();
             let (probe, refused) = match obj.get("probe") {
@@ -163,23 +210,7 @@ impl Ledger {
             }
             let taken: Vec<String> = items.iter().map(|i| i.rec.id.clone()).collect();
             let id = clean_id(o.id.as_deref(), &taken, items.len() + 1);
-            items.push(Required {
-                rec: OutcomeRecord {
-                    id,
-                    description,
-                    probe: probe.as_ref().map(ProbeSpec::label),
-                    probe_refused: refused,
-                    status: Status::Pending,
-                    verified_at: None,
-                    by: None,
-                    evidence: Vec::new(),
-                },
-                probe,
-            });
-        }
-        Self {
-            items,
-            confirmed: Vec::new(),
+            items.push(Required::new(id, description, probe, refused));
         }
     }
 

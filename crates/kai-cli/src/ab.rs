@@ -58,6 +58,10 @@ pub struct Ab {
     /// every later step (docs/LONG_RUNS.md).
     #[arg(long)]
     pub memo: bool,
+    /// Accept "done" only when the output the task names exists (a file,
+    /// a folder shown in the file manager); docs/VERIFICATION.md.
+    #[arg(long)]
+    pub task_checks: bool,
 }
 
 impl Ab {
@@ -98,6 +102,9 @@ impl Ab {
         if self.memo {
             v.push("--memo");
         }
+        if self.task_checks {
+            v.push("--task-checks");
+        }
         v
     }
 }
@@ -120,6 +127,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.best_of = ab.best_of;
     config.recover = ab.recover;
     config.memo = ab.memo;
+    config.task_checks = ab.task_checks;
     Ok(true)
 }
 
@@ -173,5 +181,12 @@ mod tests {
         apply_ab(&mut c, &ab).unwrap();
         assert!(c.memo);
         assert_eq!(ab.changed(), vec!["--memo"]);
+        let ab = Ab {
+            task_checks: true,
+            ..Default::default()
+        };
+        apply_ab(&mut c, &ab).unwrap();
+        assert!(c.task_checks);
+        assert_eq!(ab.changed(), vec!["--task-checks"]);
     }
 }

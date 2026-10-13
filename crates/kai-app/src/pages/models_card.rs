@@ -275,6 +275,10 @@ pub fn card(r: &Ranked, l: &LocalState, in_use: bool, cx: &Context<KaiApp>) -> A
                 .flex_wrap()
                 .gap_2()
                 .child(computer_use(e))
+                .children(
+                    e.agent_trained
+                        .then(|| Badge::new("Made for computer use").tone(Tone::Success)),
+                )
                 .children(e.vision.then(|| Badge::new("Sees images").tone(Tone::Info)))
                 .children(l.is_installed(&e.id).then(|| Badge::new("Downloaded")))
                 .children(

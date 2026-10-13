@@ -21,6 +21,7 @@ mod onboarding;
 mod pages;
 mod runs;
 mod state;
+mod store;
 mod switcher;
 mod team;
 mod ui;

@@ -14,6 +14,7 @@ pub const SHOTS: &[&str] = &[
     "90-models-ranked",
     "91-models-downloading",
     "92-models-ready",
+    "93-models-store",
 ];
 
 fn hardware() -> HardwareSummary {
@@ -39,6 +40,7 @@ pub fn reset(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
     // Overlays from the previous shot (81 opens the shortcuts sheet).
     app.palette = false;
     app.shortcuts = false;
+    app.pages.store = Default::default();
     if app.settings.backend == BackendChoice::Local {
         app.settings.backend = BackendChoice::Both;
         app.settings.local_model.clear();
@@ -111,6 +113,29 @@ pub fn stage(app: &mut KaiApp, name: &str, window: &mut Window, cx: &mut Context
         }
         cx.notify();
     });
+    if name == "93-models-store" {
+        // One card, so the store card below it is in the frame.
+        app.local.update(cx, |l, _| {
+            l.ranked.retain(|r| r.entry.id == "holo-3.1-9b-q4")
+        });
+        app.pages.store.hits = [
+            "Hcompany/Holo4-35B-A3B-GGUF",
+            "bartowski/microsoft_Fara-7B-GGUF",
+        ]
+        .iter()
+        .zip([6029, 2904])
+        .map(|(repo, downloads)| kai_core::models::hub::SearchHit {
+            repo: repo.to_string(),
+            downloads,
+            likes: 0,
+        })
+        .collect();
+        app.pages.store.message = Some((
+            true,
+            "Added holo4-35b-a3b (Q4_K_M) (22.2 GB). It is untested with Kai; its card is below."
+                .into(),
+        ));
+    }
     if let Some(id) = use_it {
         app.settings.backend = BackendChoice::Local;
         app.settings.local_model = id;

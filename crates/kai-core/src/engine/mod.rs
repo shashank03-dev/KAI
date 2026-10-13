@@ -127,6 +127,7 @@ impl Engine<'_> {
     pub async fn run_with(&self, task: &str, opts: RunOptions<'_>) -> Trace {
         let decider = opts.executor.filter(|_| self.config.executor);
         let mut r = Run::new(task, &opts, decider);
+        self.ledger_seed(&mut r);
         self.executor_start(&mut r).await;
         let outcome = self.drive(&mut r, opts).await;
         self.finish_ledger(&mut r);

@@ -4,7 +4,7 @@
 
 use clap::Subcommand;
 use kai_core::models::hub::parse_ref;
-use kai_core::models::{Catalog, DEFAULT_PORT, Fit, ModelEntry, rank};
+use kai_core::models::{Catalog, DEFAULT_PORT, Fit, ModelEntry, Pulled, rank};
 use kai_core::settings::Settings;
 use kai_os::local::{Cancelled, LocalManager, LocalServer, Progress, detect_hardware, hub};
 use std::io::Write;
@@ -94,15 +94,13 @@ pub async fn run(cmd: ModelsCmd) -> anyhow::Result<ExitCode> {
         }
         ModelsCmd::Pull { repo, install: now } => {
             let e = hub::resolve(&parse_ref(&repo)?).await?;
-            if let Some(same) = cat.same_weights(&e).filter(|s| s.id != e.id) {
+            let path = Catalog::user_file();
+            if let Pulled::AlreadyHave(id) = cat.add_pulled(&path, &e)? {
                 println!(
-                    "These weights are already in the catalog as {}: kai models install {}",
-                    same.id, same.id
+                    "These weights are already in the catalog as {id}: kai models install {id}"
                 );
                 return Ok(ExitCode::SUCCESS);
             }
-            let path = Catalog::user_file();
-            Catalog::save_user_entry(&path, &e)?;
             println!(
                 "Added {} ({:.1} GB, {}) to {}",
                 e.id,

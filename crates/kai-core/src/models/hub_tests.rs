@@ -206,6 +206,10 @@ fn a_pull_of_curated_weights_finds_the_curated_entry() {
         .same_weights(&pulled)
         .map(|m| m.id.clone());
     assert_eq!(same.as_deref(), Some("holo4-35b-a3b-q4"));
+    let path = std::env::temp_dir().join(format!("kai-dup-{}/models.json", std::process::id()));
+    let got = Catalog::builtin().add_pulled(&path, &pulled).unwrap();
+    assert_eq!(got, super::Pulled::AlreadyHave("holo4-35b-a3b-q4".into()));
+    assert!(!path.exists(), "nothing written for a duplicate");
 }
 
 #[test]

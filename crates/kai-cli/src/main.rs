@@ -126,7 +126,7 @@ fn all_skills() -> Vec<Skill> {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    console::init();
     match run(Cli::parse()).await {
         Ok(code) => code,
         Err(e) => {

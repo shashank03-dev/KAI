@@ -27,5 +27,8 @@ jiff.workspace = true
 keyring.workspace = true
 tempfile = "3"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [lints.clippy]
 all = { level = "warn", priority = -1 }

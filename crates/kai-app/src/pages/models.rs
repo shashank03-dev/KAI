@@ -5,7 +5,7 @@
 use crate::app::{KaiApp, Page as AppPage};
 use crate::local::LocalState;
 use crate::local_api::{Fit, HardwareSummary};
-use crate::pages::models_card;
+use crate::pages::{models_card, models_store};
 use crate::ui;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
@@ -168,6 +168,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             ix,
         )
     });
+    let store = models_store::card(app, cx);
     let theme = cx.theme();
     let note = div()
         .text_size(theme.text_size(TextSize::Sm))
@@ -221,6 +222,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     .child("Use the DigitalOcean server, the Gemini API or the AI Gateway instead (Settings › Model & server).")
             }))
             .child(div().flex().flex_col().gap_3().children(cards))
+            .child(store)
             .child(note),
     ));
     div().size_full().child(page).children(confirm)

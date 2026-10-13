@@ -19,6 +19,12 @@ kai models install holo4-35b-a3b-q4_k_m
 kai bench --backend local --model holo4-35b-a3b-q4_k_m --out target/bench-holo4
 ```
 
+In the app: **Models › More from Hugging Face** has the same search and a
+*Pull* button per result. A pulled model gets its own card in the ranked
+list, and its Download button installs it like any other (`kai-app/src/store.rs`,
+`pages/models_store.rs`). Cards of models trained for computer use carry a
+*Made for computer use* badge.
+
 ## Design note (2026-10-13)
 
 **What.** Pulling an open model is one command and needs no code change.

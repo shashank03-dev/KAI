@@ -34,6 +34,7 @@ pub mod schema;
 pub mod settings;
 pub mod shell_ro;
 pub mod skill;
+pub mod task_checks;
 pub mod trace;
 pub mod untrusted;
 pub mod web;

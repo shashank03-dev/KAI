@@ -1,8 +1,11 @@
 name: Release
 
+# A `v*` tag builds, tests, packages and publishes. "Run workflow" by hand
+# does everything except publishing (a dry run of the release).
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,6 +32,8 @@ jobs:
             libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \
             libfontconfig-dev libdbus-1-dev libxdo-dev libxtst-dev libxrandr-dev libxi-dev \
             libgbm-dev libegl-dev libpipewire-0.3-dev libclang-dev
+      # CI is paused, so a release checks itself before it ships.
+      - run: cargo test --workspace --release
       - run: cargo build --release -p kai-app -p kai-cli
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -37,6 +42,15 @@ jobs:
           cp target/release/kai-app target/release/kai dist/kai/
           cp -r skills bench LICENSE README.md dist/kai/
           tar -C dist -czf ${{ matrix.archive }} kai
+          sha256sum ${{ matrix.archive }} > ${{ matrix.archive }}.sha256
+      - name: Smoke test the packaged CLI (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir smoke && tar -C smoke -xzf ${{ matrix.archive }}
+          cd smoke/kai
+          ./kai skill validate skills
+          ./kai models list
+          ./kai bench --backend mock --out ../bench
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -46,6 +60,29 @@ jobs:
           Copy-Item -Recurse skills, bench dist/kai/
           Copy-Item LICENSE, README.md dist/kai/
           Compress-Archive -Path dist/kai -DestinationPath ${{ matrix.archive }}
-      - uses: softprops/action-gh-release@v2
+          $h = (Get-FileHash ${{ matrix.archive }} -Algorithm SHA256).Hash.ToLower()
+          "$h  ${{ matrix.archive }}" | Out-File -Encoding ascii ${{ matrix.archive }}.sha256
+      - name: Smoke test the packaged CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Expand-Archive ${{ matrix.archive }} -DestinationPath smoke
+          Set-Location smoke/kai
+          ./kai.exe skill validate skills
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          ./kai.exe models list
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          ./kai.exe bench --backend mock --out ../bench
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
         with:
-          files: ${{ matrix.archive }}
+          name: ${{ matrix.archive }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256

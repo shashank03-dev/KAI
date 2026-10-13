@@ -52,7 +52,18 @@ model: remembering what it read. The run memo is that piece.
 3. **Run memo** (`docs/LONG_RUNS.md`): a scratchpad the model keeps across
    steps, behind `--memo` (off by default). Injection-looking memos are
    refused, and with the switch off the prompt is byte-stable.
-4. **Code health:** the four files over the 500-line rule were split by
+4. **Task checks** (`docs/VERIFICATION.md`, `--task-checks`, off): the
+   DONE gate reads the task's named output (a file, a folder in the file
+   manager) with no model call, against the main live failure, false
+   "done".
+5. **The store in the app:** Models › More from Hugging Face, with search
+   and Pull, and a *Made for computer use* badge on model cards.
+6. **Release workflow:** a tag now runs the full test suite first,
+   publishes SHA-256 files next to the archives, and smoke-tests the
+   unpacked CLI on Linux and Windows. "Run workflow" by hand is a dry run
+   that does not publish. `kai … | head` no longer panics on the closed
+   pipe.
+7. **Code health:** the four files over the 500-line rule were split by
    responsibility: prompt tests, human-check phrase tables, Skills page
    tests, and the window's pages and shortcuts (`kai-app/src/nav.rs`).
    There is no behaviour change.
@@ -75,17 +86,14 @@ Day 1, measure:
    `recommended` whatever matches Gemma 4 E4B's pass rate. This is what
    makes "Best for this computer" point at a model trained for computer use.
 
-Day 2, close the top failure and package:
+Day 2, decide the defaults and package:
 
-4. **False "done"** is the main failure left
-   (`DECISIONS.md`, real-world review). The gate to build first: when the
-   task names an output file or "show/open … in <app>", `done` needs that
-   file or window to exist (`docs/NEXT_SESSION_PROMPT.md` item 1).
-5. **The store in the app:** a search box and a *Pull* button on the Models
-   page, calling the same `kai_os::local::hub` functions the CLI uses.
-6. **Release:** run CI by hand (it is paused), build the Linux tarball and
-   the Windows zip, and smoke-test `kai doctor`, `kai models list` and one
-   `kai run` on each.
+4. **Task checks A/B** on live Gemma: `--task-checks` vs off, two runs
+   per side (built; see §2).
+5. **Release:** push a `v*` tag, or first "Run workflow" on Release for a
+   dry run. Then try one real `kai run` and the app's Models page on a
+   Windows machine: the Windows code is type-checked here but has never
+   run.
 
 What cannot be promised: measured accuracy for any model this session did
 not run. Every vendor score above is the vendor's. Kai's own numbers come

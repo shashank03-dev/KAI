@@ -10,6 +10,7 @@ pub mod memory;
 pub mod model_settings;
 pub mod models;
 pub mod models_card;
+pub mod models_store;
 pub mod panes;
 pub mod running;
 pub mod sessions;
@@ -64,6 +65,9 @@ pub struct PageState {
     pub lesson_draft: Entity<TextInput>,
     pub lessons: Vec<kai_core::Lesson>,
     pub memory_suggestions: Vec<kai_core::memory::promote::Suggestion>,
+    /// Models › More from Hugging Face: the search field and its results.
+    pub store_query: Entity<TextInput>,
+    pub store: crate::store::StoreState,
 }
 
 impl PageState {
@@ -112,6 +116,8 @@ impl PageState {
             lesson_draft: field("e.g. Save notes to ~/Notes", window, cx),
             lessons: Vec::new(),
             memory_suggestions: Vec::new(),
+            store_query: field("Search Hugging Face, e.g. holo, fara, gemma", window, cx),
+            store: Default::default(),
         }
     }
 

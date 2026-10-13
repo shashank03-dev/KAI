@@ -15,12 +15,31 @@ const MAX_ARG: usize = 200;
 /// One probe from the menu. Regexes are compiled once, case-insensitive.
 #[derive(Debug, Clone)]
 pub enum ProbeSpec {
-    FileExists { path: String },
-    FileContains { path: String, text: String },
-    A11yHas { role: String, name: String },
-    WindowTitle { pattern: regex::Regex },
-    UrlIs { pattern: regex::Regex },
-    ShellRo { cmd: ReadOnlyCmd },
+    FileExists {
+        path: String,
+    },
+    /// A folder, or a file with at least one byte. Kai's own task checks
+    /// use it (`crate::task_checks`); the model's menu does not offer it.
+    FileNotEmpty {
+        path: String,
+    },
+    FileContains {
+        path: String,
+        text: String,
+    },
+    A11yHas {
+        role: String,
+        name: String,
+    },
+    WindowTitle {
+        pattern: regex::Regex,
+    },
+    UrlIs {
+        pattern: regex::Regex,
+    },
+    ShellRo {
+        cmd: ReadOnlyCmd,
+    },
 }
 
 /// What a probe said.
@@ -119,6 +138,7 @@ impl ProbeSpec {
     pub fn label(&self) -> String {
         match self {
             Self::FileExists { path } => format!("file_exists({path})"),
+            Self::FileNotEmpty { path } => format!("file_not_empty({path})"),
             Self::FileContains { path, text } => format!("file_contains({path}, {text})"),
             Self::A11yHas { role, name } => format!("a11y_has({role}, {name})"),
             Self::WindowTitle { pattern } => format!("window_title({})", pattern.as_str()),
@@ -132,7 +152,10 @@ impl ProbeSpec {
     pub fn needs_os(&self) -> bool {
         matches!(
             self,
-            Self::FileExists { .. } | Self::FileContains { .. } | Self::ShellRo { .. }
+            Self::FileExists { .. }
+                | Self::FileNotEmpty { .. }
+                | Self::FileContains { .. }
+                | Self::ShellRo { .. }
         )
     }
 
