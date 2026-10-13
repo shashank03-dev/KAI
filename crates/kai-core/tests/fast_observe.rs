@@ -4,7 +4,7 @@
 mod common;
 use async_trait::async_trait;
 use common::*;
-use kai_core::engine::{CACHED, Verifier};
+use kai_core::engine::{CACHED, Observation, Perceptor, Verifier};
 use kai_core::*;
 use std::sync::atomic::Ordering;
 
@@ -124,6 +124,53 @@ async fn a_model_that_keeps_asking_for_a_refused_repeat_is_stopped() {
     let trace = e.run("x").await;
     assert_eq!(trace.outcome, Some(Outcome::AskedUser));
     assert!(client.count() <= 8, "{} model calls", client.count());
+}
+
+/// A menu that a click opens and the next click closes again.
+struct Toggling<'a>(&'a Screen);
+#[async_trait]
+impl Perceptor for Toggling<'_> {
+    async fn observe(&self) -> anyhow::Result<Observation> {
+        let mut o = self.0.observe().await?;
+        let open = self.0.frame.load(Ordering::SeqCst) % 2 == 1;
+        if let Grounding::Marks(els) = &mut o.grounding {
+            els[9].name = if open { "Menu open" } else { "Menu closed" }.into();
+        }
+        o.screen_hash = open as u64;
+        Ok(o)
+    }
+    async fn observe_tree_only(&self) -> anyhow::Result<Observation> {
+        self.observe().await
+    }
+}
+
+#[tokio::test]
+async fn two_steps_that_lead_back_to_the_same_screen_are_a_loop() {
+    // Seen live: open the Search menu, click the wrong item (which closes
+    // it), 19 times, until the step limit.
+    let open = r#"{"thought":"open the menu","action":"click","target":4,"risk":"none","expect":"menu open"}"#;
+    let pick = r#"{"thought":"pick the item","action":"click","target":8,"risk":"none","expect":"dialog"}"#;
+    let screen = Screen::marks();
+    let hands = Hands::new(&screen);
+    let (ap, stop) = (approve_all(), flag());
+    let replies: Vec<&str> = (0..30)
+        .map(|i| if i % 2 == 0 { open } else { pick })
+        .collect();
+    let client = Counting::new(&replies);
+    let toggling = Toggling(&screen);
+    let mut e = engine(&client, &screen, &hands, &ap, &stop);
+    e.perceptor = &toggling;
+    e.config.max_steps = 30;
+    let trace = e.run("x").await;
+    assert_eq!(trace.outcome, Some(Outcome::AskedUser));
+    assert!(client.count() <= 10, "{} model calls", client.count());
+    assert!(
+        client
+            .seen()
+            .iter()
+            .any(|s| s.text.contains("led back to the same screen")),
+        "the model was told"
+    );
 }
 
 struct FixedVerifier(f32);

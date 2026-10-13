@@ -198,6 +198,7 @@ impl Engine<'_> {
         r.no_progress_streak = 0;
         r.failure_streak = 0;
         r.last_sig = None;
+        r.list_before = None;
         r.grid_click = None;
         r.careful_next = false;
         None

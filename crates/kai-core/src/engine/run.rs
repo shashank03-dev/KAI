@@ -32,6 +32,9 @@ pub(super) struct Run<'t> {
     pub(super) step: u32,
     /// (screen hash, element-list hash, was tree-only) of the last observation.
     pub(super) last_sig: Option<(u64, u64, bool)>,
+    /// The element-list hash of the observation before that one, to see a
+    /// pair of steps that only leads back to where it started.
+    pub(super) list_before: Option<u64>,
     pub(super) no_progress_streak: u32,
     pub(super) failure_streak: u32,
     /// The next observation must include a screenshot.
@@ -97,6 +100,7 @@ impl<'t> Run<'t> {
             history: Vec::new(),
             step: 0,
             last_sig: None,
+            list_before: None,
             no_progress_streak: 0,
             failure_streak: 0,
             force_full: true,
