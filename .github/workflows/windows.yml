@@ -1,0 +1,77 @@
+# Kai on a real Windows machine (GitHub's windows-latest runner): clippy and
+# the full test suite, release binaries, a CLI smoke test, the desktop app
+# launched for real to photograph every screen (KAI_CAPTURE, light and dark),
+# and the bench's recorded replies driven on the real Windows desktop.
+# Manual only: Windows minutes cost more, so it never runs on a push.
+name: Windows check
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --release -p kai-app -p kai-cli
+      - name: CLI smoke test
+        shell: pwsh
+        run: |
+          $kai = "target\release\kai.exe"
+          & $kai skill validate skills
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $kai models list
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $kai bench --backend mock --out target/bench-mock
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Informational: what Kai can see and use on this machine.
+          & $kai doctor
+          "doctor exit $LASTEXITCODE"
+          exit 0
+      - name: Desktop app, every screen
+        shell: pwsh
+        env:
+          KAI_CAPTURE: ${{ github.workspace }}\shots
+          RUST_LOG: info
+        run: |
+          $p = Start-Process target\release\kai-app.exe -PassThru `
+            -RedirectStandardOutput app-out.log -RedirectStandardError app-err.log
+          if (-not $p.WaitForExit(900000)) {
+            Stop-Process -Id $p.Id -Force
+            "kai-app did not finish its screens in 15 minutes"
+            exit 1
+          }
+          $shots = @(Get-ChildItem shots -Filter *.png -ErrorAction SilentlyContinue)
+          "kai-app exit code $($p.ExitCode), $($shots.Count) screens"
+          if ($shots.Count -eq 0) { Get-Content app-err.log -Tail 40; exit 1 }
+      - name: Real desktop, recorded replies
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          target\release\kai.exe bench --backend replay --yes --out target/bench-replay
+          "replay exit $LASTEXITCODE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-check
+          path: |
+            shots/
+            app-out.log
+            app-err.log
+            target/bench-mock/
+            target/bench-replay/
+          if-no-files-found: warn
