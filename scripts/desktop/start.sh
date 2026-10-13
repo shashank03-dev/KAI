@@ -16,7 +16,13 @@ _kai_start() {
   local num="${disp#:}"
   mkdir -p "$dir/xdg" && chmod 700 "$dir/xdg"
 
-  _alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+  # Alive, and still the program it was (`$2`): after a container restart
+  # a saved PID can belong to something else, and openbox was then never
+  # started again.
+  _alive() {
+    [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null || return 1
+    [ -z "${2:-}" ] || ps -p "$1" -o args= 2>/dev/null | grep -q -- "$2"
+  }
   _pid() { cat "$dir/$1.pid" 2>/dev/null; }
 
   # 1. X server.
@@ -42,7 +48,7 @@ _kai_start() {
     # shellcheck disable=SC1091
     . "$dir/dbus.env"
   fi
-  if ! _alive "${DBUS_SESSION_BUS_PID:-}"; then
+  if ! _alive "${DBUS_SESSION_BUS_PID:-}" dbus-daemon; then
     dbus-launch --sh-syntax | grep -v '^#' >"$dir/dbus.env"
     # shellcheck disable=SC1091
     . "$dir/dbus.env"
@@ -72,7 +78,7 @@ _kai_start() {
   fi
 
   # 4. AT-SPI bus launcher (it starts the a11y bus and the registry daemon).
-  if ! _alive "$(_pid atspi)"; then
+  if ! _alive "$(_pid atspi)" at-spi; then
     /usr/libexec/at-spi-bus-launcher --launch-immediately \
       >"$dir/atspi.log" 2>&1 &
     echo $! >"$dir/atspi.pid"
@@ -86,7 +92,7 @@ _kai_start() {
     >/dev/null 2>&1 || true
 
   # 5. Window manager (focus, stacking, the "active" state AT-SPI reports).
-  if ! _alive "$(_pid openbox)"; then
+  if ! _alive "$(_pid openbox)" openbox; then
     openbox --sm-disable >"$dir/openbox.log" 2>&1 &
     echo $! >"$dir/openbox.pid"
     sleep 0.2

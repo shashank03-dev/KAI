@@ -8,6 +8,9 @@ use std::time::Duration;
 
 pub use crate::perceive::DesktopPerceptor;
 
+/// The longest wait for a started app or opened link to show a window.
+const LAUNCH_WAIT: Duration = Duration::from_secs(10);
+
 /// Mouse, keyboard, launcher and terminal.
 pub struct DesktopActuator {
     pub input: Input,
@@ -84,12 +87,24 @@ impl Actuator for DesktopActuator {
 
     async fn open_app(&self, app: &str) -> anyhow::Result<()> {
         let app = app.to_string();
-        tokio::task::spawn_blocking(move || launch::open_app(&app)).await?
+        tokio::task::spawn_blocking(move || {
+            let before = crate::window::shot();
+            launch::open_app(&app)?;
+            crate::window::wait_for_change(&before, LAUNCH_WAIT);
+            Ok(())
+        })
+        .await?
     }
 
     async fn open_url(&self, url: &str) -> anyhow::Result<()> {
         let url = url.to_string();
-        tokio::task::spawn_blocking(move || launch::open_url(&url)).await?
+        tokio::task::spawn_blocking(move || {
+            let before = crate::window::shot();
+            launch::open_url(&url)?;
+            crate::window::wait_for_change(&before, LAUNCH_WAIT);
+            Ok(())
+        })
+        .await?
     }
 
     async fn shell(&self, cmd: &str) -> anyhow::Result<String> {
@@ -104,6 +119,7 @@ impl Actuator for DesktopActuator {
         // (a GUI app never exits by itself): start it detached instead.
         #[cfg(target_os = "linux")]
         if crate::launch::linux::is_gui_command(cmd) {
+            let before = tokio::task::spawn_blocking(crate::window::shot).await?;
             std::process::Command::new("setsid")
                 .args(["-f", "sh", "-c", cmd])
                 .current_dir(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
@@ -111,6 +127,10 @@ impl Actuator for DesktopActuator {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()?;
+            tokio::task::spawn_blocking(move || {
+                crate::window::wait_for_change(&before, LAUNCH_WAIT)
+            })
+            .await?;
             return Ok(format!(
                 "started `{cmd}` as an app in the background (its window should open)\n[exit 0]"
             ));
