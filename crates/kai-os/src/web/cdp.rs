@@ -45,6 +45,19 @@ impl std::fmt::Display for DialogOpen {
 }
 impl std::error::Error for DialogOpen {}
 
+/// The tab the call was for closed while it waited: a click on a button
+/// that closes its own tab gets no reply. Calls on it end here instead of
+/// waiting out [`CALL_TIMEOUT`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TabGone;
+
+impl std::fmt::Display for TabGone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the tab closed")
+    }
+}
+impl std::error::Error for TabGone {}
+
 /// What the reader thread learned outside replies.
 #[derive(Default)]
 struct Shared {
@@ -52,6 +65,8 @@ struct Shared {
     dialogs: HashMap<String, Value>,
     /// Kept events: `(method, params, session)`.
     events: VecDeque<(String, Value, Option<String>)>,
+    /// Page sessions the browser detached (their tab closed).
+    gone: std::collections::HashSet<String>,
 }
 
 /// One browser process and the pipe to it. Dropping it closes the browser.
@@ -169,6 +184,12 @@ impl Cdp {
             {
                 self.lock_pending().remove(&id);
                 return Err(DialogOpen.into());
+            }
+            if let Some(s) = session
+                && self.lock_shared().gone.contains(s)
+            {
+                self.lock_pending().remove(&id);
+                return Err(TabGone.into());
             }
             let tick = (deadline - tokio::time::Instant::now()).min(DIALOG_POLL);
             match tokio::time::timeout(tick, &mut rx).await {
@@ -289,6 +310,12 @@ fn event(v: &Value, shared: &Mutex<Shared>) {
         }
         ("Page.javascriptDialogClosed", Some(s)) => {
             sh.dialogs.remove(&s);
+        }
+        ("Target.detachedFromTarget", _) => {
+            if let Some(s) = v["params"]["sessionId"].as_str() {
+                sh.dialogs.remove(s);
+                sh.gone.insert(s.to_string());
+            }
         }
         (m, s) if KEPT_EVENTS.contains(&m) => {
             if sh.events.len() >= MAX_EVENTS {

@@ -932,3 +932,12 @@ Still no model key and no GPU in this session, so there are no live numbers.
   and an `AXValue` fill (6.7 ms) in TextEdit read back from the tree, all 60
   app screens, replay 18/19 (the miss is `dark-mode`'s GNOME reply). No live
   model number on macOS is claimed.
+- **Two browser-lane races, found by the first release dry run** (Linux,
+  GitHub runner, 2026-10-15) and reproduced here with every core busy. (1)
+  `Input.insertText` can return before the page handles the text, so the
+  next step overtook it (leaving the page skipped its "unsaved changes"
+  prompt); typing now waits, at most 600 ms, until the focused element
+  holds the text. (2) A click on a button that closes its own tab got no
+  reply, so Kai waited 15 s and reported an error; calls on a detached
+  session now end at once, and the click counts as done. Browser tests
+  under full CPU load: 1 failure in 4 runs before, 0 in 8 after.

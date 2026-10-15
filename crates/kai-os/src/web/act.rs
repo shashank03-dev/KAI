@@ -2,7 +2,7 @@
 //! the user's pointer never moves and no window takes focus: Kai works in
 //! its browser while the user works elsewhere.
 
-use super::cdp::DialogOpen;
+use super::cdp::{DialogOpen, TabGone};
 use super::dialog::{self, DialogTarget};
 use super::keys::{self, Chord};
 use super::lane::{BrowserLane, MarkTarget};
@@ -14,6 +14,8 @@ use std::time::Duration;
 
 /// Longest a navigation may take before the step fails.
 const LOAD_LIMIT: Duration = Duration::from_secs(20);
+/// Longest wait for typed text to show in the focused element.
+const TYPED_WAIT: Duration = Duration::from_millis(600);
 
 /// An input call that a page dialog interrupted did its job: the click or
 /// key landed and the page answered with a dialog. The next observation
@@ -21,11 +23,45 @@ const LOAD_LIMIT: Duration = Duration::from_secs(20);
 fn landed(r: anyhow::Result<()>) -> anyhow::Result<()> {
     match r {
         Err(e) if e.downcast_ref::<DialogOpen>().is_some() => Ok(()),
+        // The action closed its own tab (a "Close" button): done; the next
+        // look hands over to another tab.
+        Err(e) if e.downcast_ref::<TabGone>().is_some() => Ok(()),
         r => r,
     }
 }
 
 impl BrowserLane {
+    /// Wait (at most [`TYPED_WAIT`]) until the focused element holds `text`.
+    /// `Input.insertText` can return before the page has handled the text,
+    /// and the next step (a navigation, a click on Send) then overtakes it:
+    /// seen on a slow CI runner, where leaving the page beat the page's own
+    /// `input` handler. Never fails the step: a rich editor that keeps its
+    /// text elsewhere just costs the wait. Only a yes/no comes back, never
+    /// the field's contents.
+    async fn wait_typed(&self, text: &str) {
+        let probe = format!(
+            "(() => {{ const e = document.activeElement; \
+             const v = e ? (e.value ?? e.textContent ?? '') : ''; \
+             return String(v).includes({}); }})()",
+            json!(text)
+        );
+        let deadline = tokio::time::Instant::now() + TYPED_WAIT;
+        while tokio::time::Instant::now() < deadline {
+            let r = self
+                .page(
+                    "Runtime.evaluate",
+                    json!({"expression": probe, "returnByValue": true}),
+                )
+                .await;
+            match r {
+                Ok(v) if v["result"]["value"] == json!(true) => return,
+                Ok(_) => tokio::time::sleep(Duration::from_millis(30)).await,
+                // A dialog the typing opened, or the page went away.
+                Err(_) => return,
+            }
+        }
+    }
+
     /// What `mark` stands for, if the latest observation numbered this same
     /// element (role, name and box match; its value and enabled state may
     /// have changed since, e.g. by Kai's own typing). `None` when the marks
@@ -320,9 +356,9 @@ impl Actuator for BrowserLane {
                         self.press(&["ctrl".to_string(), "a".to_string()]).await?;
                     }
                     let text = d.text.as_deref().unwrap_or("");
-                    self.page("Input.insertText", json!({"text": text}))
-                        .await
-                        .map(drop)
+                    self.page("Input.insertText", json!({"text": text})).await?;
+                    self.wait_typed(text).await;
+                    Ok(())
                 }
             },
             // Enter after choosing in a native dropdown (the engine sends it)
@@ -398,8 +434,9 @@ mod tests {
     }
 
     #[test]
-    fn an_input_interrupted_by_a_dialog_counts_as_done() {
+    fn an_input_interrupted_by_a_dialog_or_its_tab_closing_counts_as_done() {
         assert!(landed(Err(DialogOpen.into())).is_ok());
+        assert!(landed(Err(TabGone.into())).is_ok());
         assert!(landed(Err(anyhow::anyhow!("boom"))).is_err());
         assert!(landed(Ok(())).is_ok());
     }
