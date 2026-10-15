@@ -69,6 +69,7 @@ pub(super) struct Run<'t> {
     pub(super) mem: memory::Recalled,
     /// Human checks this run: handled ones, codes typed, time waited.
     pub(super) human: human::HumanState,
+    pub(super) privacy: super::privacy::Privacy,
     /// Required outcomes, gate refusals, and the OS probe port.
     pub(super) ledger: gate::LedgerState,
     pub(super) probe: Option<&'t dyn Probe>,
@@ -90,6 +91,7 @@ impl<'t> Run<'t> {
     pub(super) fn redact(&self, g: &mut crate::element::Grounding) {
         crate::human::redact(g, &self.human.codes);
         self.trace.typed_secrets.redact(g);
+        self.privacy.redact(g);
     }
 
     /// A fresh run of `task`. `decider`: the executor, when it is on.
@@ -125,6 +127,7 @@ impl<'t> Run<'t> {
             memory: opts.memory,
             mem: Default::default(),
             human: Default::default(),
+            privacy: Default::default(),
             ledger: Default::default(),
             probe: opts.probe,
             events_mark: None,

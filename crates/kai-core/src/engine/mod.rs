@@ -34,6 +34,7 @@ mod gate;
 mod human;
 mod memory;
 mod observe;
+mod privacy;
 mod procedure;
 mod record;
 mod recover;
@@ -251,6 +252,9 @@ impl Engine<'_> {
             }
         };
         let obs = &seen.obs;
+        if r.privacy.active() && matches!(obs.grounding, crate::Grounding::Grid { .. }) {
+            return Some(Outcome::AskedUser);
+        }
         let elements = obs.grounding.as_text();
         self.ledger_observe(r, step, obs);
 
@@ -263,7 +267,7 @@ impl Engine<'_> {
         self.sink.emit(&EngineEvent::Thinking { step });
         let mut notes = std::mem::take(&mut r.notes);
         notes.extend(r.plan_note.clone());
-        if std::mem::take(&mut r.read_page) {
+        if std::mem::take(&mut r.read_page) && !r.privacy.active() {
             let read = self.perceptor.page_text(crate::web::PAGE_TEXT_MAX).await;
             notes.push(crate::web::page_text_note(read));
         }
@@ -393,6 +397,7 @@ impl Engine<'_> {
         if self.interrupt.cancelled() {
             return Some(Outcome::Stopped);
         }
+        r.privacy.protect(&decision, &obs.grounding, false);
         let t_act = Instant::now();
         let guarded = act::reopen_guard(&mut r.opened, &decision)
             .or_else(|| act::repeat_guard(&r.history, &decision));
@@ -405,11 +410,13 @@ impl Engine<'_> {
         let (output, path) = match acted {
             Ok((o, p)) => (o, p),
             Err(e) => {
+                let e = if r.privacy.active() { "sensitive action failed".into() } else { e.to_string() };
                 log::error!("act failed at step {step}: {e}");
                 r.failure_streak += 1;
                 (Some(format!("ERROR: {e}")), "error")
             }
         };
+        let output = output.map(|text| r.privacy.text(&text));
         rec.timings.act_ms = t_act.elapsed().as_millis() as u64;
         self.sink.emit(&EngineEvent::Acted {
             step,

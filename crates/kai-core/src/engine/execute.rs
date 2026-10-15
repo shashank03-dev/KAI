@@ -265,6 +265,7 @@ impl Engine<'_> {
 
             // ---- Act ----
             let t_act = Instant::now();
+            r.privacy.protect(&decision, g, false);
             r.events_mark = self.perceptor.ui_events();
             let acted = match super::act::reopen_guard(&mut r.opened, &decision) {
                 Some(note) => Ok((Some(note), "none")),
@@ -279,6 +280,7 @@ impl Engine<'_> {
                 }
             };
             rec.timings.act_ms = t_act.elapsed().as_millis() as u64;
+            let output = output.map(|text| r.privacy.text(&text));
             self.sink.emit(&EngineEvent::Acted {
                 step,
                 timings: rec.timings,

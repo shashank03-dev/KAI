@@ -153,12 +153,13 @@ impl Engine<'_> {
     /// sensitive data Kai typed blanked out of the element list before
     /// anything (model, verifier, trace, UI) reads it.
     pub(super) async fn look(&self, r: &Run<'_>, tree_only: bool) -> anyhow::Result<Observation> {
-        let mut obs = if tree_only {
+        let mut obs = if tree_only || r.privacy.active() {
             self.perceptor.observe_tree_only().await?
         } else {
             self.perceptor.observe().await?
         };
         r.redact(&mut obs.grounding);
+        r.privacy.sanitise(&mut obs);
         Ok(obs)
     }
 
@@ -317,6 +318,7 @@ impl Engine<'_> {
 
         // ---- Zoomed crop after a grid click that changed nothing ----
         if no_progress
+            && !r.privacy.active()
             && let Some((cell, rect)) = r.grid_click.take()
             && let Some(crop) = self.perceptor.zoom(zoom_rect(rect, &obs.grounding)).await
         {

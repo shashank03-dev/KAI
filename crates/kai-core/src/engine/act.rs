@@ -205,6 +205,7 @@ impl Engine<'_> {
                 }
             }
             let t = Instant::now();
+            r.privacy.protect(d, &g, false);
             let (output, path) = match self.act(d, &g).await {
                 Ok(x) => x,
                 Err(e) => {
@@ -213,6 +214,7 @@ impl Engine<'_> {
                 }
             };
             self.perceptor.settle(Duration::from_secs(3)).await;
+            let output = output.map(|text| r.privacy.text(&text));
             let timings = Timings {
                 act_ms: t.elapsed().as_millis() as u64,
                 ..Default::default()

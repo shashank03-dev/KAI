@@ -93,6 +93,7 @@ impl Engine<'_> {
                 target: d.target.and_then(|t| grounding.target_rect(t)),
             });
             let t_act = Instant::now();
+            r.privacy.protect(d, &grounding, false);
             let result = match super::act::reopen_guard(&mut r.opened, d) {
                 Some(note) => Ok((Some(note), "none")),
                 None => self.act(d, &grounding).await,
@@ -106,6 +107,7 @@ impl Engine<'_> {
                     (Some(format!("ERROR: {e}")), "error", false)
                 }
             };
+            let output = output.map(|text| r.privacy.text(&text));
             self.sink.emit(&EngineEvent::Acted { step, timings });
             self.emit_output(step, d, output.as_deref());
             self.perceptor.settle(Duration::from_secs(3)).await;

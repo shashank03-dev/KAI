@@ -187,6 +187,9 @@ impl Engine<'_> {
         }
         r.human.blocked = 0;
         self.record_human(r, step, &check, result, wait);
+        if result == "code_type_failed" {
+            return Some(Outcome::AskedUser);
+        }
         r.history.push(HistoryItem::note(format!(
             "paused for the user ({}): {}",
             check.kind.as_str(),
@@ -272,6 +275,9 @@ impl Engine<'_> {
             target: obs.grounding.target_rect(mark),
         });
         let t_act = Instant::now();
+        r.privacy.protect(&typing, &obs.grounding, true);
+        // Even a partial input failure may leave the code on screen.
+        r.human.codes.push(code);
         let acted = self.act(&typing, &obs.grounding).await;
         drop(typing);
         let timings = Timings {
@@ -285,7 +291,6 @@ impl Engine<'_> {
         let result = match acted {
             Ok(_) => {
                 rec.verified = true;
-                r.human.codes.push(code);
                 r.notes.push(format!(
                     "Kai typed the verification code the user gave into \"{}\". Look again \
                      and carry on (for example press Verify or Continue).",
@@ -293,10 +298,10 @@ impl Engine<'_> {
                 ));
                 "code_typed"
             }
-            Err(e) => {
+            Err(_) => {
                 // The error never carries the code: actuators report the
                 // action kind and the OS error only.
-                log::error!("typing the user's code failed: {e}");
+                log::error!("typing the user's code failed");
                 r.notes.push(
                     "Kai could not type the code the user gave. If a code is still needed, \
                      Kai will ask the user again."
