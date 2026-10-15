@@ -45,7 +45,10 @@ echo "== mouse and keyboard: click the document, type"
 "$probe" mouse @textfield "kai mouse ok" | tee "$out/mouse.txt"
 got=$(doc_text)
 echo "document now: $got"
-[[ "$got" == *"kai mouse ok"* ]] || fail "typed text did not land (got: $got)"
+# TextEdit capitalises the first word as it is typed: compare without case
+# (macOS ships bash 3.2, so through tr).
+lower=$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')
+[[ "$lower" == *"kai mouse ok"* ]] || fail "typed text did not land (got: $got)"
 
 echo "== accessibility: fill an empty document"
 open_doc a11y
