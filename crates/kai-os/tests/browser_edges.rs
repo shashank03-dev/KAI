@@ -259,6 +259,15 @@ async fn file_pickers_are_reported_and_downloads_land_in_the_folder() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello from kai");
 }
 
+/// Whether any process's command line contains `pattern`.
+fn running(pattern: &str) -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-f", pattern])
+        .stdout(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dead_browser_and_a_busy_profile_fail_clearly() {
     let Some(browser) = find_browser() else {
@@ -286,12 +295,18 @@ async fn a_dead_browser_and_a_busy_profile_fail_clearly() {
 
     let lane = BrowserLane::launch(&opts, None).await.unwrap();
     lane.observe().await.unwrap();
-    // Kill the browser behind Kai's back.
+    // Kill the browser behind Kai's back, and wait until it is really gone:
+    // a busy Mac took more than the old fixed half second to shut Chrome
+    // down, so the browser was not dead yet when the clock below started.
+    let ours = format!("user-data-dir={}", profile.path().display());
     std::process::Command::new("pkill")
-        .args(["-f", &format!("user-data-dir={}", profile.path().display())])
+        .args(["-f", &ours])
         .status()
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let gone = Instant::now();
+    while gone.elapsed() < Duration::from_secs(10) && running(&ours) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     let t = Instant::now();
     let err = lane
         .observe()
