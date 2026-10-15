@@ -8,6 +8,7 @@
 
 pub mod best_of;
 pub mod client;
+pub mod computer;
 pub mod cua;
 pub mod element;
 pub mod engine;
