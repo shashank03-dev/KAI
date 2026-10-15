@@ -216,7 +216,11 @@ impl Engine<'_> {
         g: &crate::element::Grounding,
     ) -> ApprovalChoice {
         let t = Instant::now();
-        let choice = self.approver.approve(d, g).await;
+        let choice = tokio::select! {
+            biased;
+            () = crate::ports::wait_cancelled(self.interrupt) => ApprovalChoice::Stop,
+            choice = self.approver.approve(d, g) => choice,
+        };
         r.human.waited += t.elapsed();
         choice
     }
@@ -290,6 +294,9 @@ impl Engine<'_> {
         let decided = self
             .decide(client, system, &user_text, obs, schema, max_tokens)
             .await;
+        if self.interrupt.cancelled() {
+            return Some(Outcome::Stopped);
+        }
         r.step += 1;
         let decided = match decided {
             Ok(d) => d,
@@ -383,6 +390,9 @@ impl Engine<'_> {
         }
 
         // ---- Act ----
+        if self.interrupt.cancelled() {
+            return Some(Outcome::Stopped);
+        }
         let t_act = Instant::now();
         let guarded = act::reopen_guard(&mut r.opened, &decision)
             .or_else(|| act::repeat_guard(&r.history, &decision));

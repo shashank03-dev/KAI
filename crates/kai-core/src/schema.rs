@@ -134,7 +134,7 @@ impl Decision {
         if let Some(t) = &mut self.text
             && t.len() > MAX_TEXT_LEN
         {
-            t.truncate(MAX_TEXT_LEN);
+            t.truncate(t.floor_char_boundary(MAX_TEXT_LEN));
         }
 
         if let Some(a) = self.amount {
@@ -300,6 +300,21 @@ mod tests {
         let raw = format!(r#"{{"thought":"{long}","action":"done","risk":"none"}}"#);
         let d = Decision::parse_checked(&raw).unwrap();
         assert_eq!(d.thought.split_whitespace().count(), MAX_THOUGHT_WORDS);
+    }
+
+    #[test]
+    fn unicode_text_crossing_byte_limit_is_safely_bounded() {
+        for suffix in ["é", "界", "🦀"] {
+            for room in 1..suffix.len() {
+                let text = "a".repeat(8192 - room) + suffix;
+                let raw = serde_json::json!({
+                    "thought": "type", "action": "type", "target": 1,
+                    "text": text, "risk": "none"
+                });
+                let d = Decision::parse_checked(&raw.to_string()).unwrap();
+                assert_eq!(d.text.unwrap(), "a".repeat(8192 - room));
+            }
+        }
     }
 
     #[test]

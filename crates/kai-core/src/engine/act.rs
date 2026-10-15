@@ -105,6 +105,7 @@ impl Engine<'_> {
         decision: &Decision,
         grounding: &Grounding,
     ) -> anyhow::Result<(Option<String>, &'static str)> {
+        anyhow::ensure!(!self.interrupt.cancelled(), "run cancelled");
         let text = decision.text.as_deref().unwrap_or("");
         // Fast paths reach the OS directly, no grounding needed.
         match decision.action {
@@ -146,6 +147,7 @@ impl Engine<'_> {
                     enter.target = None;
                     enter.text = None;
                     enter.keys = vec!["enter".to_string()];
+                    anyhow::ensure!(!self.interrupt.cancelled(), "run cancelled");
                     self.actuator.act(&enter, grounding).await?;
                 }
                 Ok((None, path))

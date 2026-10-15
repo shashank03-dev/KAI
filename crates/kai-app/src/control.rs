@@ -91,6 +91,10 @@ impl RunControl {
 }
 
 impl Interrupt for RunControl {
+    fn cancelled(&self) -> bool {
+        self.stop_requested()
+    }
+
     fn stopped(&self) -> bool {
         if self.is_paused() && !self.stop_requested() {
             self.tell(true);

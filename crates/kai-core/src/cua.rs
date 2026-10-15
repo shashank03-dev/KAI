@@ -135,7 +135,17 @@ impl CuaRunner<'_> {
             }
             self.sink.emit(&EngineEvent::Thinking { step });
             let t_model = Instant::now();
-            let resp = match self.post(&http, &key, &body).await {
+            let response = tokio::select! {
+                biased;
+                () = crate::ports::wait_cancelled(self.interrupt) => {
+                    return Ok(self.end(trace, Outcome::Stopped, None, message));
+                }
+                response = self.post(&http, &key, &body) => response,
+            };
+            if self.interrupt.cancelled() {
+                return Ok(self.end(trace, Outcome::Stopped, None, message));
+            }
+            let resp = match response {
                 Ok(v) => v,
                 Err(e) => {
                     return Ok(self.end(trace, Outcome::Failed, Some(e.to_string()), message));

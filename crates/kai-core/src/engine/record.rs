@@ -132,7 +132,7 @@ impl Engine<'_> {
             max_tokens,
             temperature: 0.0,
         };
-        let reply = client.decide(&req).await?;
+        let reply = self.decision_request(client, &req).await?;
 
         match StepReply::parse_with_focus(&reply.raw, focused) {
             Ok(d) => Ok(Decided::new(d, &reply)),
@@ -169,12 +169,25 @@ impl Engine<'_> {
                     max_tokens: max_tokens.saturating_mul(8).max(REPAIR_MAX_TOKENS),
                     ..req
                 };
-                let reply2 = client.decide(&req2).await?;
+                let reply2 = self.decision_request(client, &req2).await?;
                 let mut d =
                     Decided::new(StepReply::parse_with_focus(&reply2.raw, focused)?, &reply2);
                 d.add_usage(&reply);
                 Ok(d)
             }
+        }
+    }
+
+    async fn decision_request(
+        &self,
+        client: &dyn ModelClient,
+        req: &ModelRequest<'_>,
+    ) -> anyhow::Result<ModelReply> {
+        anyhow::ensure!(!self.interrupt.cancelled(), "run cancelled");
+        tokio::select! {
+            biased;
+            () = crate::ports::wait_cancelled(self.interrupt) => anyhow::bail!("run cancelled"),
+            reply = client.decide(req) => Ok(reply?),
         }
     }
 }

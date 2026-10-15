@@ -165,6 +165,19 @@ pub enum ApprovalChoice {
 /// Lets the loop be stopped within one step (kill switch / interrupt button).
 pub trait Interrupt: Send + Sync {
     fn stopped(&self) -> bool;
+
+    /// Nonblocking cancellation query. Pausable controls override this so
+    /// racing an in-flight operation never blocks an async worker on pause.
+    fn cancelled(&self) -> bool {
+        self.stopped()
+    }
+}
+
+/// Cancellation polling for operations whose ports do not expose a wakeup.
+pub async fn wait_cancelled(interrupt: &dyn Interrupt) {
+    while !interrupt.cancelled() {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// A no-op interrupt for headless runs.
