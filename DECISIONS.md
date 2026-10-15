@@ -927,7 +927,8 @@ Still no model key and no GPU in this session, so there are no live numbers.
   was trusted (the tree is now read from the frontmost app's pid); the
   bench's server script used `setsid`; the bench saw no display or browser
   on a Mac; a killed browser could leave a call waiting on its timeout
-  (calls now watch the process). Run 2: tree read 20 ms, click-and-type in
-  TextEdit read back from the tree, all 60 app screens, replay 18/19 (the
-  miss is `dark-mode`'s GNOME reply). No live model number on macOS is
-  claimed.
+  (calls now watch the process); the AX fill required an `AXEnabled` that
+  text views do not report. Run 5, all green: tree read 10 ms, click-and-type
+  and an `AXValue` fill (6.7 ms) in TextEdit read back from the tree, all 60
+  app screens, replay 18/19 (the miss is `dark-mode`'s GNOME reply). No live
+  model number on macOS is claimed.

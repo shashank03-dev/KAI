@@ -145,10 +145,13 @@ replies on the real desktop. The first runs (2026-10-15) found and fixed:
 - After the browser was killed, a call could wait for its timeout because
   Chrome's helpers kept the pipe open; calls now also watch the process.
 - Home showed "Ctrl K" for a shortcut that is ⌘K on a Mac.
+- The accessibility fill declined on TextEdit's document: text views report
+  no `AXEnabled`, and the actor required one.
 
-Measured there (run 2, before the last fixes): the tree read of a TextEdit
-window took 20 ms (14 nodes); Kai clicked the document and typed, and the
-tree read the text back; the app drew all 60 screens in both themes;
+Measured there (run 5, all green): the tree read of a TextEdit window took
+10 ms (14 nodes); Kai clicked the document and typed through the mouse and
+keyboard, and filled an empty document through `AXValue` in 6.7 ms, each
+read back from the tree; the app drew all 60 screens in both themes;
 replay passed 18 of 19 tasks. The one failure is `dark-mode`, whose
 recorded reply is the GNOME command.
 
