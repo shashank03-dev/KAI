@@ -13,14 +13,16 @@ use std::ptr::NonNull;
 
 pub fn act(node: &AxRef, plan: &Plan, role: Role) -> anyhow::Result<bool> {
     let el = &*node.0;
-    // Live checks: the element may be gone or disabled since the observation,
-    // and a secure field is never filled or pressed this way.
-    let Some(enabled) = attr(el, "AXEnabled").and_then(|v| boolean(&v)) else {
+    // Live checks: the element may be gone (no role) or disabled since the
+    // observation, and a secure field is never filled or pressed this way.
+    // Text views report no `AXEnabled` at all (TextEdit's, seen on macOS
+    // 15): missing means enabled, as in the tree read.
+    let Some(role_now) = attr(el, "AXRole").and_then(|v| string(&v)) else {
         return Ok(false);
     };
-    let role_now = attr(el, "AXRole")
-        .and_then(|v| string(&v))
-        .unwrap_or_default();
+    let enabled = attr(el, "AXEnabled")
+        .and_then(|v| boolean(&v))
+        .unwrap_or(true);
     let subrole = attr(el, "AXSubrole")
         .and_then(|v| string(&v))
         .unwrap_or_default();
