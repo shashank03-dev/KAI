@@ -6,9 +6,10 @@
 //! cargo run -p kai-os --example probe -- a11y "<name>" [text]   # accessibility-first action
 //! cargo run -p kai-os --example probe -- mouse "<name>" [text]  # the mouse/keyboard path
 //! cargo run -p kai-os --example probe -- zoom "<name>" OUT.jpg
+//! cargo run -p kai-os --example probe -- value "<name>"          # print a field's text
 //! ```
 //! `<name>` picks the first mark whose name contains it (case-insensitive),
-//! or `#N` picks mark N;
+//! `#N` picks mark N, and `@role` the first mark of that role (`@textfield`);
 //! with `text` the action is `type`, otherwise `click`.
 
 use kai_core::{Actuator, Decision, Grounding, Perceptor};
@@ -56,7 +57,7 @@ async fn tree(n: usize) -> anyhow::Result<()> {
 /// Assumes the primary display sits at (0,0), as on Xvfb.
 async fn frames(out: Option<String>) -> anyhow::Result<()> {
     let m = xcap::Monitor::all()?.into_iter().next().unwrap();
-    let img = m.capture_image()?;
+    let img = frame::to_display(m.capture_image()?, m.width()?, m.height()?);
     let (w, h) = img.dimensions();
     let screen = kai_core::Rect::new(0.0, 0.0, w as f32, h as f32);
     let grounding = kai_os::a11y::ground(&kai_os::a11y::read_tree().await, screen);
@@ -113,8 +114,13 @@ async fn find(p: &kai_os::DesktopPerceptor, name: &str) -> anyhow::Result<(Groun
     let o = p.observe().await?;
     let needle = name.to_lowercase();
     let by_number = name.strip_prefix('#').and_then(|n| n.parse::<u32>().ok());
+    let by_role = name.strip_prefix('@');
     let mark = match &o.grounding {
         Grounding::Marks(_) if by_number.is_some() => by_number,
+        Grounding::Marks(els) if by_role.is_some() => els
+            .iter()
+            .find(|e| Some(e.role.label()) == by_role)
+            .map(|e| e.mark),
         Grounding::Marks(els) => els
             .iter()
             .find(|e| e.name.to_lowercase().contains(&needle))
@@ -170,6 +176,15 @@ async fn act(a11y: bool, name: &str, text: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Print the text a field holds now, as the accessibility tree reports it.
+async fn value(name: &str) -> anyhow::Result<()> {
+    let p = kai_os::DesktopPerceptor::new();
+    let (g, mark) = find(&p, name).await?;
+    let v = g.element(mark).and_then(|e| e.value.clone());
+    println!("value #{mark}: {}", v.unwrap_or_default());
+    Ok(())
+}
+
 async fn zoom(name: &str, out: &str) -> anyhow::Result<()> {
     let p = kai_os::DesktopPerceptor::new();
     let (g, mark) = find(&p, name).await?;
@@ -196,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
         Some("a11y") => act(true, arg(1).unwrap_or(""), arg(2)).await,
         Some("mouse") => act(false, arg(1).unwrap_or(""), arg(2)).await,
         Some("zoom") => zoom(arg(1).unwrap_or(""), arg(2).unwrap_or("zoom.jpg")).await,
-        _ => anyhow::bail!("usage: probe tree|frames|a11y|mouse|zoom ..."),
+        Some("value") => value(arg(1).unwrap_or("")).await,
+        _ => anyhow::bail!("usage: probe tree|frames|a11y|mouse|zoom|value ..."),
     }
 }

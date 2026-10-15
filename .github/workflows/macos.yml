@@ -1,0 +1,85 @@
+# Kai on a real Mac (GitHub's macos-15 runner, Apple Silicon): clippy and
+# the full test suite, Kai.app built, signed and smoke-tested by
+# scripts/macos/bundle.sh, a live eyes-and-hands check in TextEdit
+# (scripts/macos/live_check.sh), the desktop app launched for real to
+# photograph every screen (KAI_CAPTURE, light and dark), and the bench's
+# recorded replies driven on the real macOS desktop. Manual, plus pushes to
+# the session branch that brought up macOS (session dispatch is refused).
+name: macOS check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-3439f58f-2dk3ra]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Machine
+        run: sw_vers; uname -m; sysctl -n machdep.cpu.brand_string hw.memsize; system_profiler SPDisplaysDataType | sed -n '1,30p'
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: Kai.app (build, sign, smoke test)
+        run: scripts/macos/bundle.sh
+      - name: CLI smoke test
+        run: |
+          kai=dist/Kai.app/Contents/MacOS/kai
+          "$kai" bench --backend mock --out target/bench-mock
+          # Informational: what Kai can see and use on this machine.
+          "$kai" doctor || echo "doctor exit $?"
+      - name: Live eyes and hands (TextEdit)
+        id: live
+        continue-on-error: true
+        env:
+          RUST_LOG: info
+        run: scripts/macos/live_check.sh target/mac-live
+      - name: Desktop app, every screen
+        env:
+          KAI_CAPTURE: ${{ github.workspace }}/shots
+          RUST_LOG: info
+        run: |
+          app=dist/Kai.app/Contents/MacOS/kai-app
+          "$app" > app-out.log 2> app-err.log &
+          pid=$!
+          for _ in $(seq 900); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then
+            kill $pid; echo "kai-app did not finish its screens in 15 minutes"; exit 1
+          fi
+          wait $pid && code=0 || code=$?
+          n=$(ls shots/*.png 2>/dev/null | wc -l | tr -d ' ')
+          echo "kai-app exit code $code, $n screens"
+          [ "$n" -gt 0 ] || { tail -40 app-err.log; exit 1; }
+      - name: Real desktop, recorded replies
+        continue-on-error: true
+        run: |
+          dist/Kai.app/Contents/MacOS/kai bench --backend replay --yes --out target/bench-replay
+          echo "replay exit $?"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-check
+          path: |
+            shots/
+            app-out.log
+            app-err.log
+            target/mac-live/
+            target/bench-mock/
+            target/bench-replay/
+          if-no-files-found: warn
+      - name: Live check verdict
+        if: steps.live.outcome == 'failure'
+        run: echo "the live eyes-and-hands check failed; see its step log" && exit 1
