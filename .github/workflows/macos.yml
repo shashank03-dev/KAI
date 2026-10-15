@@ -3,14 +3,12 @@
 # scripts/macos/bundle.sh, a live eyes-and-hands check in TextEdit
 # (scripts/macos/live_check.sh), the desktop app launched for real to
 # photograph every screen (KAI_CAPTURE, light and dark), and the bench's
-# recorded replies driven on the real macOS desktop. Manual, plus pushes to
-# the session branch that brought up macOS (session dispatch is refused).
+# recorded replies driven on the real macOS desktop. Manual only: macOS
+# minutes cost more, so it never runs on a push.
 name: macOS check
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ccr-3439f58f-2dk3ra]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
