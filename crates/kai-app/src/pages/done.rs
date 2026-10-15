@@ -301,9 +301,9 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             ))
             .child(ui::hints(
                 &[
-                    (&["Ctrl", "R"], "run again"),
-                    (&["Ctrl", "N"], "new task"),
-                    (&["Alt", "↑↓"], "other tasks"),
+                    (&[ui::MOD_KEY, "R"], "run again"),
+                    (&[ui::MOD_KEY, "N"], "new task"),
+                    (&[ui::ALT_KEY, "↑↓"], "other tasks"),
                 ],
                 cx,
             ))

@@ -157,6 +157,21 @@ pub fn mono(text: impl Into<SharedString>, color: Hsla, cx: &App) -> Div {
         .child(text.into())
 }
 
+/// The key that app shortcuts use: ⌘ on a Mac, Ctrl elsewhere (gpui's
+/// `secondary`).
+pub const MOD_KEY: &str = if cfg!(target_os = "macos") {
+    "⌘"
+} else {
+    "Ctrl"
+};
+
+/// The Alt key as its keyboard labels it: ⌥ on a Mac.
+pub const ALT_KEY: &str = if cfg!(target_os = "macos") {
+    "⌥"
+} else {
+    "Alt"
+};
+
 /// A key cap: "Ctrl", "K", "↵".
 pub fn kbd(key: impl Into<SharedString>, cx: &App) -> Div {
     let g = Glass::of(cx);

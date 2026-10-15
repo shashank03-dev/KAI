@@ -60,6 +60,7 @@ impl Machine {
                     .map(|(_, v)| v.trim().to_string())
             })
             .or_else(|| env("PROCESSOR_IDENTIFIER"))
+            .or_else(|| cmd("sysctl", &["-n", "machdep.cpu.brand_string"]))
             .unwrap_or_else(|| "unknown".into());
         let os = read("/etc/os-release")
             .and_then(|t| {
@@ -67,12 +68,15 @@ impl Machine {
                     .find_map(|l| l.strip_prefix("PRETTY_NAME="))
                     .map(|v| v.trim_matches('"').to_string())
             })
+            .or_else(|| cmd("sw_vers", &["-productVersion"]).map(|v| format!("macOS {v}")))
             .unwrap_or_else(|| std::env::consts::OS.to_string());
         let kernel = read("/proc/sys/kernel/osrelease")
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
         let display = if cfg!(windows) {
             "windows".to_string()
+        } else if cfg!(target_os = "macos") {
+            "macos".to_string()
         } else {
             let session = env("XDG_SESSION_TYPE").unwrap_or_else(|| {
                 if env("WAYLAND_DISPLAY").is_some() {

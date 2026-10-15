@@ -1,7 +1,7 @@
 //! The window's pages and keyboard shortcuts: the actions, their chords and
 //! the page each one opens. The main window (`app.rs`) handles them.
 
-use gpui::{App, KeyBinding, actions};
+use gpui::{App, KeyBinding, Menu, MenuItem, actions};
 
 actions!(
     kai,
@@ -20,31 +20,39 @@ actions!(
         NextTask,
         PrevTask,
         TogglePause,
-        RetryRun
+        RetryRun,
+        Quit
     ]
 );
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("ctrl-k", OpenPalette, Some("KaiRoot")),
-        KeyBinding::new("ctrl-/", ShowShortcuts, Some("KaiRoot")),
+        KeyBinding::new("secondary-k", OpenPalette, Some("KaiRoot")),
+        KeyBinding::new("secondary-/", ShowShortcuts, Some("KaiRoot")),
         KeyBinding::new("f1", ShowShortcuts, Some("KaiRoot")),
-        KeyBinding::new("ctrl-.", StopRun, Some("KaiRoot")),
-        KeyBinding::new("ctrl-n", NewTask, Some("KaiRoot")),
-        KeyBinding::new("ctrl-shift-l", ToggleTheme, Some("KaiRoot")),
+        KeyBinding::new("secondary-.", StopRun, Some("KaiRoot")),
+        KeyBinding::new("secondary-n", NewTask, Some("KaiRoot")),
+        KeyBinding::new("secondary-shift-l", ToggleTheme, Some("KaiRoot")),
+        // `secondary` is ⌘ on a Mac and Ctrl elsewhere.
         // Keyboard-first, like Linear and Superhuman: every page one chord
         // away, tasks walkable without the mouse.
-        KeyBinding::new("ctrl-1", GoRun, Some("KaiRoot")),
-        KeyBinding::new("ctrl-2", GoModels, Some("KaiRoot")),
-        KeyBinding::new("ctrl-3", GoSkills, Some("KaiRoot")),
-        KeyBinding::new("ctrl-4", GoHistory, Some("KaiRoot")),
-        KeyBinding::new("ctrl-5", GoBench, Some("KaiRoot")),
-        KeyBinding::new("ctrl-,", GoSettings, Some("KaiRoot")),
+        KeyBinding::new("secondary-1", GoRun, Some("KaiRoot")),
+        KeyBinding::new("secondary-2", GoModels, Some("KaiRoot")),
+        KeyBinding::new("secondary-3", GoSkills, Some("KaiRoot")),
+        KeyBinding::new("secondary-4", GoHistory, Some("KaiRoot")),
+        KeyBinding::new("secondary-5", GoBench, Some("KaiRoot")),
+        KeyBinding::new("secondary-,", GoSettings, Some("KaiRoot")),
         KeyBinding::new("alt-down", NextTask, Some("KaiRoot")),
         KeyBinding::new("alt-up", PrevTask, Some("KaiRoot")),
-        KeyBinding::new("ctrl-p", TogglePause, Some("KaiRoot")),
-        KeyBinding::new("ctrl-r", RetryRun, Some("KaiRoot")),
+        KeyBinding::new("secondary-p", TogglePause, Some("KaiRoot")),
+        KeyBinding::new("secondary-r", RetryRun, Some("KaiRoot")),
     ]);
+    // A Mac app is quit from its menu bar (⌘Q), not by closing its window.
+    if cfg!(target_os = "macos") {
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.set_menus([Menu::new("Kai").items([MenuItem::action("Quit Kai", Quit)])]);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -350,8 +350,11 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .child(ui::hints(
                     &[
                         (&["↵"], "send to Kai"),
-                        (&["Ctrl", "P"], if r.paused { "resume" } else { "pause" }),
-                        (&["Ctrl", "."], "stop"),
+                        (
+                            &[ui::MOD_KEY, "P"],
+                            if r.paused { "resume" } else { "pause" },
+                        ),
+                        (&[ui::MOD_KEY, "."], "stop"),
                     ],
                     cx,
                 )),

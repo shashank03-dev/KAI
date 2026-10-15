@@ -37,7 +37,14 @@ impl KaiApp {
         let queued = self.queued_count(cx);
         let (stop_keys, stop_label) = match crate::StopHotkey::label(cx) {
             Some(k) => (Some(KbdCombo::new(&k)), "stops Kai"),
-            None => (None, "Stop: top-left corner or Ctrl+."),
+            None => (
+                None,
+                if cfg!(target_os = "macos") {
+                    "Stop: top-left corner or ⌘."
+                } else {
+                    "Stop: top-left corner or Ctrl+."
+                },
+            ),
         };
         let switcher = crate::switcher::switcher("status-model", self, cx);
         let this = cx.entity();
@@ -86,27 +93,27 @@ impl KaiApp {
         };
         // Run controls only while a run has the screen, and only the one that applies.
         let paused = self.active_state().map(|s| s.read(cx).paused);
-        let mut kai = vec![cmd("new", "New task", IconName::Plus, Some("ctrl-n"))];
+        let mut kai = vec![cmd("new", "New task", IconName::Plus, Some("secondary-n"))];
         if let Some(paused) = paused {
             kai.push(cmd(
                 "stop",
                 "Stop Kai",
                 IconName::CircleStop,
-                Some("ctrl-."),
+                Some("secondary-."),
             ));
             kai.push(if paused {
                 cmd(
                     "resume",
                     "Resume the running task",
                     IconName::Play,
-                    Some("ctrl-p"),
+                    Some("secondary-p"),
                 )
             } else {
                 cmd(
                     "pause",
                     "Pause the running task",
                     IconName::Pause,
-                    Some("ctrl-p"),
+                    Some("secondary-p"),
                 )
             });
         }
@@ -115,13 +122,13 @@ impl KaiApp {
                 "theme",
                 "Toggle light / dark",
                 IconName::Moon,
-                Some("ctrl-shift-l"),
+                Some("secondary-shift-l"),
             ),
             cmd(
                 "shortcuts",
                 "Keyboard shortcuts",
                 IconName::Keyboard,
-                Some("ctrl-/"),
+                Some("secondary-/"),
             ),
         ]);
         CommandPalette::new("palette", move |_, cx| {
@@ -134,26 +141,31 @@ impl KaiApp {
         .group(
             "Go to",
             [
-                cmd("go:run", "Run", IconName::Play, Some("ctrl-1")),
+                cmd("go:run", "Run", IconName::Play, Some("secondary-1")),
                 cmd(
                     "go:models",
                     "Models (run on this computer)",
                     IconName::Cpu,
-                    Some("ctrl-2"),
+                    Some("secondary-2"),
                 ),
-                cmd("go:skills", "Skills", IconName::Puzzle, Some("ctrl-3")),
-                cmd("go:history", "History", IconName::History, Some("ctrl-4")),
+                cmd("go:skills", "Skills", IconName::Puzzle, Some("secondary-3")),
+                cmd(
+                    "go:history",
+                    "History",
+                    IconName::History,
+                    Some("secondary-4"),
+                ),
                 cmd(
                     "go:bench",
                     "Benchmarks",
                     IconName::ChartColumn,
-                    Some("ctrl-5"),
+                    Some("secondary-5"),
                 ),
                 cmd(
                     "go:settings",
                     "Settings",
                     IconName::Settings,
-                    Some("ctrl-,"),
+                    Some("secondary-,"),
                 ),
             ],
         )

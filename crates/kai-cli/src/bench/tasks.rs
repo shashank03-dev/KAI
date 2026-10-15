@@ -193,10 +193,11 @@ pub fn browser_path() -> Option<String> {
 
 fn probe_need(need: &str) -> bool {
     match need {
-        // Windows always ships a browser and a desktop session.
-        "browser" => cfg!(windows) || browser_path().is_some(),
+        // Windows and macOS always ship a browser (Edge, Safari) and a
+        // desktop session.
+        "browser" => desktop_os() || browser_path().is_some(),
         "display" => {
-            cfg!(windows)
+            desktop_os()
                 || std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
                 || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty())
         }
@@ -208,6 +209,11 @@ fn probe_need(need: &str) -> bool {
         "imagemagick" => on_path("convert") && on_path("identify"),
         _ => false,
     }
+}
+
+/// An OS that always has a desktop session and a browser.
+fn desktop_os() -> bool {
+    cfg!(any(windows, target_os = "macos"))
 }
 
 /// A quick TCP connect to a well-known host (through no proxy: the browser
