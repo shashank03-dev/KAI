@@ -68,7 +68,7 @@ impl RunMeta {
             backend: backend.into(),
             model: model.into(),
             kai_version: env!("CARGO_PKG_VERSION").to_string(),
-            os: if cfg!(windows) { "windows" } else { "linux" }.to_string(),
+            os: std::env::consts::OS.to_string(),
             screen: None,
             started: jiff::Zoned::now().to_string(),
             check: None,

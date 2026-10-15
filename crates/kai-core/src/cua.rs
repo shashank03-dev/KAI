@@ -38,13 +38,24 @@ pub struct CuaConfig {
     pub timeout: Duration,
 }
 
+/// The computer-use tool's `environment`: `windows`, `mac` or `linux`.
+fn cua_environment() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "mac"
+    } else {
+        "linux"
+    }
+}
+
 impl Default for CuaConfig {
     fn default() -> Self {
         Self {
             base: crate::client::OPENAI_BASE.to_string(),
             api_key: None,
             model: "computer-use-preview".to_string(),
-            environment: if cfg!(windows) { "windows" } else { "linux" }.to_string(),
+            environment: cua_environment().to_string(),
             max_steps: 40,
             max_time: Duration::from_secs(600),
             timeout: Duration::from_secs(60),
