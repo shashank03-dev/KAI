@@ -7,10 +7,12 @@
 use super::RawNode;
 use super::macos_roles::{child_clip, in_clip, map_role, pick_name};
 use kai_core::{Rect, Role};
+use objc2_app_kit::NSWorkspace;
 use objc2_application_services::{
     AXCopyMultipleAttributeOptions, AXError, AXUIElement, AXValue, AXValueType,
 };
 use objc2_core_foundation::{CFArray, CFBoolean, CFRetained, CFString, CFType, CGPoint, CGSize};
+use objc2_foundation::{NSNumber, NSString};
 use std::ptr::NonNull;
 use std::time::Instant;
 
@@ -70,14 +72,17 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
     // so no single call can wait on a hung app for long.
     let system = unsafe { AXUIElement::new_system_wide() };
     unsafe { system.set_messaging_timeout(MESSAGING_TIMEOUT) };
-    let app = attr(&system, "AXFocusedApplication")
-        .and_then(element)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no frontmost app to read: allow Kai under System Settings › \
-                 Privacy & Security › Accessibility"
-            )
-        })?;
+    let app = frontmost_pid()
+        // SAFETY: creating an app element from a pid has no preconditions.
+        .map(|pid| unsafe { AXUIElement::new_application(pid) })
+        .or_else(|| attr(&system, "AXFocusedApplication").and_then(element))
+        .ok_or_else(|| anyhow::anyhow!("no frontmost app to read"))?;
+    if !trusted() {
+        anyhow::bail!(
+            "not allowed to read other apps: allow Kai under System Settings › \
+             Privacy & Security › Accessibility"
+        );
+    }
     // SAFETY: a plain setter on a live element. Electron apps (Slack, VS
     // Code, Discord) build their tree only once a client sets
     // `AXManualAccessibility`; other apps ignore it.
@@ -107,6 +112,24 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
         walk.run(bar);
     }
     Ok(walk.out)
+}
+
+/// The frontmost app's process id, read now. `activeApplication` is
+/// deprecated, but `frontmostApplication` only updates in a process that
+/// runs an AppKit event loop, which the `kai` command line does not (xcap
+/// reads it the same way). The system-wide `AXFocusedApplication` was seen
+/// failing on a Mac where Kai was trusted (GitHub's macos-15, 2026-10-15).
+#[allow(deprecated)]
+fn frontmost_pid() -> Option<i32> {
+    let key = NSString::from_str("NSApplicationProcessIdentifier");
+    let app = NSWorkspace::sharedWorkspace().activeApplication()?;
+    let pid = app.valueForKey(&key)?.downcast::<NSNumber>().ok()?;
+    Some(pid.intValue())
+}
+
+fn trusted() -> bool {
+    // SAFETY: no arguments, no preconditions.
+    unsafe { objc2_application_services::AXIsProcessTrusted() }
 }
 
 struct Walk<'a> {

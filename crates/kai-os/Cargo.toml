@@ -42,6 +42,9 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsA
 objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "HIServices", "AXUIElement", "AXError", "AXValue", "libc"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFCGTypes", "CFDictionary", "CFNumber", "CFString"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow"] }
+# Same versions and features as xcap, so nothing extra is built.
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 atspi = { version = "0.30", features = ["proxies", "connection", "tokio"] }

@@ -4,27 +4,33 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// A command per OS. Missing means "not available on this OS".
+/// A command per OS. Missing means "not available on this OS". `linux` is
+/// POSIX shell, so a Mac runs it too unless the task gives a `macos` one.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PerOs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linux: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macos: Option<String>,
 }
 
 impl PerOs {
     pub fn is_empty(&self) -> bool {
-        self.linux.is_none() && self.windows.is_none()
+        self.linux.is_none() && self.windows.is_none() && self.macos.is_none()
     }
-}
 
-impl PerOs {
     pub fn here(&self) -> Option<&str> {
-        if cfg!(windows) {
-            self.windows.as_deref()
-        } else {
-            self.linux.as_deref()
+        self.for_os(std::env::consts::OS)
+    }
+
+    /// The command for `os` (`linux`, `windows`, `macos`).
+    pub fn for_os(&self, os: &str) -> Option<&str> {
+        match os {
+            "windows" => self.windows.as_deref(),
+            "macos" => self.macos.as_deref().or(self.linux.as_deref()),
+            _ => self.linux.as_deref(),
         }
     }
 }
@@ -324,5 +330,23 @@ mod tests {
                 assert!(t.check.linux.is_some(), "{} has no Linux check", t.id);
             }
         }
+    }
+
+    #[test]
+    fn a_mac_runs_its_own_script_or_the_posix_one() {
+        let both = PerOs {
+            linux: Some("gsettings get x".into()),
+            windows: Some("exit 0".into()),
+            macos: Some("defaults read x".into()),
+        };
+        assert_eq!(both.for_os("macos"), Some("defaults read x"));
+        assert_eq!(both.for_os("linux"), Some("gsettings get x"));
+        assert_eq!(both.for_os("windows"), Some("exit 0"));
+        let posix = PerOs {
+            linux: Some("ls".into()),
+            ..PerOs::default()
+        };
+        assert_eq!(posix.for_os("macos"), Some("ls"));
+        assert_eq!(posix.for_os("windows"), None);
     }
 }

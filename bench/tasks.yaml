@@ -380,7 +380,7 @@
     windows: if ((Get-Content $HOME\kai-bench\sales-total.txt -Raw) -match '548\.50?') { exit 0 } else { exit 1 }
   mock:
     - '{"thought":"look at the file","action":"shell","text":"head -3 ~/kai-bench/sales.csv","risk":"low","expect":"header and rows"}'
-    - '{"thought":"sum the third column","action":"shell","text":"tail -n +2 ~/kai-bench/sales.csv | cut -d, -f3 | paste -sd+ | bc | tee ~/kai-bench/sales-total.txt","risk":"low","expect":"548.50"}'
+    - '{"thought":"sum the third column","action":"shell","text":"tail -n +2 ~/kai-bench/sales.csv | cut -d, -f3 | paste -sd+ - | bc | tee ~/kai-bench/sales-total.txt","risk":"low","expect":"548.50"}'
     - '{"thought":"total is 548.50","action":"done","risk":"none"}'
 
 - id: tip-calculator
@@ -466,8 +466,10 @@
   setup:
     linux: gsettings set org.gnome.desktop.interface color-scheme default
     windows: Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize -Name AppsUseLightTheme -Value 1
+    macos: defaults delete -g AppleInterfaceStyle 2>/dev/null; true
   check:
     linux: gsettings get org.gnome.desktop.interface color-scheme | grep -q dark
+    macos: defaults read -g AppleInterfaceStyle 2>/dev/null | grep -q Dark
     windows: if ((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize).AppsUseLightTheme -eq 0) { exit 0 } else { exit 1 }
   mock:
     - '{"thought":"set the GNOME color scheme","action":"shell","text":"gsettings set org.gnome.desktop.interface color-scheme prefer-dark","risk":"high","expect":"dark windows"}'
@@ -484,8 +486,8 @@
     linux: grep -Eq '^[0-9]+([.][0-9]+)?' ~/kai-bench/answer.txt
     windows: if ((Get-Content $HOME\kai-bench\answer.txt -Raw) -match '^\d') { exit 0 } else { exit 1 }
   mock:
-    - '{"thought":"check free space","action":"shell","text":"df -BG --output=avail ~ | tail -1","risk":"low","expect":"a number"}'
-    - '{"thought":"write the answer","action":"shell","text":"df -BG --output=avail ~ | tail -1 | tr -dc 0-9 > ~/kai-bench/answer.txt","risk":"low","expect":"saved"}'
+    - '{"thought":"check free space","action":"shell","text":"df -Pk ~ | awk ''NR==2 {print int($4/1048576)}''","risk":"low","expect":"a number"}'
+    - '{"thought":"write the answer","action":"shell","text":"df -Pk ~ | awk ''NR==2 {print int($4/1048576)}'' > ~/kai-bench/answer.txt","risk":"low","expect":"saved"}'
     - '{"thought":"answer saved","action":"done","risk":"none"}'
 
 - id: count-errors

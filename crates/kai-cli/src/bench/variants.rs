@@ -68,6 +68,7 @@ fn subst_os(p: &PerOs, vals: &BTreeMap<String, String>) -> PerOs {
     PerOs {
         linux: p.linux.as_deref().map(|c| subst(c, vals, false)),
         windows: p.windows.as_deref().map(|c| subst(c, vals, false)),
+        macos: p.macos.as_deref().map(|c| subst(c, vals, false)),
     }
 }
 
