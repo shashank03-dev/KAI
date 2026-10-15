@@ -447,6 +447,7 @@ pub fn describe(d: &Decision, element: Option<&str>) -> String {
     let text = d.text.as_deref().unwrap_or("");
     let short: String = text.chars().take(48).collect();
     match d.action {
+        Action::Computer => "Using computer tool".into(),
         Action::Click => format!("Clicking{on}"),
         Action::DoubleClick => format!("Double-clicking{on}"),
         Action::RightClick => format!("Right-clicking{on}"),

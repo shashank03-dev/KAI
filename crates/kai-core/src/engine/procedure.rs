@@ -88,11 +88,12 @@ impl Engine<'_> {
                 break;
             }
             let t_act = Instant::now();
-            r.privacy.protect(&d, &g, false);
-            let (output, path) = match self.act(&d, &g).await {
+            r.protect(&d, &g, false);
+            let (output, path) = match self.act(&d, &g, &r.privacy, None).await {
                 Ok(x) => x,
                 Err(e) => {
-                    stopped_at = Some(format!("the step failed: {e}"));
+                    let _ = e;
+                    stopped_at = Some("the step failed".into());
                     break;
                 }
             };
@@ -113,7 +114,7 @@ impl Engine<'_> {
             if matches!(g, Grounding::Marks(ref els) if !els.is_empty()) {
                 rec.elements = g.as_text();
             }
-            r.trace.push(rec);
+            r.push(rec);
             let mut item = HistoryItem::from_step(&d, &g);
             if let Some(o) = &output {
                 item.push_output(o);

@@ -101,6 +101,8 @@ impl Engine<'_> {
             crop_jpeg: None,
         };
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: reflect::SYSTEM,
             user_text: &summary,
             images: &images,

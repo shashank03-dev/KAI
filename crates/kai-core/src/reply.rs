@@ -15,8 +15,9 @@ use serde_json::Value;
 /// At most this many follow-up actions run without a new model call.
 pub const MAX_THEN: usize = 3;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StepReply {
+    pub computer: Option<crate::computer::ComputerAction>,
     pub decision: Decision,
     /// Follow-up actions, already validated. Empty for a single action.
     pub then: Vec<Decision>,
@@ -111,6 +112,7 @@ impl StepReply {
             crate::plan::parse_plan(plan_raw)
         };
         Ok(Self {
+            computer: None,
             decision,
             then,
             need_screen,
@@ -119,6 +121,50 @@ impl StepReply {
             memo,
             outcomes,
         })
+    }
+
+    /// Decode the opt-in envelope separately from the legacy wire contract.
+    pub fn parse_computer(raw: &str, focused: Option<u32>) -> Result<Self, SchemaError> {
+        let json =
+            extract_json_object(raw).ok_or_else(|| SchemaError::Parse("missing object".into()))?;
+        let mut v: Value =
+            serde_json::from_str(json).map_err(|e| SchemaError::Parse(e.to_string()))?;
+        let obj = v
+            .as_object_mut()
+            .ok_or_else(|| SchemaError::Parse("missing object".into()))?;
+        let computer = obj.remove("computer");
+        if obj.get("action").and_then(Value::as_str) != Some("computer") {
+            if computer.is_some_and(|v| !v.is_null()) {
+                return Err(SchemaError::Parse("unexpected computer payload".into()));
+            }
+            return Self::parse_with_focus(&v.to_string(), focused);
+        }
+        for key in ["then", "plan", "keys"] {
+            if obj
+                .get(key)
+                .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty()))
+            {
+                return Err(SchemaError::Parse(
+                    "computer actions cannot carry follow-ups".into(),
+                ));
+            }
+        }
+        for key in ["text", "target", "direction", "amount"] {
+            if obj.get(key).is_some_and(|v| !v.is_null()) {
+                return Err(SchemaError::Parse("ambiguous computer envelope".into()));
+            }
+        }
+        let action: crate::computer::ComputerAction = serde_json::from_value(
+            computer.ok_or_else(|| SchemaError::Parse("missing computer payload".into()))?,
+        )
+        .map_err(|e| SchemaError::Parse(e.to_string()))?;
+        obj.insert("action".into(), "wait".into());
+        let mut reply = Self::parse_with_focus(&v.to_string(), focused)?;
+        reply.decision.action = Action::Computer;
+        reply.decision.text =
+            Some(serde_json::to_string(&action).map_err(|e| SchemaError::Parse(e.to_string()))?);
+        reply.computer = Some(action);
+        Ok(reply)
     }
 
     /// `schema` plus the optional `outcomes` the first call may name.

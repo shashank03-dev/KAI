@@ -11,6 +11,7 @@ use tokio::process::Command;
 /// Most bytes of output kept per stream; the rest is summarised.
 pub const MAX_OUTPUT: usize = 12_000;
 
+#[derive(Clone)]
 pub struct Shell {
     pub timeout: Duration,
     pub kill: KillSwitch,

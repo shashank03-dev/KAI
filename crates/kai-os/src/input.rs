@@ -4,6 +4,11 @@
 
 use enigo::{Axis, Button, Coordinate, Direction as Press, Enigo, Key, Keyboard, Mouse, Settings};
 use kai_core::Direction;
+use kai_core::computer::ExecutionContext;
+mod clipboard;
+mod execute;
+use clipboard::{clipboard_get, clipboard_set};
+use execute::run;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -12,6 +17,21 @@ use std::time::Duration;
 pub const PASTE_OVER: usize = 32;
 
 enum Cmd {
+    Move {
+        x: i32,
+        y: i32,
+    },
+    Drag {
+        points: Vec<(i32, i32)>,
+        button: Button,
+        duration_ms: u32,
+    },
+    Scroll2 {
+        x: i32,
+        y: i32,
+        dx: i32,
+        dy: i32,
+    },
     Click {
         x: i32,
         y: i32,
@@ -34,12 +54,61 @@ type Reply = mpsc::Sender<anyhow::Result<(i32, i32)>>;
 /// Handle to the input thread. Cheap to clone.
 #[derive(Clone)]
 pub struct Input {
-    tx: mpsc::Sender<(Cmd, Reply)>,
+    tx: mpsc::Sender<(Cmd, Reply, Option<ExecutionContext>)>,
+    context: Option<ExecutionContext>,
 }
 
 impl Input {
+    pub async fn move_to(&self, x: i32, y: i32) -> anyhow::Result<()> {
+        self.call(Cmd::Move { x, y }).await.map(drop)
+    }
+
+    pub async fn drag(
+        &self,
+        points: Vec<(i32, i32)>,
+        button: kai_core::computer::MouseButton,
+        duration_ms: u32,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            (2..=256).contains(&points.len()) && duration_ms <= 5000,
+            "invalid drag"
+        );
+        self.call(Cmd::Drag {
+            points,
+            button: native_button(button),
+            duration_ms,
+        })
+        .await
+        .map(drop)
+    }
+
+    pub async fn click_button(
+        &self,
+        x: i32,
+        y: i32,
+        button: kai_core::computer::MouseButton,
+        count: u8,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(matches!(count, 1 | 2), "invalid click count");
+        self.call(Cmd::Click {
+            x,
+            y,
+            button: native_button(button),
+            count,
+        })
+        .await
+        .map(drop)
+    }
+
+    pub async fn wheel(&self, x: i32, y: i32, dx: i32, dy: i32) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            dx.unsigned_abs() <= 20 && dy.unsigned_abs() <= 20,
+            "invalid wheel amount"
+        );
+        self.call(Cmd::Scroll2 { x, y, dx, dy }).await.map(drop)
+    }
     pub fn spawn() -> anyhow::Result<Self> {
-        let (tx, rx) = mpsc::channel::<(Cmd, Reply)>();
+        let (tx, rx) = mpsc::channel::<(Cmd, Reply, Option<ExecutionContext>)>();
         let (ready_tx, ready_rx) = mpsc::channel();
         thread::Builder::new()
             .name("kai-input".into())
@@ -61,18 +130,37 @@ impl Input {
                         return;
                     }
                 };
-                for (cmd, reply) in rx {
-                    let _ = reply.send(run(&mut enigo, cmd));
+                for (cmd, reply, context) in rx {
+                    let result = run(&mut enigo, cmd, context.as_ref());
+                    let unsafe_state = result
+                        .as_ref()
+                        .err()
+                        .is_some_and(|e| e.downcast_ref::<execute::CleanupFailed>().is_some());
+                    let _ = reply.send(result);
+                    if unsafe_state {
+                        break;
+                    } // Drop the queue: no input after failed cleanup.
                 }
             })?;
         ready_rx.recv()??;
-        Ok(Self { tx })
+        Ok(Self { tx, context: None })
+    }
+
+    pub fn with_context(&self, context: &ExecutionContext) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            context: Some(context.clone()),
+        }
+    }
+
+    pub(crate) fn context(&self) -> Option<ExecutionContext> {
+        self.context.clone()
     }
 
     async fn call(&self, cmd: Cmd) -> anyhow::Result<(i32, i32)> {
         let (rtx, rrx) = mpsc::channel();
         self.tx
-            .send((cmd, rtx))
+            .send((cmd, rtx, self.context.clone()))
             .map_err(|_| anyhow::anyhow!("input thread stopped"))?;
         tokio::task::spawn_blocking(move || {
             rrx.recv()
@@ -94,7 +182,7 @@ impl Input {
     }
 
     pub async fn type_text(&self, text: &str) -> anyhow::Result<()> {
-        if text.chars().count() > PASTE_OVER {
+        if self.context.is_none() && text.chars().count() > PASTE_OVER {
             return self.paste(text).await;
         }
         self.call(Cmd::Type(text.to_string())).await.map(drop)
@@ -142,46 +230,15 @@ impl Input {
     }
 }
 
-fn run(e: &mut Enigo, cmd: Cmd) -> anyhow::Result<(i32, i32)> {
-    match cmd {
-        Cmd::Click {
-            x,
-            y,
-            button,
-            count,
-        } => {
-            e.move_mouse(x, y, Coordinate::Abs)?;
-            thread::sleep(Duration::from_millis(30));
-            for _ in 0..count.max(1) {
-                e.button(button, Press::Click)?;
-            }
-        }
-        Cmd::Type(t) => e.text(&t)?,
-        Cmd::Keys(keys) => {
-            let (mods, last) = keys.split_at(keys.len().saturating_sub(1));
-            for k in mods {
-                e.key(*k, Press::Press)?;
-            }
-            for k in last {
-                e.key(*k, Press::Click)?;
-            }
-            for k in mods.iter().rev() {
-                e.key(*k, Press::Release)?;
-            }
-        }
-        Cmd::Scroll { x, y, dir, amount } => {
-            e.move_mouse(x, y, Coordinate::Abs)?;
-            let (len, axis) = match dir {
-                Direction::Down => (amount, Axis::Vertical),
-                Direction::Up => (-amount, Axis::Vertical),
-                Direction::Right => (amount, Axis::Horizontal),
-                Direction::Left => (-amount, Axis::Horizontal),
-            };
-            e.scroll(len, axis)?;
-        }
-        Cmd::Cursor => return Ok(e.location()?),
+fn native_button(button: kai_core::computer::MouseButton) -> Button {
+    use kai_core::computer::MouseButton as B;
+    match button {
+        B::Left => Button::Left,
+        B::Middle => Button::Middle,
+        B::Right => Button::Right,
+        B::Back => Button::Back,
+        B::Forward => Button::Forward,
     }
-    Ok((0, 0))
 }
 
 /// Map a normalised key name (see `Decision::validate_and_clamp`) to enigo.
@@ -228,38 +285,5 @@ pub fn parse_key(name: &str) -> anyhow::Result<Key> {
     Ok(k)
 }
 
-/// One clipboard handle for the whole process. On X11 the clipboard only
-/// holds what we set while the handle that set it is alive (arboard serves
-/// paste requests from it); a handle dropped right after `set_text` left the
-/// target app pasting nothing.
-static CLIPBOARD: std::sync::LazyLock<std::sync::Mutex<Option<arboard::Clipboard>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(arboard::Clipboard::new().ok()));
-
-fn clipboard_get() -> Option<String> {
-    CLIPBOARD.lock().ok()?.as_mut()?.get_text().ok()
-}
-
-fn clipboard_set(text: &str) -> anyhow::Result<()> {
-    let mut guard = CLIPBOARD
-        .lock()
-        .map_err(|_| anyhow::anyhow!("clipboard lock poisoned"))?;
-    let cb = guard
-        .as_mut()
-        .ok_or_else(|| anyhow::anyhow!("no clipboard available"))?;
-    cb.set_text(text.to_string())?;
-    Ok(())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_named_and_single_keys() {
-        assert!(matches!(parse_key("ctrl").unwrap(), Key::Control));
-        assert!(matches!(parse_key("enter").unwrap(), Key::Return));
-        assert!(matches!(parse_key("s").unwrap(), Key::Unicode('s')));
-        assert!(matches!(parse_key("f5").unwrap(), Key::F5));
-        assert!(parse_key("hyperdrive").is_err());
-    }
-}
+mod tests;

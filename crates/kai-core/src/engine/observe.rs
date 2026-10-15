@@ -208,6 +208,7 @@ impl Engine<'_> {
         let mut verify_ms = 0;
         let mut p = None;
         if let (Some(v), Some(pend), false) = (self.verifier, r.pending.as_ref(), exec)
+            && !r.privacy.active()
             && !pend.expect.trim().is_empty()
         {
             let state = format!(

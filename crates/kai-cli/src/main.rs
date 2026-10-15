@@ -1,5 +1,4 @@
-//! `kai` — run Gemma 4 on your computer from the terminal, validate skills and
-//! run the benchmark. The desktop app is `kai-app`; both share kai-core.
+//! `kai`: terminal runs, skill validation and benchmarks; shares kai-core with kai-app.
 
 mod ab;
 mod backend;
@@ -292,23 +291,9 @@ fn live_settings(
     Ok((b, s, keys))
 }
 
-/// `--backend local`: the model's server, started for this run if needed.
-async fn local_server(
-    b: BackendArg,
-    s: &mut Settings,
-) -> anyhow::Result<Option<kai_os::local::LocalServer>> {
-    if b == BackendArg::Local
-        || (b == BackendArg::Auto && s.backend == kai_core::settings::BackendChoice::Local)
-    {
-        models::ensure_local(s).await
-    } else {
-        Ok(None)
-    }
-}
-
 async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
     let (b, mut s, keys) = live_settings(o)?;
-    let _local = local_server(b, &mut s).await?;
+    let _local = runs::local_server(b, &mut s).await?;
     let (client, _) = s.clients(&keys)?;
     let screen = kai_os::DesktopPerceptor::new();
     let obs = kai_core::Perceptor::observe(&screen).await?;
@@ -344,7 +329,7 @@ async fn run_task(
     lane: &runs::LaneArgs,
 ) -> anyhow::Result<ExitCode> {
     let (b, mut s, keys) = live_settings(o)?;
-    let _local = local_server(b, &mut s).await?;
+    let _local = runs::local_server(b, &mut s).await?;
     let recorder = match record {
         Some(root) if team => {
             eprintln!("--record is not supported with --team; not recording");
@@ -416,7 +401,7 @@ async fn run_task(
             interrupt: &kill,
             sink: &Printer,
         };
-        let run = runner.run(task).await?;
+        let run = runner.run_with_approver(task, Some(&approver)).await?;
         if let Some(e) = &run.error {
             eprintln!("native loop error: {e}");
         }

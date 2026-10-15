@@ -160,8 +160,13 @@ pub fn native_config(
             "--backend openai-native needs an OpenAI key: run `kai key openai` or set OPENAI_API_KEY"
         )
     })?;
+    anyhow::ensure!(
+        !config.computer_tools_v1 || model.is_some(),
+        "the current computer protocol needs an explicit compatible --model (the catalog is not auto-selected)"
+    );
     let mut c = kai_core::cua::CuaConfig {
         api_key: Some(key),
+        computer_tools_v1: config.computer_tools_v1,
         max_steps: config.max_steps,
         max_time: config.max_time,
         ..Default::default()

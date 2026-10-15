@@ -66,6 +66,9 @@ impl Engine<'_> {
         state: &serde_json::Value,
         qs: &[(String, crate::client::Question)],
     ) -> Option<(std::collections::BTreeMap<String, Answer>, u64)> {
+        if r.privacy.active() {
+            return None;
+        }
         let d = r.decider?;
         let t = Instant::now();
         let res = d.ask(state, qs).await;
@@ -237,9 +240,10 @@ impl Engine<'_> {
             rec.elements = g.as_text();
             rec.target = crate::trace::TargetSig::of(&decision, g);
             rec.executor = Some(xrec);
+            r.protect(&decision, g, false);
             self.sink.emit(&EngineEvent::Decided {
                 step,
-                decision: Box::new(decision.clone()),
+                decision: Box::new(r.privacy.decision(&decision)),
                 target: decision.target.and_then(|t| g.target_rect(t)),
             });
 
@@ -253,7 +257,7 @@ impl Engine<'_> {
                         rec.approval = Some("skipped".into());
                         rec.verified = false;
                         rec.path = Some("none".into());
-                        r.trace.push(rec);
+                        r.push(rec);
                         r.pending = None;
                         let note = format!("You (the user) skipped '{}'.", sg.describe());
                         self.escalate(r, note, acted_any);
@@ -265,16 +269,18 @@ impl Engine<'_> {
 
             // ---- Act ----
             let t_act = Instant::now();
-            r.privacy.protect(&decision, g, false);
+            r.protect(&decision, g, false);
             r.events_mark = self.perceptor.ui_events();
             let acted = match super::act::reopen_guard(&mut r.opened, &decision) {
                 Some(note) => Ok((Some(note), "none")),
-                None => self.act(&decision, g).await,
+                None => self.act(&decision, g, &r.privacy, None).await,
             };
             let (output, path) = match acted {
                 Ok(x) => x,
                 Err(e) => {
-                    log::error!("executor act failed at step {step}: {e}");
+                    let _ = e;
+                    let e = "action failed";
+                    log::error!("executor act failed at step {step}");
                     r.failure_streak += 1;
                     (Some(format!("ERROR: {e}")), "error")
                 }
@@ -290,7 +296,7 @@ impl Engine<'_> {
             rec.path = Some(path.to_string());
             rec.output = output.clone();
             rec.verified = false; // confirmed by the next request
-            r.trace.push(rec);
+            r.push(rec);
             let idx = r.trace.steps.len() - 1;
             let mut item = HistoryItem::from_step(&decision, &obs.grounding);
             item.summary.push_str(" (executor)");

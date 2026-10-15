@@ -32,6 +32,10 @@ pub struct Images {
 /// Everything a single `decide` call needs. Laid out stable-first by
 /// [`crate::prompt`] so vLLM prefix caching hits.
 pub struct ModelRequest<'a> {
+    /// Host-assigned observation identity for versioned tool adapters.
+    pub observation_id: Option<u64>,
+    /// Trusted execution feedback; screen/page text cannot forge it.
+    pub computer_result: Option<&'a crate::computer::ToolResult>,
     /// Stable system prompt (cached prefix).
     pub system: &'a str,
     /// The changing user content: element list + last-3 history + task.
@@ -65,7 +69,7 @@ pub enum Backend {
     Gemini,
     /// Any OpenAI-compatible endpoint: Vercel AI Gateway or OpenAI itself.
     OpenAi,
-    /// OpenAI's own computer-use loop (native, not Kai's harness).
+    /// Responses computer tool, executed through Kai's shared harness.
     OpenAiNative,
     /// A model running on this computer (`llama-server`, OpenAI-compatible).
     Local,
@@ -78,7 +82,7 @@ impl Backend {
             Backend::Vllm => "DigitalOcean (Gemma 4)",
             Backend::Gemini => "Gemini API (Gemma 4)",
             Backend::OpenAi => "OpenAI-compatible (Gateway/OpenAI)",
-            Backend::OpenAiNative => "OpenAI computer use (native loop)",
+            Backend::OpenAiNative => "OpenAI computer use (native protocol)",
             Backend::Local => "This computer (local model)",
             Backend::Mock => "Mock",
         }
@@ -175,6 +179,8 @@ pub trait ModelClient: Send + Sync {
     async fn warm_up(&self, images: &Images) -> Result<ModelReply, ClientError> {
         let schema = crate::schema::Decision::json_schema();
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: "You are Kai. Reply with a `done` action.",
             user_text: "warm up",
             images,

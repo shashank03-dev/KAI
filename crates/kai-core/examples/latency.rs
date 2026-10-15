@@ -170,6 +170,8 @@ async fn main() -> anyhow::Result<()> {
     };
     let schema = Decision::json_schema();
     let req = ModelRequest {
+        observation_id: None,
+        computer_result: None,
         system: &system,
         user_text: &user,
         images: &images,

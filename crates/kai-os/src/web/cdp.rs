@@ -79,6 +79,24 @@ pub struct Cdp {
 }
 
 impl Cdp {
+    pub(super) fn send_cleanup(
+        &self,
+        method: &str,
+        params: Value,
+        session: &str,
+    ) -> anyhow::Result<()> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let mut bytes = serde_json::to_vec(
+            &json!({"id":id,"method":method,"params":params,"sessionId":session}),
+        )?;
+        bytes.push(0);
+        self.writer
+            .lock()
+            .map_err(|_| anyhow::anyhow!("browser pipe lock poisoned"))?
+            .write_all(&bytes)?;
+        Ok(())
+    }
+
     /// Start `browser` with `args` and the debugging pipe attached.
     #[cfg(unix)]
     pub fn launch(browser: &Path, args: &[String]) -> anyhow::Result<Self> {

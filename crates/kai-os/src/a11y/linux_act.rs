@@ -47,14 +47,23 @@ pub(super) fn pick_action(offered: &[String], wanted: &[&str]) -> Option<usize> 
     })
 }
 
-pub async fn act(node: &NodeRef, plan: &Plan, role: Role) -> anyhow::Result<bool> {
+pub async fn act(
+    node: &NodeRef,
+    plan: &Plan,
+    role: Role,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     match plan {
-        Plan::Press => press(node, role).await,
-        Plan::Fill(text) => fill(node, text).await,
+        Plan::Press => press(node, role, ctx).await,
+        Plan::Fill(text) => fill(node, text, ctx).await,
     }
 }
 
-async fn press(node: &NodeRef, role: Role) -> anyhow::Result<bool> {
+async fn press(
+    node: &NodeRef,
+    role: Role,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     let bus = conn().await?.connection();
     let prep = async {
         let p = node.as_accessible_proxy(bus).await.ok()?;
@@ -77,6 +86,7 @@ async fn press(node: &NodeRef, role: Role) -> anyhow::Result<bool> {
         return Ok(false);
     };
     log::debug!("a11y press: action {idx} of {names:?}");
+    ctx.check()?;
     match tokio::time::timeout(ACT_BUDGET, action.do_action(idx)).await {
         Ok(Ok(done)) => Ok(done),
         Ok(Err(e)) => {
@@ -88,7 +98,11 @@ async fn press(node: &NodeRef, role: Role) -> anyhow::Result<bool> {
     }
 }
 
-async fn fill(node: &NodeRef, text: &str) -> anyhow::Result<bool> {
+async fn fill(
+    node: &NodeRef,
+    text: &str,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     let bus = conn().await?.connection();
     let prep = async {
         let p = node.as_accessible_proxy(bus).await.ok()?;
@@ -133,12 +147,15 @@ async fn fill(node: &NodeRef, text: &str) -> anyhow::Result<bool> {
     // Focus first, like the click the mouse path does, so a following
     // `key Enter` lands in this field.
     if let Some(c) = comp {
+        ctx.check()?;
         let _ = tokio::time::timeout(CHECK_BUDGET, c.grab_focus()).await;
     }
+    ctx.check()?;
     let set = match tokio::time::timeout(ACT_BUDGET, edit.set_text_contents(text)).await {
         Ok(Ok(ok)) => ok,
         Ok(Err(e)) => {
-            log::debug!("a11y set_text_contents failed: {e}");
+            let _ = e;
+            log::debug!("a11y set_text_contents failed");
             false
         }
         Err(_) => anyhow::bail!("accessibility text entry timed out; its effect is unknown"),
@@ -166,6 +183,7 @@ async fn fill(node: &NodeRef, text: &str) -> anyhow::Result<bool> {
         // Firefox reports success for SetTextContents on web inputs but
         // ignores it; InsertText at offset 0 of an empty field is the same edit.
         let n = text.chars().count() as i32;
+        ctx.check()?;
         set = matches!(
             tokio::time::timeout(ACT_BUDGET, edit.insert_text(0, text, n)).await,
             Ok(Ok(true))
@@ -181,18 +199,19 @@ async fn fill(node: &NodeRef, text: &str) -> anyhow::Result<bool> {
     if set && now == text {
         return Ok(true);
     }
-    log::debug!("a11y fill: set={set}, field now holds {now:?}");
+    log::debug!("a11y fill could not verify the field");
     if now.is_empty() {
         return Ok(false); // nothing happened; the keyboard can do it cleanly
     }
     // Partly applied (e.g. a field that filters input): undo so the
     // keyboard fallback does not type twice.
+    ctx.check()?;
     let _ = tokio::time::timeout(CHECK_BUDGET, edit.set_text_contents("")).await;
     let after = read.get_text(0, -1).await.unwrap_or_default();
     if after.is_empty() {
         Ok(false)
     } else {
-        anyhow::bail!("accessibility text entry left {after:?} instead of {text:?}")
+        anyhow::bail!("accessibility text entry could not be verified")
     }
 }
 

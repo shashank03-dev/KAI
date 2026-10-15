@@ -11,7 +11,12 @@ use objc2_application_services::{AXError, AXUIElement};
 use objc2_core_foundation::{CFBoolean, CFString};
 use std::ptr::NonNull;
 
-pub fn act(node: &AxRef, plan: &Plan, role: Role) -> anyhow::Result<bool> {
+pub fn act(
+    node: &AxRef,
+    plan: &Plan,
+    role: Role,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     let el = &*node.0;
     // Live checks: the element may be gone (no role) or disabled since the
     // observation, and a secure field is never filled or pressed this way.
@@ -30,21 +35,26 @@ pub fn act(node: &AxRef, plan: &Plan, role: Role) -> anyhow::Result<bool> {
         return Ok(false);
     }
     match plan {
-        Plan::Press => Ok(press(el)),
-        Plan::Fill(text) => fill(el, text),
+        Plan::Press => press(el, ctx),
+        Plan::Fill(text) => fill(el, text, ctx),
     }
 }
 
-fn press(el: &AXUIElement) -> bool {
+fn press(el: &AXUIElement, ctx: &kai_core::computer::ExecutionContext) -> anyhow::Result<bool> {
+    ctx.check()?;
     // SAFETY: a plain action call on a live element.
     let err = unsafe { el.perform_action(&CFString::from_static_str("AXPress")) };
     if err != AXError::Success {
         log::debug!("AXPress failed: {err:?}");
     }
-    err == AXError::Success
+    Ok(err == AXError::Success)
 }
 
-fn fill(el: &AXUIElement, text: &str) -> anyhow::Result<bool> {
+fn fill(
+    el: &AXUIElement,
+    text: &str,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     let value = CFString::from_static_str("AXValue");
     let mut settable = 0u8;
     // SAFETY: `settable` is a valid out pointer for a Boolean.
@@ -57,11 +67,13 @@ fn fill(el: &AXUIElement, text: &str) -> anyhow::Result<bool> {
         return Ok(false);
     }
     // SAFETY: plain setters on a live element with CF values.
+    ctx.check()?;
     unsafe {
         el.set_attribute_value(
             &CFString::from_static_str("AXFocused"),
             CFBoolean::new(true),
         );
+        ctx.check()?;
         if el.set_attribute_value(&value, &CFString::from_str(text)) != AXError::Success {
             return Ok(false);
         }
@@ -74,11 +86,12 @@ fn fill(el: &AXUIElement, text: &str) -> anyhow::Result<bool> {
         return Ok(false);
     }
     // SAFETY: as above.
+    ctx.check()?;
     unsafe { el.set_attribute_value(&value, &CFString::from_static_str("")) };
     if current(el).is_some_and(|v| v.is_empty()) {
         Ok(false)
     } else {
-        anyhow::bail!("accessibility text entry left {now:?} instead of {text:?}")
+        anyhow::bail!("accessibility text entry could not be verified")
     }
 }
 

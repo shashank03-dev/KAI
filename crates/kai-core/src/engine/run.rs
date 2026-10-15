@@ -26,6 +26,8 @@ pub(super) struct Pending {
 
 /// Mutable state of one run.
 pub(super) struct Run<'t> {
+    pub(super) session: u64,
+    pub(super) computer_result: Option<crate::computer::ToolResult>,
     pub(super) task: &'t str,
     pub(super) trace: Trace,
     pub(super) history: Vec<HistoryItem>,
@@ -86,6 +88,17 @@ pub(super) struct Run<'t> {
 }
 
 impl<'t> Run<'t> {
+    pub(super) fn protect(&mut self, d: &crate::Decision, g: &crate::Grounding, force: bool) {
+        self.privacy.protect(d, g, force);
+        for rec in &mut self.trace.steps {
+            self.privacy.record(rec);
+        }
+    }
+    pub(super) fn push(&mut self, mut rec: crate::trace::StepRecord) {
+        self.privacy.record(&mut rec);
+        self.trace.push(rec);
+    }
+
     /// Blank what Kai typed for the user from a fresh read: one-time codes
     /// and sensitive data (`docs/SAFETY.md`).
     pub(super) fn redact(&self, g: &mut crate::element::Grounding) {
@@ -100,7 +113,10 @@ impl<'t> Run<'t> {
         opts: &RunOptions<'t>,
         decider: Option<&'t dyn Decider>,
     ) -> Self {
+        static SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Run {
+            computer_result: None,
+            session: SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             task,
             trace: Trace::new(task),
             history: Vec::new(),

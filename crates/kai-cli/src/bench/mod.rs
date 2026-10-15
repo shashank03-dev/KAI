@@ -174,7 +174,11 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         eprintln!("--best-of ignored: recorded replies have no plans (use a live backend)");
         config.best_of = 0;
     }
-    let keys = kai_os::secrets::keys();
+    let keys = if matches!(b, BackendArg::Mock | BackendArg::Replay) {
+        Default::default()
+    } else {
+        kai_os::secrets::keys()
+    };
     let prices = match (args.usd_per_mtok_in, args.usd_per_mtok_out) {
         (None, None) => None,
         (i, o) => Some(Prices {

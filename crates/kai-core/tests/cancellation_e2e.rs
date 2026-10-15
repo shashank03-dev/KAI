@@ -11,7 +11,9 @@ struct StopOnReply<'a>(&'a Flag, MockClient);
 
 #[async_trait]
 impl ModelClient for StopOnReply<'_> {
-    fn backend(&self) -> Backend { Backend::Mock }
+    fn backend(&self) -> Backend {
+        Backend::Mock
+    }
     async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
         self.0.0.store(true, Ordering::SeqCst);
         self.1.decide(req).await
@@ -21,13 +23,16 @@ impl ModelClient for StopOnReply<'_> {
 #[tokio::test]
 async fn stop_during_decision_prevents_the_returned_click() {
     let stop = flag();
-    let client = StopOnReply(&stop, MockClient::new([
-        r#"{"thought":"click File","action":"click","target":1,"risk":"none"}"#,
-    ]));
+    let client = StopOnReply(
+        &stop,
+        MockClient::new([r#"{"thought":"click File","action":"click","target":1,"risk":"none"}"#]),
+    );
     let screen = Screen::marks();
     let hands = Hands::new(&screen);
     let approve = approve_all();
-    let trace = engine(&client, &screen, &hands, &approve, &stop).run("Click File").await;
+    let trace = engine(&client, &screen, &hands, &approve, &stop)
+        .run("Click File")
+        .await;
     assert!(hands.log.lock().unwrap().is_empty());
     assert_eq!(trace.outcome, Some(Outcome::Stopped));
 }
@@ -50,7 +55,8 @@ async fn stop_during_approval_prevents_the_approved_command() {
     let screen = Screen::marks();
     let hands = Hands::new(&screen);
     let trace = engine(&client, &screen, &hands, &StopOnApproval(&stop), &stop)
-        .run("Run a command").await;
+        .run("Run a command")
+        .await;
     assert!(hands.log.lock().unwrap().is_empty());
     assert_eq!(trace.outcome, Some(Outcome::Stopped));
 }
@@ -58,7 +64,9 @@ async fn stop_during_approval_prevents_the_approved_command() {
 struct Hanging;
 #[async_trait]
 impl ModelClient for Hanging {
-    fn backend(&self) -> Backend { Backend::Mock }
+    fn backend(&self) -> Backend {
+        Backend::Mock
+    }
     async fn decide(&self, _: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
         std::future::pending().await
     }
@@ -76,8 +84,34 @@ async fn cancellation_does_not_wait_for_a_hanging_model() {
         stop.0.store(true, Ordering::SeqCst);
     };
     let (trace, ()) = tokio::join!(
-        tokio::time::timeout(Duration::from_secs(1), runner.run("Click File")), trip
+        tokio::time::timeout(Duration::from_secs(1), runner.run("Click File")),
+        trip
     );
-    assert_eq!(trace.expect("stop must interrupt inference").outcome, Some(Outcome::Stopped));
+    assert_eq!(
+        trace.expect("stop must interrupt inference").outcome,
+        Some(Outcome::Stopped)
+    );
+    assert!(hands.log.lock().unwrap().is_empty());
+}
+
+struct ChangeOnApproval<'a>(&'a Screen);
+#[async_trait]
+impl Approver for ChangeOnApproval<'_> {
+    async fn approve(&self, _: &Decision, _: &Grounding) -> ApprovalChoice {
+        self.0.frame.fetch_add(1, Ordering::SeqCst);
+        ApprovalChoice::Approve
+    }
+}
+#[tokio::test]
+async fn approval_for_an_old_screen_cannot_click_after_another_action_changes_it() {
+    let stop = flag();
+    let screen = Screen::marks();
+    let hands = Hands::new(&screen);
+    let client =
+        MockClient::new([r#"{"thought":"delete","action":"click","target":5,"risk":"high"}"#]);
+    let approver = ChangeOnApproval(&screen);
+    let mut e = engine(&client, &screen, &hands, &approver, &stop);
+    e.config.max_steps = 1;
+    e.run("Delete").await;
     assert!(hands.log.lock().unwrap().is_empty());
 }

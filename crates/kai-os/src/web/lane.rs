@@ -114,6 +114,7 @@ pub struct BrowserLane {
     pub(super) last: Mutex<(PageInfo, Rect)>,
     /// A click opened a file picker (intercepted: Kai cannot choose files).
     pub(super) file_chooser: AtomicBool,
+    pub(super) input_poisoned: AtomicBool,
     /// The marks of the last dialog shown, so an action on one of them after
     /// the dialog closed is refused instead of clicking the page under it.
     pub(super) last_dialog: Mutex<Vec<kai_core::Element>>,
@@ -173,6 +174,7 @@ impl BrowserLane {
                 Rect::new(0.0, 0.0, opts.size.0 as f32, opts.size.1 as f32),
             )),
             file_chooser: AtomicBool::new(false),
+            input_poisoned: AtomicBool::new(false),
             last_dialog: Mutex::default(),
             open_select: Mutex::default(),
         })
@@ -188,6 +190,13 @@ impl BrowserLane {
     }
 
     pub(super) async fn page(&self, method: &str, params: Value) -> anyhow::Result<Value> {
+        if let Ok(result) = super::computer::INPUT_CONTEXT.try_with(|ctx| ctx.check()) {
+            result?;
+        }
+        anyhow::ensure!(
+            !self.input_poisoned.load(Ordering::SeqCst),
+            "browser input cleanup was not acknowledged; restart the browser"
+        );
         if !self.cdp.alive() {
             anyhow::bail!("Kai's browser was closed");
         }

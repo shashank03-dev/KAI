@@ -49,10 +49,10 @@ impl Engine<'_> {
                 break;
             }
             let mut timings = Timings::default();
-            if let Some(t) = d.target {
-                if !matches!(seen, Grounding::Marks(_)) {
-                    break;
-                }
+            if !matches!(
+                d.action,
+                Action::Shell | Action::OpenApp | Action::OpenUrl | Action::Wait
+            ) {
                 let t_obs = Instant::now();
                 let now = match self.perceptor.observe_tree_only().await {
                     Ok(mut o) => {
@@ -65,7 +65,9 @@ impl Engine<'_> {
                     }
                 };
                 timings.tree_ms = t_obs.elapsed().as_millis() as u64;
-                if !same_target(seen, &now, t) {
+                if let Some(t) = d.target
+                    && (!matches!(seen, Grounding::Marks(_)) || !same_target(seen, &now, t))
+                {
                     log::info!("batch stopped: target #{t} changed or vanished");
                     break;
                 }
@@ -87,22 +89,25 @@ impl Engine<'_> {
 
             let step = r.step;
             r.step += 1;
+            r.protect(d, &grounding, false);
             self.sink.emit(&EngineEvent::Decided {
                 step,
-                decision: Box::new(d.clone()),
+                decision: Box::new(r.privacy.decision(d)),
                 target: d.target.and_then(|t| grounding.target_rect(t)),
             });
             let t_act = Instant::now();
-            r.privacy.protect(d, &grounding, false);
+            r.protect(d, &grounding, false);
             let result = match super::act::reopen_guard(&mut r.opened, d) {
                 Some(note) => Ok((Some(note), "none")),
-                None => self.act(d, &grounding).await,
+                None => self.act(d, &grounding, &r.privacy, None).await,
             };
             timings.act_ms = t_act.elapsed().as_millis() as u64;
             let (output, path, ok) = match result {
                 Ok((o, p)) => (o, p, true),
                 Err(e) => {
-                    log::error!("batched act failed at step {step}: {e}");
+                    let _ = e;
+                    let e = "action failed";
+                    log::error!("batched act failed at step {step}");
                     r.failure_streak += 1;
                     (Some(format!("ERROR: {e}")), "error", false)
                 }
@@ -119,7 +124,7 @@ impl Engine<'_> {
             rec.output = output.clone();
             // Confirmed by the next observation (or the verifier).
             rec.verified = false;
-            r.trace.push(rec);
+            r.push(rec);
             let mut item = HistoryItem::from_step(d, &grounding);
             item.summary.push_str(" (batched)");
             if let Some(o) = &output {

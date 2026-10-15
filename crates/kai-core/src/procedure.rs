@@ -280,7 +280,7 @@ fn replayable(d: &Decision, has_sig: bool) -> bool {
         Action::Click | Action::DoubleClick | Action::RightClick | Action::Type => {
             (d.target.is_some() && has_sig) || (d.action == Action::Type && d.target.is_none())
         }
-        Action::AskUser | Action::Done => false,
+        Action::AskUser | Action::Done | Action::Computer => false,
     }
 }
 

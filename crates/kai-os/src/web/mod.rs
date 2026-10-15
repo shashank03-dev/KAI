@@ -5,11 +5,13 @@
 
 mod act;
 pub mod cdp;
+mod computer;
 pub mod dialog;
 pub mod dropdown;
 pub mod keys;
 mod lane;
 mod look;
+mod release;
 pub mod snapshot;
 
 pub use lane::{BrowserLane, LaneOptions, default_profile, downloads_dir, find_browser};

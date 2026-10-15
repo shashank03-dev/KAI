@@ -326,6 +326,8 @@ mod tests {
         let c = GeminiClient::new("key");
         let (imgs, schema) = req_fixture();
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: "SYS",
             user_text: "USER",
             images: &imgs,
@@ -354,6 +356,8 @@ mod tests {
         let c = GeminiClient::new("key");
         let (imgs, schema) = req_fixture();
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: "s",
             user_text: "u",
             images: &imgs,

@@ -2,8 +2,13 @@
 //! a separate wire format; unsupported semantics must never be approximated.
 
 mod action;
+mod dispatch;
+mod schema;
 mod validate;
 pub use action::*;
+pub use dispatch::*;
+pub use schema::with_schema;
+pub use validate::valid_keys;
 pub use validate::validate_batch;
 
 use crate::Rect;

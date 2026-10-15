@@ -169,7 +169,6 @@ pub fn shortcut_list() -> Vec<Shortcut> {
             "Stop Kai (if the first is taken)",
             "ctrl-alt-end",
         ),
-        s("Anywhere", "Quick launcher", "ctrl-shift-space"),
         s("In Kai", "Command palette", "secondary-k"),
         s("In Kai", "New task", "secondary-n"),
         s("In a run", "Send a message to Kai", "enter"),

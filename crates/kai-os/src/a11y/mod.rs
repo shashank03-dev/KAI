@@ -121,32 +121,66 @@ fn interactive(role: Role) -> bool {
 /// handle for this mark, element gone, disabled, secure, no matching action,
 /// field not empty) so the caller falls back to mouse and keyboard.
 pub async fn act(decision: &kai_core::Decision, grounding: &Grounding) -> anyhow::Result<bool> {
+    act_context(
+        decision,
+        grounding,
+        &kai_core::computer::ExecutionContext::new(std::time::Duration::from_secs(30)),
+    )
+    .await
+}
+
+pub async fn act_context(
+    decision: &kai_core::Decision,
+    grounding: &Grounding,
+    context: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
+    context.check()?;
     let Some((el, plan)) = live::resolve(decision, grounding) else {
         return Ok(false);
     };
     let Some(node) = live::lookup(&el) else {
         return Ok(false);
     };
-    platform_act(node, plan, el.role).await
+    platform_act(node, plan, el.role, context.clone()).await
 }
 
 #[cfg(target_os = "linux")]
-async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Result<bool> {
-    linux_act::act(&node, &plan, role).await
+async fn platform_act(
+    node: NodeRef,
+    plan: live::Plan,
+    role: Role,
+    context: kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
+    linux_act::act(&node, &plan, role, &context).await
 }
 
 #[cfg(target_os = "windows")]
-async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Result<bool> {
-    tokio::task::spawn_blocking(move || windows_act::act(&node, &plan, role)).await?
+async fn platform_act(
+    node: NodeRef,
+    plan: live::Plan,
+    role: Role,
+    context: kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
+    tokio::task::spawn_blocking(move || windows_act::act(&node, &plan, role, &context)).await?
 }
 
 #[cfg(target_os = "macos")]
-async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Result<bool> {
-    tokio::task::spawn_blocking(move || macos_act::act(&node, &plan, role)).await?
+async fn platform_act(
+    node: NodeRef,
+    plan: live::Plan,
+    role: Role,
+    context: kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
+    tokio::task::spawn_blocking(move || macos_act::act(&node, &plan, role, &context)).await?
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-async fn platform_act(_: NodeRef, _: live::Plan, _: Role) -> anyhow::Result<bool> {
+async fn platform_act(
+    _: NodeRef,
+    _: live::Plan,
+    _: Role,
+    _: kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     Ok(false)
 }
 
@@ -265,6 +299,20 @@ fn clean(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn cancelled_accessibility_work_is_rejected_before_live_resolution() {
+        let ctx = kai_core::computer::ExecutionContext::new(std::time::Duration::from_secs(1));
+        ctx.cancel();
+        let d = serde_json::from_value(
+            serde_json::json!({"thought":"click","action":"click","target":1}),
+        )
+        .unwrap();
+        assert!(
+            act_context(&d, &Grounding::Marks(vec![]), &ctx)
+                .await
+                .is_err()
+        );
+    }
 
     const SCREEN: Rect = Rect {
         x: 0.0,

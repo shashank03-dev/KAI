@@ -217,6 +217,7 @@ impl TraceRecorder {
         failure: Option<Failure>,
     ) -> io::Result<()> {
         let mut st = self.state.lock().unwrap();
+        st.meta.task = trace.task.clone();
         st.meta.check = check;
         st.meta.outcome = trace.outcome;
         if st.meta.started.is_empty() {

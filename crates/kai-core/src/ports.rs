@@ -91,6 +91,43 @@ pub trait Probe: Send + Sync {
 /// Moves the mouse/keyboard and reaches the OS for fast paths.
 #[async_trait]
 pub trait Actuator: Send + Sync {
+    fn computer_capabilities(&self) -> crate::computer::Capabilities {
+        crate::computer::Capabilities {
+            actions: Vec::new(),
+            buttons: Vec::new(),
+            scroll_units: Vec::new(),
+        }
+    }
+    async fn computer_act(
+        &self,
+        _action: &crate::computer::ComputerAction,
+        _space: &crate::computer::ObservationSpace,
+        _grounding: &Grounding,
+        _context: &crate::computer::ExecutionContext,
+    ) -> Result<(), crate::computer::ToolError> {
+        Err(crate::computer::ToolError::Unsupported)
+    }
+    /// Context-aware entry used by the engine, including OS fast paths.
+    async fn act_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &crate::computer::ExecutionContext,
+    ) -> anyhow::Result<Option<String>> {
+        ctx.check()?;
+        match d.action {
+            crate::Action::OpenApp => self
+                .open_app(d.text.as_deref().unwrap_or(""))
+                .await
+                .map(|_| None),
+            crate::Action::OpenUrl => self
+                .open_url(d.text.as_deref().unwrap_or(""))
+                .await
+                .map(|_| None),
+            crate::Action::Shell => self.shell(d.text.as_deref().unwrap_or("")).await.map(Some),
+            _ => self.act(d, g).await.map(|_| None),
+        }
+    }
     async fn act(&self, decision: &Decision, grounding: &Grounding) -> anyhow::Result<()>;
     async fn open_app(&self, app: &str) -> anyhow::Result<()>;
     async fn open_url(&self, url: &str) -> anyhow::Result<()>;
@@ -100,6 +137,15 @@ pub trait Actuator: Send + Sync {
     /// accessibility pattern (UIA Invoke/Value/Toggle/ExpandCollapse, AT-SPI
     /// Action/EditableText) with no mouse move. `Ok(true)` when it was done
     /// that way, `Ok(false)` when the caller should fall back to `act`.
+    async fn a11y_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &crate::computer::ExecutionContext,
+    ) -> anyhow::Result<bool> {
+        ctx.check()?;
+        self.a11y_act(d, g).await
+    }
     async fn a11y_act(&self, _decision: &Decision, _grounding: &Grounding) -> anyhow::Result<bool> {
         Ok(false)
     }
@@ -109,6 +155,38 @@ pub trait Actuator: Send + Sync {
 /// it to the browser lane for shell and app launches).
 #[async_trait]
 impl<T: Actuator + ?Sized> Actuator for std::sync::Arc<T> {
+    async fn a11y_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &crate::computer::ExecutionContext,
+    ) -> anyhow::Result<bool> {
+        (**self).a11y_context(d, g, ctx).await
+    }
+
+    async fn act_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &crate::computer::ExecutionContext,
+    ) -> anyhow::Result<Option<String>> {
+        (**self).act_context(d, g, ctx).await
+    }
+
+    fn computer_capabilities(&self) -> crate::computer::Capabilities {
+        (**self).computer_capabilities()
+    }
+    async fn computer_act(
+        &self,
+        action: &crate::computer::ComputerAction,
+        space: &crate::computer::ObservationSpace,
+        grounding: &Grounding,
+        context: &crate::computer::ExecutionContext,
+    ) -> Result<(), crate::computer::ToolError> {
+        (**self)
+            .computer_act(action, space, grounding, context)
+            .await
+    }
     async fn act(&self, decision: &Decision, grounding: &Grounding) -> anyhow::Result<()> {
         (**self).act(decision, grounding).await
     }
@@ -266,6 +344,8 @@ pub enum EngineEvent {
 /// Run limits and policy.
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
+    /// Versioned shared computer tools, experimental until measured.
+    pub computer_tools_v1: bool,
     pub max_steps: u32,
     pub max_time: Duration,
     pub approval: ApprovalLevel,
@@ -329,6 +409,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            computer_tools_v1: false,
             max_steps: 40,
             max_time: Duration::from_secs(600),
             approval: ApprovalLevel::HighRiskOnly,

@@ -37,6 +37,8 @@ async fn rejected_fields_are_dropped_and_remembered() {
     };
     let schema = Decision::json_schema();
     let req = ModelRequest {
+        observation_id: None,
+        computer_result: None,
         system: "s",
         user_text: "u",
         images: &imgs,

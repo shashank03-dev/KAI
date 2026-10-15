@@ -70,6 +70,8 @@ impl Verifier for LlmVerifier {
         let schema = Self::schema();
         let user = verifier_state(task, expect, state);
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: SYSTEM,
             user_text: &user,
             images: &images,

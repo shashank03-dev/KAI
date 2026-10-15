@@ -186,3 +186,21 @@ fn serde_rejects_unknown_action_and_unknown_fields() {
         assert!(serde_json::from_value::<ComputerAction>(value).is_err());
     }
 }
+
+#[test]
+fn strict_output_can_complete_without_attaching_a_computer_action() {
+    let schema = with_schema(&kai_core::StepReply::json_schema(), &Capabilities::all());
+    assert!(
+        schema["properties"]["computer"]["anyOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["type"] == "null")
+    );
+    let reply = kai_core::StepReply::parse_computer(
+        r#"{"thought":"done","action":"done","computer":null}"#,
+        None,
+    )
+    .unwrap();
+    assert_eq!(reply.decision.action, kai_core::Action::Done);
+}

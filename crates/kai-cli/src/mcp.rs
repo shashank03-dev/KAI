@@ -47,7 +47,7 @@ pub async fn serve(o: &BackendOpts) -> anyhow::Result<ExitCode> {
     let mut _local = None;
     match crate::live_settings(o) {
         Ok((b, mut s, keys)) => {
-            _local = crate::local_server(b, &mut s).await.ok().flatten();
+            _local = crate::runs::local_server(b, &mut s).await.ok().flatten();
             match (backend::config(&s, &o.ab), s.clients(&keys)) {
                 (Ok((mut config, _)), Ok(clients)) => {
                     // Nobody can approve here, so autopilot would let high-risk

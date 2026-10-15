@@ -79,3 +79,17 @@ pub fn run_recorder(
     }
     Ok(rec)
 }
+
+/// `--backend local`: the model's server, started for this run if needed.
+pub async fn local_server(
+    b: BackendArg,
+    s: &mut Settings,
+) -> anyhow::Result<Option<kai_os::local::LocalServer>> {
+    if b == BackendArg::Local
+        || (b == BackendArg::Auto && s.backend == kai_core::settings::BackendChoice::Local)
+    {
+        crate::models::ensure_local(s).await
+    } else {
+        Ok(None)
+    }
+}

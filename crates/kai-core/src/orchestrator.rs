@@ -265,6 +265,8 @@ impl Orchestrator<'_> {
             crop_jpeg: None,
         };
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: PLANNER,
             user_text: task,
             images: &images,
@@ -386,6 +388,8 @@ impl Orchestrator<'_> {
             crop_jpeg: None,
         };
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: SUMMARY,
             user_text: &text,
             images: &images,

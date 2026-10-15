@@ -81,6 +81,17 @@ pub enum ActionKind {
 }
 
 impl ComputerAction {
+    pub fn targets(&self) -> Vec<&Target> {
+        match self {
+            Self::Click { target, .. }
+            | Self::Move { target }
+            | Self::Type { target, .. }
+            | Self::Scroll { target, .. } => vec![target],
+            Self::Drag { points, .. } => points.iter().collect(),
+            _ => vec![],
+        }
+    }
+
     pub fn kind(&self) -> ActionKind {
         match self {
             Self::Observe => ActionKind::Observe,

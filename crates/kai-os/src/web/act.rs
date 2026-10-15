@@ -119,8 +119,16 @@ impl BrowserLane {
         self.file_chooser.store(false, Ordering::SeqCst);
         self.mouse("mouseMoved", x, y, "none", 0).await?;
         for n in 1..=times {
+            let mut release = super::release::Release::new(
+                &self.cdp,
+                &self.input_poisoned,
+                "Input.dispatchMouseEvent",
+                json!({"type":"mouseReleased","x":x,"y":y,"button":button,"clickCount":n}),
+                self.current().session,
+            );
             self.mouse("mousePressed", x, y, button, n).await?;
             self.mouse("mouseReleased", x, y, button, n).await?;
+            release.disarm();
         }
         // A file picker opens asynchronously; give its event a moment.
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -138,9 +146,17 @@ impl BrowserLane {
         match keys::chord(chord)? {
             Chord::Keys(downs) => {
                 for down in downs {
+                    let mut release = super::release::Release::new(
+                        &self.cdp,
+                        &self.input_poisoned,
+                        "Input.dispatchKeyEvent",
+                        keys::key_up(&down),
+                        self.current().session,
+                    );
                     self.page("Input.dispatchKeyEvent", down.clone()).await?;
                     self.page("Input.dispatchKeyEvent", keys::key_up(&down))
                         .await?;
+                    release.disarm();
                 }
                 Ok(())
             }
@@ -284,6 +300,39 @@ fn quad_centre(q: &Value) -> Option<(f64, f64)> {
 
 #[async_trait]
 impl Actuator for BrowserLane {
+    async fn act_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &kai_core::computer::ExecutionContext,
+    ) -> anyhow::Result<Option<String>> {
+        super::computer::INPUT_CONTEXT
+            .scope(ctx.clone(), async {
+                ctx.check()?;
+                match d.action {
+                    Action::OpenApp | Action::Shell => match &self.fallback {
+                        Some(h) => h.act_context(d, g, ctx).await,
+                        None => anyhow::bail!("desktop tools are unavailable in this browser lane"),
+                    },
+                    _ => self.act(d, g).await.map(|_| None),
+                }
+            })
+            .await
+    }
+
+    fn computer_capabilities(&self) -> kai_core::computer::Capabilities {
+        super::computer::capabilities()
+    }
+    async fn computer_act(
+        &self,
+        a: &kai_core::computer::ComputerAction,
+        s: &kai_core::computer::ObservationSpace,
+        g: &Grounding,
+        c: &kai_core::computer::ExecutionContext,
+    ) -> Result<(), kai_core::computer::ToolError> {
+        super::computer::act(self, a, s, g, c).await
+    }
+
     async fn act(&self, d: &Decision, g: &Grounding) -> anyhow::Result<()> {
         if matches!(d.action, Action::OpenApp | Action::Shell | Action::OpenUrl) {
             return match d.action {
@@ -332,6 +381,7 @@ impl Actuator for BrowserLane {
             _ => self.close_dropdown(),
         }
         landed(match d.action {
+            Action::Computer => anyhow::bail!("computer tools require versioned dispatch"),
             Action::Click | Action::DoubleClick | Action::RightClick => {
                 let mark = d.target.ok_or_else(|| anyhow::anyhow!("no target"))?;
                 let (button, times) = match d.action {

@@ -158,3 +158,15 @@ fn experimental_switches_are_off_until_turned_on() {
     assert!(c.outcomes && c.macro_history && c.procedures && c.recover && c.memo && c.task_checks);
     assert_eq!(c.best_of, 3);
 }
+
+#[test]
+fn obsolete_launcher_setting_is_ignored_and_not_written_back() {
+    let settings: Settings =
+        serde_json::from_value(serde_json::json!({"launcher_hotkey":"ctrl+shift+Space"})).unwrap();
+    assert!(
+        serde_json::to_value(settings)
+            .unwrap()
+            .get("launcher_hotkey")
+            .is_none()
+    );
+}

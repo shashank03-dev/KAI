@@ -28,6 +28,8 @@ impl Engine<'_> {
             crop_jpeg: None,
         };
         let req = ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: best_of::SYSTEM,
             user_text: &text,
             images: &images,

@@ -110,6 +110,11 @@ impl Engine<'_> {
     }
 }
 
+pub(super) struct DecisionObservation<'a> {
+    pub obs: &'a Observation,
+    pub id: u64,
+    pub result: Option<&'a crate::computer::ToolResult>,
+}
 impl Engine<'_> {
     /// Returns the reply plus the model wall time and time-to-first-token.
     pub(super) async fn decide(
@@ -117,14 +122,17 @@ impl Engine<'_> {
         client: &dyn ModelClient,
         system: &str,
         user_text: &str,
-        obs: &Observation,
+        observed: DecisionObservation<'_>,
         schema: &serde_json::Value,
         max_tokens: u32,
     ) -> anyhow::Result<Decided> {
+        let obs = observed.obs;
         // A `type` with no target goes to the field that has focus.
         let focused = obs.grounding.focused_field();
         let images = &obs.images;
         let req = ModelRequest {
+            observation_id: Some(observed.id),
+            computer_result: observed.result,
             system,
             user_text,
             images,
@@ -134,16 +142,20 @@ impl Engine<'_> {
         };
         let reply = self.decision_request(client, &req).await?;
 
-        match StepReply::parse_with_focus(&reply.raw, focused) {
+        let parse = |raw: &str| {
+            if self.config.computer_tools_v1 {
+                StepReply::parse_computer(raw, focused)
+            } else {
+                StepReply::parse_with_focus(raw, focused)
+            }
+        };
+        match parse(&reply.raw) {
             Ok(d) => Ok(Decided::new(d, &reply)),
             Err(_) if let Some(d) = salvaged(&reply.raw, focused) => Ok(Decided::new(d, &reply)),
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
                 // no-op improvement on vLLM structured outputs).
-                log::warn!(
-                    "repairing malformed reply: {first}; reply began: {:?}",
-                    reply.raw.chars().take(900).collect::<String>()
-                );
+                log::warn!("repairing malformed reply");
                 // A long command or text (e.g. a script) can overrun the
                 // short reply budget and arrive cut off: the retry gets room.
                 let hint = match &first {
@@ -165,13 +177,14 @@ impl Engine<'_> {
                      Reply with ONLY the JSON object."
                 );
                 let req2 = ModelRequest {
+                    observation_id: Some(observed.id),
+                    computer_result: observed.result,
                     user_text: &repair_text,
                     max_tokens: max_tokens.saturating_mul(8).max(REPAIR_MAX_TOKENS),
                     ..req
                 };
                 let reply2 = self.decision_request(client, &req2).await?;
-                let mut d =
-                    Decided::new(StepReply::parse_with_focus(&reply2.raw, focused)?, &reply2);
+                let mut d = Decided::new(parse(&reply2.raw)?, &reply2);
                 d.add_usage(&reply);
                 Ok(d)
             }

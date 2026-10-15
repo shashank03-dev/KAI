@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
+    /// Trace representation of an opt-in shared tool. Legacy model replies
+    /// cannot request this variant without the separate validated payload.
+    Computer,
     Click,
     DoubleClick,
     RightClick,
@@ -125,6 +128,11 @@ impl Decision {
     /// Force every field into range. Required fields missing for the action are
     /// an error; everything else is clamped, never rejected.
     pub fn validate_and_clamp(&mut self) -> Result<(), SchemaError> {
+        if self.action == Action::Computer {
+            return Err(SchemaError::Parse(
+                "computer tools require the versioned adapter".into(),
+            ));
+        }
         // Clamp thought to 25 words.
         let words: Vec<&str> = self.thought.split_whitespace().collect();
         if words.len() > MAX_THOUGHT_WORDS {

@@ -39,8 +39,58 @@ impl DesktopActuator {
 
 #[async_trait]
 impl Actuator for DesktopActuator {
+    async fn a11y_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &kai_core::computer::ExecutionContext,
+    ) -> anyhow::Result<bool> {
+        a11y::act_context(d, g, ctx).await
+    }
+
+    async fn act_context(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        ctx: &kai_core::computer::ExecutionContext,
+    ) -> anyhow::Result<Option<String>> {
+        let scoped = Self {
+            input: self.input.with_context(ctx),
+            shell: self.shell.clone(),
+        };
+        ctx.check()?;
+        match d.action {
+            Action::OpenApp => scoped
+                .open_app(d.text.as_deref().unwrap_or(""))
+                .await
+                .map(|_| None),
+            Action::OpenUrl => scoped
+                .open_url(d.text.as_deref().unwrap_or(""))
+                .await
+                .map(|_| None),
+            Action::Shell => scoped
+                .shell(d.text.as_deref().unwrap_or(""))
+                .await
+                .map(Some),
+            _ => scoped.act(d, g).await.map(|_| None),
+        }
+    }
+
+    fn computer_capabilities(&self) -> kai_core::computer::Capabilities {
+        crate::computer::capabilities()
+    }
+    async fn computer_act(
+        &self,
+        action: &kai_core::computer::ComputerAction,
+        space: &kai_core::computer::ObservationSpace,
+        grounding: &Grounding,
+        context: &kai_core::computer::ExecutionContext,
+    ) -> Result<(), kai_core::computer::ToolError> {
+        crate::computer::act(self, action, space, grounding, context).await
+    }
     async fn act(&self, d: &Decision, g: &Grounding) -> anyhow::Result<()> {
         match d.action {
+            Action::Computer => anyhow::bail!("computer tools require versioned dispatch"),
             Action::Click => {
                 let (x, y) = Self::point(d, g)?;
                 self.input.click(x, y, false, 1).await
@@ -87,8 +137,12 @@ impl Actuator for DesktopActuator {
 
     async fn open_app(&self, app: &str) -> anyhow::Result<()> {
         let app = app.to_string();
+        let context = self.input.context();
         tokio::task::spawn_blocking(move || {
             let before = crate::window::shot();
+            if let Some(ctx) = &context {
+                ctx.check()?;
+            }
             launch::open_app(&app)?;
             crate::window::wait_for_change(&before, LAUNCH_WAIT);
             Ok(())
@@ -98,8 +152,12 @@ impl Actuator for DesktopActuator {
 
     async fn open_url(&self, url: &str) -> anyhow::Result<()> {
         let url = url.to_string();
+        let context = self.input.context();
         tokio::task::spawn_blocking(move || {
             let before = crate::window::shot();
+            if let Some(ctx) = &context {
+                ctx.check()?;
+            }
             launch::open_url(&url)?;
             crate::window::wait_for_change(&before, LAUNCH_WAIT);
             Ok(())
@@ -119,7 +177,11 @@ impl Actuator for DesktopActuator {
         // (a GUI app never exits by itself): start it detached instead.
         #[cfg(target_os = "linux")]
         if crate::launch::linux::is_gui_command(cmd) {
+            let _owner = kai_core::computer::mutation_owner().await;
             let before = tokio::task::spawn_blocking(crate::window::shot).await?;
+            if let Some(ctx) = self.input.context() {
+                ctx.check()?;
+            }
             std::process::Command::new("setsid")
                 .args(["-f", "sh", "-c", cmd])
                 .current_dir(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))

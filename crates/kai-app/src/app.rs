@@ -126,10 +126,10 @@ impl KaiApp {
 
     /// Runs once the window is up: warm the connection and report it.
     pub fn after_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.check_connection(window, cx);
         if let Some(dir) = self.capture.clone() {
             crate::pages::capture::start(dir, window, cx);
         } else {
+            self.check_connection(window, cx);
             self.detect_local(cx);
         }
     }

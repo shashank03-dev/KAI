@@ -34,7 +34,12 @@ fn press_patterns(role: Role) -> &'static [Pattern] {
     }
 }
 
-pub fn act(node: &UiaRef, plan: &Plan, role: Role) -> anyhow::Result<bool> {
+pub fn act(
+    node: &UiaRef,
+    plan: &Plan,
+    role: Role,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     // Joins this blocking thread to the MTA (see `UiaRef`).
     let _auto = UIAutomation::new()?;
     let el = &node.0;
@@ -46,37 +51,50 @@ pub fn act(node: &UiaRef, plan: &Plan, role: Role) -> anyhow::Result<bool> {
         return Ok(false);
     }
     match plan {
-        Plan::Press => press(node, role),
-        Plan::Fill(text) => fill(node, text),
+        Plan::Press => press(node, role, ctx),
+        Plan::Fill(text) => fill(node, text, ctx),
     }
 }
 
-fn press(node: &UiaRef, role: Role) -> anyhow::Result<bool> {
+fn press(
+    node: &UiaRef,
+    role: Role,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     let el = &node.0;
     for p in press_patterns(role) {
         // None: pattern not supported, try the next one.
         let done: Option<Result<(), String>> = match p {
-            Pattern::Invoke => el
-                .get_pattern::<UIInvokePattern>()
-                .ok()
-                .map(|x| x.invoke().map_err(|e| e.to_string())),
-            Pattern::Toggle => el
-                .get_pattern::<UITogglePattern>()
-                .ok()
-                .map(|x| x.toggle().map_err(|e| e.to_string())),
-            Pattern::SelectionItem => el
-                .get_pattern::<UISelectionItemPattern>()
-                .ok()
-                .map(|x| x.select().map_err(|e| e.to_string())),
+            Pattern::Invoke => el.get_pattern::<UIInvokePattern>().ok().map(|x| {
+                ctx.check()
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| x.invoke().map_err(|e| e.to_string()))
+            }),
+            Pattern::Toggle => el.get_pattern::<UITogglePattern>().ok().map(|x| {
+                ctx.check()
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| x.toggle().map_err(|e| e.to_string()))
+            }),
+            Pattern::SelectionItem => el.get_pattern::<UISelectionItemPattern>().ok().map(|x| {
+                ctx.check()
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| x.select().map_err(|e| e.to_string()))
+            }),
             Pattern::ExpandCollapse => {
                 el.get_pattern::<UIExpandCollapsePattern>()
                     .ok()
                     .and_then(|x| match x.get_state() {
                         Ok(ExpandCollapseState::LeafNode) => None,
-                        Ok(ExpandCollapseState::Expanded) => {
-                            Some(x.collapse().map_err(|e| e.to_string()))
-                        }
-                        _ => Some(x.expand().map_err(|e| e.to_string())),
+                        Ok(ExpandCollapseState::Expanded) => Some(
+                            ctx.check()
+                                .map_err(|e| e.to_string())
+                                .and_then(|_| x.collapse().map_err(|e| e.to_string())),
+                        ),
+                        _ => Some(
+                            ctx.check()
+                                .map_err(|e| e.to_string())
+                                .and_then(|_| x.expand().map_err(|e| e.to_string())),
+                        ),
                     })
             }
         };
@@ -92,7 +110,11 @@ fn press(node: &UiaRef, role: Role) -> anyhow::Result<bool> {
     Ok(false)
 }
 
-fn fill(node: &UiaRef, text: &str) -> anyhow::Result<bool> {
+fn fill(
+    node: &UiaRef,
+    text: &str,
+    ctx: &kai_core::computer::ExecutionContext,
+) -> anyhow::Result<bool> {
     let el = &node.0;
     let Ok(value) = el.get_pattern::<UIValuePattern>() else {
         return Ok(false);
@@ -105,9 +127,11 @@ fn fill(node: &UiaRef, text: &str) -> anyhow::Result<bool> {
         Ok(v) if v.is_empty() => {}
         _ => return Ok(false),
     }
+    ctx.check()?;
     let _ = el.set_focus();
-    if let Err(e) = value.set_value(text) {
-        log::debug!("UIA SetValue failed: {e}");
+    ctx.check()?;
+    if let Err(_e) = value.set_value(text) {
+        log::debug!("UIA SetValue failed");
         return Ok(false);
     }
     let now = value.get_value().unwrap_or_default();
@@ -117,10 +141,11 @@ fn fill(node: &UiaRef, text: &str) -> anyhow::Result<bool> {
     if now.is_empty() {
         return Ok(false);
     }
+    ctx.check()?;
     let _ = value.set_value("");
     if value.get_value().map(|v| v.is_empty()).unwrap_or(false) {
         Ok(false)
     } else {
-        anyhow::bail!("UI Automation text entry left {now:?} instead of {text:?}")
+        anyhow::bail!("UI Automation text entry could not be verified")
     }
 }

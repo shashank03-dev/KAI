@@ -78,7 +78,7 @@ impl Engine<'_> {
         r.human.blocked += 1;
         rec.path = Some("human".into());
         rec.verified = false;
-        r.trace.push(rec);
+        r.push(rec);
         r.pending = None;
         r.force_full = true;
         let what = match check.kind {
@@ -124,7 +124,7 @@ impl Engine<'_> {
         let step = rec.index;
         rec.path = Some("human".into());
         rec.verified = false;
-        r.trace.push(rec);
+        r.push(rec);
         r.pending = None;
 
         let helper = match self.human {
@@ -275,10 +275,12 @@ impl Engine<'_> {
             target: obs.grounding.target_rect(mark),
         });
         let t_act = Instant::now();
-        r.privacy.protect(&typing, &obs.grounding, true);
+        r.protect(&typing, &obs.grounding, true);
         // Even a partial input failure may leave the code on screen.
         r.human.codes.push(code);
-        let acted = self.act(&typing, &obs.grounding).await;
+        let acted = self
+            .act(&typing, &obs.grounding, &r.privacy, Some(&obs))
+            .await;
         drop(typing);
         let timings = Timings {
             act_ms: t_act.elapsed().as_millis() as u64,
@@ -310,7 +312,7 @@ impl Engine<'_> {
                 "code_type_failed"
             }
         };
-        r.trace.push(rec);
+        r.push(rec);
         self.perceptor.settle(Duration::from_secs(3)).await;
         result
     }

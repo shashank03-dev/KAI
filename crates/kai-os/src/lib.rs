@@ -4,6 +4,7 @@
 //! Actuator for the real desktop.
 
 pub mod a11y;
+mod computer;
 pub mod desktop;
 pub mod exclude;
 pub mod frame;

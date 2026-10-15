@@ -84,6 +84,7 @@ pub enum BackendChoice {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub computer_tools_v1: bool,
     pub backend: BackendChoice,
     /// e.g. `https://1-2-3-4.sslip.io/v1`
     pub vllm_endpoint: String,
@@ -91,7 +92,6 @@ pub struct Settings {
     pub careful_model: String,
     pub approval: ApprovalLevel,
     pub kill_hotkey: String,
-    pub launcher_hotkey: String,
     pub max_steps: u32,
     pub max_minutes: u32,
     /// Parallel terminal sub-agents.
@@ -160,13 +160,13 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            computer_tools_v1: false,
             backend: BackendChoice::Both,
             vllm_endpoint: String::new(),
             fast_model: MODELS[0].id.to_string(),
             careful_model: MODELS[1].id.to_string(),
             approval: ApprovalLevel::HighRiskOnly,
             kill_hotkey: "ctrl+alt+Escape".to_string(),
-            launcher_hotkey: "ctrl+shift+Space".to_string(),
             max_steps: 40,
             max_minutes: 10,
             parallelism: 4,
@@ -312,6 +312,7 @@ impl Settings {
     pub fn engine_config(&self) -> crate::Config {
         let (max_steps, max_time) = self.limits();
         crate::Config {
+            computer_tools_v1: self.computer_tools_v1,
             max_steps,
             max_time,
             approval: self.approval,

@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Args, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ab {
+    /// Expose the experimental shared computer tools to local models.
+    #[arg(long)]
+    pub computer_tools_v1: bool,
     /// Disable multi-action steps (one action per model call).
     #[arg(long)]
     pub no_batch: bool,
@@ -81,6 +84,9 @@ impl Ab {
     /// Every flag that differs from the defaults, as typed.
     pub fn changed(&self) -> Vec<&'static str> {
         let mut v = self.disabled();
+        if self.computer_tools_v1 {
+            v.push("--computer-tools-v1");
+        }
         if self.executor {
             v.push("--executor");
         }
@@ -128,6 +134,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.recover = ab.recover;
     config.memo = ab.memo;
     config.task_checks = ab.task_checks;
+    config.computer_tools_v1 = ab.computer_tools_v1;
     Ok(true)
 }
 

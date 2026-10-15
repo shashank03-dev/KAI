@@ -385,6 +385,8 @@ mod tests {
         };
         let schema = crate::schema::Decision::json_schema();
         f(&ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: "SYS",
             user_text: "USER",
             images: &imgs,

@@ -124,35 +124,35 @@ impl Engine<'_> {
         let step = rec.index;
         if !r.ledger.ledger.gated() || r.ledger.waived {
             rec.path = Some("none".into());
-            r.trace.push(rec);
+            r.push(rec);
             return Some(Outcome::Success);
         }
         let failed = self.run_probes(r, step, obs).await;
         self.emit_outcomes(r, step);
         if failed.is_empty() {
             rec.path = Some("none".into());
-            r.trace.push(rec);
+            r.push(rec);
             return Some(Outcome::Success);
         }
 
         // ---- Refuse: not done yet ----
-        let codes = &r.human.codes;
+        let codes = r.human.codes.clone();
         let why = failed
             .iter()
             .map(|f| format!("{}: {} failed ({})", f.outcome, f.probe, f.reason))
             .collect::<Vec<_>>()
             .join("; ");
-        let msg = redact_text(&format!("not done: {why}"), codes);
+        let msg = redact_text(&format!("not done: {why}"), &codes);
         rec.path = Some("gate".into());
         rec.verified = false;
-        r.trace.push(rec);
+        r.push(rec);
         let mut g = GateRecord {
             step,
             kind: "refused".into(),
             failed,
             last_effect: r.ledger.last_effect,
         };
-        redact_gate(&mut g, codes);
+        redact_gate(&mut g, &codes);
         r.trace.gate.push(g);
         let mut note = format!(
             "{msg}. Kai checked: the task is not finished yet. Keep going, then say done again."

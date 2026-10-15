@@ -26,6 +26,8 @@ async fn decide(c: &dyn ModelClient) -> Result<kai_core::client::ModelReply, Cli
     };
     let schema = Decision::json_schema();
     c.decide(&ModelRequest {
+        observation_id: None,
+        computer_result: None,
         system: "SYS",
         user_text: "task",
         images: &imgs,

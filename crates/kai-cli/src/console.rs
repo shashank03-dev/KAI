@@ -68,6 +68,7 @@ pub fn describe(d: &Decision) -> String {
     let target = d.target.map(|t| format!(" #{t}")).unwrap_or_default();
     let text = d.text.as_deref().unwrap_or("");
     match d.action {
+        Computer => format!("computer {text}"),
         Click => format!("click{target}"),
         DoubleClick => format!("double-click{target}"),
         RightClick => format!("right-click{target}"),
@@ -101,7 +102,10 @@ pub struct TerminalApprover {
 #[async_trait]
 impl Approver for TerminalApprover {
     async fn approve(&self, d: &Decision, g: &Grounding) -> ApprovalChoice {
-        if self.auto_yes && !kai_core::risk::is_payment_or_password(d, g) {
+        if self.auto_yes
+            && d.action != kai_core::Action::Computer
+            && !kai_core::risk::is_payment_or_password(d, g)
+        {
             eprintln!("     ✔ auto-approved: {}", describe(d));
             return ApprovalChoice::Approve;
         }

@@ -89,6 +89,8 @@ mod tests {
 
     fn empty_req<'a>(schema: &'a serde_json::Value, imgs: &'a Images) -> ModelRequest<'a> {
         ModelRequest {
+            observation_id: None,
+            computer_result: None,
             system: "s",
             user_text: "u",
             images: imgs,

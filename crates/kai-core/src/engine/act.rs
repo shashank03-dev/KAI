@@ -104,14 +104,83 @@ impl Engine<'_> {
         &self,
         decision: &Decision,
         grounding: &Grounding,
+        privacy: &super::privacy::Privacy,
+        observed: Option<&crate::Observation>,
+    ) -> anyhow::Result<(Option<String>, &'static str)> {
+        let ctx = crate::computer::ExecutionContext::new(Duration::from_secs(180));
+        let _guard = crate::computer::ExecutionGuard(ctx.clone());
+        let operation = async {
+            let _owner = if decision.action == Action::Shell {
+                None
+            } else {
+                Some(crate::computer::mutation_owner().await)
+            };
+            // Approvals and queued ownership waits can outlive the screen.
+            if !matches!(
+                decision.action,
+                Action::Shell | Action::OpenApp | Action::OpenUrl | Action::Wait
+            ) {
+                let grid = matches!(grounding, Grounding::Grid { .. });
+                anyhow::ensure!(
+                    !grid || observed.is_some(),
+                    "grid input needs a current captured observation"
+                );
+                let mut fresh = if grid || !self.config.tree_only {
+                    self.perceptor.observe().await?
+                } else {
+                    self.perceptor.observe_tree_only().await?
+                };
+                privacy.sanitise(&mut fresh);
+                let mut expected = grounding.clone();
+                privacy.redact(&mut expected);
+                anyhow::ensure!(
+                    fresh.grounding == expected,
+                    "the approved target changed; observe again"
+                );
+                if let Some(old) = observed {
+                    anyhow::ensure!(
+                        fresh.screen == old.screen
+                            && fresh.window_title
+                                == old.window_title.as_deref().map(|s| privacy.text(s))
+                            && fresh.url == old.url.as_deref().map(|s| privacy.text(s))
+                            && (!grid || fresh.screen_hash == old.screen_hash),
+                        "the approved foreground context changed; observe again"
+                    );
+                }
+            }
+            self.act_inner(decision, grounding, &ctx).await
+        };
+        tokio::select! {
+            biased;
+            ()=crate::ports::wait_cancelled(self.interrupt)=>anyhow::bail!("run cancelled"),
+            result=operation=>result,
+        }
+    }
+
+    async fn act_inner(
+        &self,
+        decision: &Decision,
+        grounding: &Grounding,
+        ctx: &crate::computer::ExecutionContext,
     ) -> anyhow::Result<(Option<String>, &'static str)> {
         anyhow::ensure!(!self.interrupt.cancelled(), "run cancelled");
-        let text = decision.text.as_deref().unwrap_or("");
         // Fast paths reach the OS directly, no grounding needed.
         match decision.action {
-            Action::OpenApp => self.actuator.open_app(text).await.map(|_| (None, "os")),
-            Action::OpenUrl => self.actuator.open_url(text).await.map(|_| (None, "os")),
-            Action::Shell => self.actuator.shell(text).await.map(|o| (Some(o), "shell")),
+            Action::OpenApp => self
+                .actuator
+                .act_context(decision, grounding, ctx)
+                .await
+                .map(|o| (o, "os")),
+            Action::OpenUrl => self
+                .actuator
+                .act_context(decision, grounding, ctx)
+                .await
+                .map(|o| (o, "os")),
+            Action::Shell => self
+                .actuator
+                .act_context(decision, grounding, ctx)
+                .await
+                .map(|o| (o, "shell")),
             Action::Wait => {
                 self.perceptor.settle(Duration::from_secs(2)).await;
                 Ok((None, "wait"))
@@ -122,10 +191,12 @@ impl Engine<'_> {
                     && let Some(t) = decision.target
                     && grounding.element(t).is_some()
                 {
-                    match self.actuator.a11y_act(decision, grounding).await {
+                    match self.actuator.a11y_context(decision, grounding, ctx).await {
                         Ok(true) => return Ok((None, "a11y")),
                         Ok(false) => {}
-                        Err(e) => log::debug!("a11y path failed, using the mouse: {e}"),
+                        Err(_) => {
+                            anyhow::bail!("accessibility action failed; its effect is unknown")
+                        }
                     }
                 }
                 let path = if decision.target.is_some() || decision.action == Action::Scroll {
@@ -133,7 +204,8 @@ impl Engine<'_> {
                 } else {
                     "keyboard"
                 };
-                self.actuator.act(decision, grounding).await?;
+                anyhow::ensure!(!self.interrupt.cancelled(), "run cancelled");
+                self.actuator.act_context(decision, grounding, ctx).await?;
                 // Typing into a dropdown picks the matching option; Enter
                 // commits it (a click alone only toggles the list).
                 if decision.action == Action::Type
@@ -148,7 +220,7 @@ impl Engine<'_> {
                     enter.text = None;
                     enter.keys = vec!["enter".to_string()];
                     anyhow::ensure!(!self.interrupt.cancelled(), "run cancelled");
-                    self.actuator.act(&enter, grounding).await?;
+                    self.actuator.act_context(&enter, grounding, ctx).await?;
                 }
                 Ok((None, path))
             }
@@ -178,7 +250,7 @@ impl Engine<'_> {
             // first, so a focused password field, a CAPTCHA or suspicious
             // text hands over to the model instead of being typed into.
             let mut g = none.clone();
-            if d.action == Action::Type {
+            if matches!(d.action, Action::Type | Action::Key | Action::Scroll) {
                 match self.perceptor.observe_tree_only().await {
                     Ok(mut o) => {
                         r.redact(&mut o.grounding);
@@ -205,11 +277,12 @@ impl Engine<'_> {
                 }
             }
             let t = Instant::now();
-            r.privacy.protect(d, &g, false);
-            let (output, path) = match self.act(d, &g).await {
+            r.protect(d, &g, false);
+            let (output, path) = match self.act(d, &g, &r.privacy, None).await {
                 Ok(x) => x,
                 Err(e) => {
-                    log::warn!("{label} step {d:?} failed: {e}; handing over to the model");
+                    log::warn!("{label} step failed; handing over to the model");
+                    let _ = e;
                     break;
                 }
             };
@@ -225,7 +298,7 @@ impl Engine<'_> {
             let mut rec = StepRecord::new(step, d, timings, label);
             rec.path = Some(path.to_string());
             rec.output = output.clone();
-            r.trace.push(rec);
+            r.push(rec);
             let mut item = HistoryItem::from_decision(d);
             if let Some(o) = &output {
                 item.push_output(o);
