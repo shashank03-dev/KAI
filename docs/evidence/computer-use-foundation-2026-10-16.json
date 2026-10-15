@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-16",
+  "code_revision": "c9054dd3dfe3d499ce472c730f874c3632ffb705",
+  "branch": "shashanks-Agent/computer-use-foundation",
+  "host_target": "aarch64-apple-darwin",
+  "experimental_default": false,
+  "checks": {
+    "format": "passed",
+    "host_workspace_clippy": "passed",
+    "tests": {
+      "passed": 616,
+      "failed": 0,
+      "ignored": 2
+    },
+    "skills": {
+      "checked": 10,
+      "failed": 0
+    },
+    "mock_benchmark": {
+      "passed": 30,
+      "total": 30,
+      "skipped": 0,
+      "recorded": true,
+      "model_called": false
+    }
+  },
+  "ignored_tests": [
+    "desktop_vs_lane_on_one_page",
+    "every_toolkit_takes_the_accessibility_path_and_the_widget_changes"
+  ],
+  "unverified": [
+    "Windows and Linux compilation/runtime",
+    "live approval layout",
+    "mixed-DPI and multi-monitor desktop acceptance",
+    "live model accuracy",
+    "comparative latency",
+    "live benchmark A/B rollout"
+  ],
+  "notes": [
+    "No paid API calls, model/runtime installs, toolchain downloads or hosted CI.",
+    "Pre-existing vendored Ely deprecation warnings remain.",
+    "Both Responses protocols execute through the shared Engine; current protocol requires an explicit compatible CLI model.",
+    "Browser v1 capabilities remain Observe, Move, pixel Scroll and Wait."
+  ]
+}

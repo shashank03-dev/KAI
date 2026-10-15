@@ -57,7 +57,7 @@ Splash ──► Onboarding (first run) ──► Home (AppShell)
                                         ├─ History    (list ▸ trace)
                                         ├─ Benchmarks
                                         └─ Settings   (6 sections)
-Everywhere: Command palette (Ctrl+K) · Quick launcher (Ctrl+Shift+Space, global)
+Everywhere: Command palette (Ctrl+K)
             · Shortcut cheat-sheet (?) · Toasts · Offline banner
 While running: Mini window (always on top, corner) ⇄ full Run view
 ```
@@ -319,8 +319,7 @@ all with `overlays::ConfirmDialog`) · Shortcuts (`settings::KeyboardShortcutsLi
 
 ### 10. Everywhere
 `navigation::CommandPalette` on `Ctrl+K` (new task, any screen, any skill,
-toggle theme, stop); global `Ctrl+Shift+Space` opens
-`navigation::QuickLauncher` from any app; `feedback::Toaster` toasts;
+toggle theme, stop); `feedback::Toaster` toasts;
 `?` opens the shortcut list.
 
 ## Name mapping (prompt → Ely at the pinned commit)
