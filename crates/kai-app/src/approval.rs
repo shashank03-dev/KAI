@@ -68,11 +68,14 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     ))
     .children(frame)
     .child(
-        ScrollArea::new("approval-action").h(px(160.)).child(
-            div()
-                .p_2()
-                .child(SelectableText::new("approval-json", json)),
-        ),
+        ScrollArea::new("approval-action")
+            .h(px(160.))
+            .vertical()
+            .child(
+                div()
+                    .p_2()
+                    .child(SelectableText::new("approval-json", json)),
+            ),
     )
     .action(|close| {
         Button::new("approval-stop", "Stop")

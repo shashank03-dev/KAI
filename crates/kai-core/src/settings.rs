@@ -209,6 +209,18 @@ pub struct Keys {
     pub openai: Option<String>,
 }
 
+impl Keys {
+    /// Each key from `self`, or else from `stored`.
+    pub fn or(self, stored: Keys) -> Keys {
+        Keys {
+            vllm: self.vllm.or(stored.vllm),
+            gemini: self.gemini.or(stored.gemini),
+            gateway: self.gateway.or(stored.gateway),
+            openai: self.openai.or(stored.openai),
+        }
+    }
+}
+
 impl Settings {
     /// `~/.config/kai` on Linux, `%APPDATA%\Kai` on Windows.
     pub fn dir() -> PathBuf {

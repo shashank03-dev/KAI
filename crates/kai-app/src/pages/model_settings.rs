@@ -60,7 +60,7 @@ pub fn test(app: &mut KaiApp, backend: Option<BackendChoice>, cx: &mut Context<K
     let rx = cx
         .global::<AgentHandle>()
         .0
-        .test_connection(settings, kai_os::secrets::keys());
+        .test_connection(settings, Default::default());
     cx.spawn(async move |this, cx| {
         let r = rx
             .await

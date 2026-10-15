@@ -148,6 +148,10 @@ fn drag_key_text_and_batch_limits_are_enforced() {
         vec![],
         vec!["ctrl".into(), "bogus".into()],
         vec!["a".into(), "b".into()],
+        vec!["\n".into()],
+        vec!["ctrl".into(), "\u{1b}".into()],
+        vec!["\u{0}".into()],
+        vec!["\u{a0}".into()],
     ] {
         assert_eq!(
             request(ComputerAction::Keypress { keys })

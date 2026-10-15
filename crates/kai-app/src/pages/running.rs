@@ -2,7 +2,8 @@
 //! composer to steer the agent, what Kai sees on the right, and the run's
 //! controls (pause, resume, stop) in the header.
 
-use crate::app::KaiApp;
+use crate::app::{KaiApp, Page};
+use crate::follow::{self, Frame};
 use crate::i18n::t;
 use crate::pages::panes;
 use crate::state::{Phase, RunState};
@@ -19,8 +20,8 @@ use ely_gpui_component::{
     theme::{ActiveTheme, TextSize},
 };
 use gpui::{
-    AnyElement, Axis, Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, point,
-    px,
+    AnyElement, Axis, Context, FontWeight, IntoElement, ParentElement, ScrollHandle, Styled,
+    Window, div, point, px,
 };
 
 /// Context a step costs, roughly: the stable prompt plus one screenshot.
@@ -122,6 +123,82 @@ fn steer_box(id: u64, app: &KaiApp, _r: &RunState, cx: &Context<KaiApp>) -> AnyE
     .into_any_element()
 }
 
+/// The tab on show: Screen is a tab only in the compact layout.
+fn shown_tab(app: &KaiApp, compact: bool) -> String {
+    if !compact && app.run_tab == "screen" {
+        "steps".into()
+    } else {
+        app.run_tab.clone()
+    }
+}
+
+/// Entries a tab lists, for the views that follow the newest one.
+fn entries(r: &RunState, tab: &str) -> Option<usize> {
+    match tab {
+        "steps" => Some(r.steps.len() + r.steers.len()),
+        "terminal" => Some(r.outputs.len()),
+        _ => None,
+    }
+}
+
+impl KaiApp {
+    /// Back to the newest step (or command): the view follows again.
+    pub fn jump_to_latest(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.filter(|_| self.page == Page::Run) else {
+            return;
+        };
+        let r = self.run.read(cx);
+        if entries(r, &self.run_tab).is_none() {
+            self.run_tab = "steps".into();
+        }
+        let n = entries(r, &self.run_tab).unwrap_or_default();
+        let (scroll, follow) = self.transcripts.view(id, &self.run_tab);
+        follow.jump(n);
+        scroll.scroll_to_bottom();
+        cx.notify();
+    }
+}
+
+/// The left pane's scroll handle, scrolled to the end while it follows, and
+/// "Jump to latest" while the user reads older entries.
+fn transcript_scroll(
+    app: &mut KaiApp,
+    id: u64,
+    tab: &str,
+    r: &RunState,
+    cx: &Context<KaiApp>,
+) -> (ScrollHandle, Option<AnyElement>) {
+    let (scroll, follow) = app.transcripts.view(id, tab);
+    let scroll = scroll.clone();
+    let Some(entries) = entries(r, tab) else {
+        return (scroll, None);
+    };
+    let frame = Frame {
+        offset: scroll.offset().y.into(),
+        max: scroll.max_offset().y.into(),
+        entries,
+    };
+    if follow.frame(frame) {
+        scroll.scroll_to_bottom();
+        return (scroll, None);
+    }
+    let jumper = cx.entity();
+    let jump = div()
+        .absolute()
+        .bottom(px(12.))
+        .right(px(20.))
+        .rounded_md()
+        .shadow_md()
+        .child(
+            Button::new("jump-latest", follow::jump_label(follow.unseen(entries)))
+                .variant(ButtonVariant::Secondary)
+                .icon(IconName::ArrowDown)
+                .on_click(move |_, _, cx| jumper.update(cx, |a, cx| a.jump_to_latest(cx))),
+        )
+        .into_any_element();
+    (scroll, Some(jump))
+}
+
 /// The left pane's tabs: transcript, terminal, sub-agents.
 pub fn tabs(
     app: &KaiApp,
@@ -131,11 +208,7 @@ pub fn tabs(
     cx: &Context<KaiApp>,
 ) -> AnyElement {
     let picker = cx.entity();
-    let tab = if !compact && app.run_tab == "screen" {
-        "steps".into()
-    } else {
-        app.run_tab.clone()
-    };
+    let tab = shown_tab(app, compact);
     let panel = match tab.as_str() {
         "terminal" => panes::terminal(r, cx),
         "team" => panes::team_tree(r, cx),
@@ -294,6 +367,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         ],
     );
     let g = Glass::of(cx);
+    let (scroll, jump) = transcript_scroll(app, id, &shown_tab(app, compact), r, cx);
     let done = step_no as f32 / r.max_steps.max(1) as f32;
     let line_color = if r.paused || r.phase == Phase::Waiting {
         cx.theme().colors.warning
@@ -348,12 +422,19 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .flex()
         .flex_col()
         .child(
-            div().flex_1().min_h_0().overflow_hidden().child(
-                ScrollArea::new("steps")
-                    .size_full()
-                    .vertical()
-                    .child(div().p_4().child(tabs(app, r, true, compact, cx))),
-            ),
+            div()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
+                .relative()
+                .child(
+                    ScrollArea::new("steps")
+                        .size_full()
+                        .vertical()
+                        .track_scroll(&scroll)
+                        .child(div().p_4().child(tabs(app, r, true, compact, cx))),
+                )
+                .children(jump),
         )
         .child(
             div()

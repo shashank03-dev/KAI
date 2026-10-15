@@ -6,13 +6,12 @@
 
 use crate::control::RunControl;
 pub use crate::errors::friendly;
-use async_trait::async_trait;
 use futures::channel::{mpsc, oneshot};
-use kai_core::engine::{ApprovalChoice, Approver, EngineEvent, EventSink};
-use kai_core::human::{HumanCheck, HumanHelper, HumanReply};
+use kai_core::engine::{ApprovalChoice, EngineEvent, EventSink};
+use kai_core::human::{HumanCheck, HumanReply};
 use kai_core::orchestrator::{Orchestrator, Plan};
 use kai_core::settings::{Keys, Settings};
-use kai_core::{Decision, Engine, Grounding, Images, Rect, Skill, Trace};
+use kai_core::{Decision, Engine, Images, Rect, Skill, Trace};
 use kai_os::{DesktopActuator, DesktopPerceptor, KillSwitch};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -146,7 +145,6 @@ impl Agent {
         task: String,
         team: bool,
         settings: Settings,
-        keys: Keys,
         skills: Vec<Skill>,
         control: Arc<RunControl>,
     ) -> mpsc::UnboundedReceiver<Ui> {
@@ -177,6 +175,7 @@ impl Agent {
             running.clone(),
         ));
         self.runtime.spawn(async move {
+            let keys = crate::keys::resolve(Keys::default()).await;
             // Kai's own browser (Settings): its eyes and hands for this run.
             let lane = match settings.use_browser {
                 true => Some(lanes.get(actuator.clone()).await),
@@ -234,13 +233,15 @@ impl Agent {
     }
 
     /// Send one real screenshot to the configured backend and time it.
+    /// `typed` keys (not saved yet) win over stored ones.
     pub fn test_connection(
         &self,
         settings: Settings,
-        keys: Keys,
+        typed: Keys,
     ) -> oneshot::Receiver<Result<(Duration, String), String>> {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
+            let keys = crate::keys::resolve(typed).await;
             let r = async {
                 let (client, _) = settings.clients(&keys)?;
                 let images = Images {
@@ -279,8 +280,8 @@ async fn drive(
         tx: tx.clone(),
         dir: dir.clone(),
     };
-    let approver = UiApprover { tx: tx.clone() };
-    let human = UiHuman { tx: tx.clone() };
+    let approver = crate::asks::UiApprover { tx: tx.clone() };
+    let human = crate::asks::UiHuman { tx: tx.clone() };
 
     if team {
         let orch = Orchestrator {
@@ -436,62 +437,6 @@ impl EventSink for Sink {
             }
         }
         let _ = self.tx.unbounded_send(Ui::Event(ev.clone()));
-    }
-}
-
-struct UiApprover {
-    tx: mpsc::UnboundedSender<Ui>,
-}
-
-#[async_trait]
-impl Approver for UiApprover {
-    async fn approve(&self, decision: &Decision, grounding: &Grounding) -> ApprovalChoice {
-        let (reply, answer) = oneshot::channel();
-        let element = decision
-            .target
-            .and_then(|t| grounding.element(t))
-            .map(|e| e.name.clone());
-        if self
-            .tx
-            .unbounded_send(Ui::Approval(Pending {
-                decision: decision.clone(),
-                element,
-                explain: kai_core::risk::explain(decision, grounding),
-                reply,
-            }))
-            .is_err()
-        {
-            return ApprovalChoice::Stop;
-        }
-        // A closed window or dropped dialog counts as Stop.
-        answer.await.unwrap_or(ApprovalChoice::Stop)
-    }
-}
-
-/// Asks the user through the app: a desktop notification, then the mini
-/// window and the main window's dialog (see `human.rs`).
-struct UiHuman {
-    tx: mpsc::UnboundedSender<Ui>,
-}
-
-#[async_trait]
-impl HumanHelper for UiHuman {
-    async fn ask(&self, check: &HumanCheck) -> HumanReply {
-        let (reply, answer) = oneshot::channel();
-        if self
-            .tx
-            .unbounded_send(Ui::Human(HumanPending {
-                check: check.clone(),
-                reply,
-            }))
-            .is_err()
-        {
-            return HumanReply::Stop;
-        }
-        // The dialog is up; now the notification (bounded, best effort).
-        kai_os::notify::desktop(check.kind.title(), &check.prompt).await;
-        // A closed window or dropped dialog counts as Stop.
-        answer.await.unwrap_or(HumanReply::Stop)
     }
 }
 

@@ -52,6 +52,8 @@ pub struct KaiApp {
     /// Which pane the run view shows: "steps", "terminal" or "team".
     pub run_tab: String,
     pub tasks_open: bool,
+    /// Where each run's Steps and Terminal views are scrolled to.
+    pub transcripts: crate::follow::Transcripts,
     pub settings: Settings,
     pub skills: Vec<Skill>,
     pub toaster: Entity<Toaster>,
@@ -112,6 +114,7 @@ impl KaiApp {
             human_draft,
             run_tab: "steps".into(),
             tasks_open: false,
+            transcripts: Default::default(),
             team: settings.team_mode,
             pages: pages::PageState::new(&settings, window, cx),
             local,
@@ -144,7 +147,7 @@ impl KaiApp {
         let rx = cx
             .global::<AgentHandle>()
             .0
-            .test_connection(self.settings.clone(), kai_os::secrets::keys());
+            .test_connection(self.settings.clone(), Default::default());
         cx.spawn(async move |this, cx| {
             let result = rx
                 .await
@@ -425,6 +428,7 @@ impl Render for KaiApp {
             .on_action(cx.listener(|a, _: &PrevTask, _, cx| a.step_task(-1, cx)))
             .on_action(cx.listener(|a, _: &TogglePause, _, cx| a.toggle_pause(cx)))
             .on_action(cx.listener(|a, _: &RetryRun, window, cx| a.retry_selected(window, cx)))
+            .on_action(cx.listener(|a, _: &JumpToLatest, _, cx| a.jump_to_latest(cx)))
             .child(
                 FocusScope::new(&self.focus)
                     .root()

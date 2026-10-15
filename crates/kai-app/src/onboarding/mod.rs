@@ -131,19 +131,18 @@ impl Onboarding {
         cx.notify();
     }
 
-    /// The keys typed here, falling back to any already stored, so a Test
-    /// works with a key set earlier or in the environment.
+    /// The keys typed here; the agent fills the rest from those already
+    /// stored, so a Test works with a key set earlier or in the environment.
     fn keys(&self, cx: &Context<Self>) -> kai_core::settings::Keys {
         let typed = |f: &Entity<TextInput>| {
             let v = f.read(cx).text().trim().to_string();
             (!v.is_empty()).then_some(v)
         };
-        let stored = kai_os::secrets::keys();
         kai_core::settings::Keys {
-            vllm: typed(&self.vllm_key).or(stored.vllm),
-            gemini: typed(&self.gemini_key).or(stored.gemini),
-            gateway: typed(&self.gateway_key).or(stored.gateway),
-            openai: typed(&self.openai_key).or(stored.openai),
+            vllm: typed(&self.vllm_key),
+            gemini: typed(&self.gemini_key),
+            gateway: typed(&self.gateway_key),
+            openai: typed(&self.openai_key),
         }
     }
 

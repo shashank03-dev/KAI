@@ -155,7 +155,6 @@ impl KaiApp {
             task,
             team,
             self.settings.clone(),
-            kai_os::secrets::keys(),
             self.enabled_skills(),
             control,
         );
@@ -374,6 +373,8 @@ impl KaiApp {
     pub fn clear_finished(&mut self, cx: &mut Context<Self>) {
         self.runs
             .retain(|r| r.state.read(cx).phase != Phase::Done || Some(r.id) == self.active);
+        let kept: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
+        self.transcripts.retain(|id| kept.contains(&id));
         if self.selected.is_some_and(|id| self.entry(id).is_none()) {
             self.select(None, cx);
         }

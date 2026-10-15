@@ -217,6 +217,7 @@ pub fn shortcut_list() -> Vec<Shortcut> {
         s("Tasks", "Previous task", "alt-up"),
         s("Tasks", "Pause or resume the running task", "secondary-p"),
         s("Tasks", "Run the selected task again", "secondary-r"),
+        s("In a run", "Jump to the latest step", "secondary-down"),
         s("In Kai", "Keyboard shortcuts", "secondary-/"),
         s("Approval", "Approve", "enter"),
         s("Approval", "Stop", "escape"),

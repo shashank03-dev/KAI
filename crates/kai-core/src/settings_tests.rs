@@ -170,3 +170,20 @@ fn obsolete_launcher_setting_is_ignored_and_not_written_back() {
             .is_none()
     );
 }
+
+#[test]
+fn typed_keys_win_and_stored_keys_fill_the_rest() {
+    let typed = Keys {
+        gemini: Some("typed".into()),
+        ..Default::default()
+    };
+    let stored = Keys {
+        gemini: Some("stored".into()),
+        openai: Some("stored-openai".into()),
+        ..Default::default()
+    };
+    let k = typed.or(stored);
+    assert_eq!(k.gemini.as_deref(), Some("typed"));
+    assert_eq!(k.openai.as_deref(), Some("stored-openai"));
+    assert_eq!(k.vllm, None);
+}

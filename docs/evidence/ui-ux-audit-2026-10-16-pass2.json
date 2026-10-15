@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-16",
+  "scope": "Source-level second pass: transcript follow policy, keychain off the UI thread, key validation, approval JSON wrap",
+  "baseline": "6face92",
+  "host": "aarch64-apple-darwin",
+  "workspace": {
+    "passed": 631,
+    "failed": 0,
+    "ignored": 2,
+    "suites": 40
+  },
+  "app_tests": 52,
+  "checks": {
+    "format": "passed",
+    "clippy_workspace_all_targets_host": "passed",
+    "clippy_windows": "not run (target not installed)",
+    "clippy_linux": "not run (target not installed)",
+    "skill_validate": "passed",
+    "bench_mock": "passed",
+    "diff_check": "passed"
+  },
+  "live": "none: app not launched, no model calls, no keychain access, no OS permission changes",
+  "report": "docs/UI_UX_AUDIT_2026_10_16.md",
+  "open": [
+    "live transcript follow and jump check at 720x520 and 1180x780",
+    "approval JSON wrap visual check",
+    "remaining visual and accessibility matrix",
+    "Windows and Linux build, clippy and live UI validation"
+  ]
+}

@@ -24,7 +24,9 @@ impl Target {
 }
 
 /// Canonical key vocabulary shared with the native driver. Only modifiers
-/// may precede the final key; arbitrary strings never reach OS injection.
+/// may precede the final key; arbitrary strings never reach OS injection,
+/// and neither does a lone control or whitespace character (a newline, ESC
+/// or NUL would be injected as a raw Unicode key).
 pub fn valid_keys(keys: &[String]) -> bool {
     let modifier = |k: &str| matches!(k, "ctrl" | "alt" | "shift" | "cmd");
     let named = |k: &str| {
@@ -59,6 +61,10 @@ pub fn valid_keys(keys: &[String]) -> bool {
                 | "f12"
         )
     };
+    let printable = |k: &str| {
+        let mut chars = k.chars();
+        matches!((chars.next(), chars.next()), (Some(c), None) if !c.is_control() && !c.is_whitespace())
+    };
     if keys.is_empty() || keys.len() > 8 {
         return false;
     }
@@ -66,7 +72,7 @@ pub fn valid_keys(keys: &[String]) -> bool {
     mods.iter()
         .enumerate()
         .all(|(i, k)| modifier(k) && !mods[..i].contains(k))
-        && (named(last) || last.chars().count() == 1)
+        && (named(last) || printable(last))
 }
 
 impl ToolRequest {

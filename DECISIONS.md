@@ -941,3 +941,21 @@ Still no model key and no GPU in this session, so there are no live numbers.
   reply, so Kai waited 15 s and reported an error; calls on a detached
   session now end at once, and the click counts as done. Browser tests
   under full CPU load: 1 failure in 4 runs before, 0 in 8 after.
+
+## Transcript follow, keychain off the UI thread (2026-10-16)
+
+- **Follow newest, hold while reading, jump back.** A run's Steps and
+  Terminal follow the newest entry; an offset the user moved away from the
+  end stops following, and growth under a still offset does not. While the
+  user reads older steps, arrivals never move the view and a "Jump to latest
+  · N new" button (or ⌘/Ctrl+↓) returns. Rejected: always auto-scroll (yanks
+  the reader), and deciding by the end position alone (a step card that
+  grows would stop following). Pure policy in `kai-app/src/follow.rs`, unit
+  tested; live behaviour still unverified (`docs/UI_UX_AUDIT_2026_10_16.md`).
+- **Keys are read on the agent runtime.** The app read the keychain on its
+  UI thread at start, at each run launch and at each connection test; one
+  read was sampled stalling the window 16.7 s on macOS. A source guard test
+  keeps keychain reads in `kai-app/src/keys.rs`.
+- **Key actions carry printable keys only.** A lone control character
+  (newline, ESC, NUL) passed validation and reached OS injection as a raw
+  key; both the native tool contract and the Decision schema now refuse it.

@@ -129,10 +129,58 @@ were used where possible. On the user's instruction, computer-use tools were
 stopped; no subsequent visual verification is claimed. Test-only GUI processes
 started for this audit were cleaned up through process management.
 
+## Second pass — 2026-10-16 (source baseline `6face92`)
+
+Scope: source review, Rust tests and build checks only. The app was not
+launched, no model was called, no credential was read and no OS permission
+was changed, so every result below is source-level; none is a live visual
+or OS observation.
+
+### Review of `6face92`
+
+The commit delivered what its table claims at source level: compact run
+layout, wheel boundary policy (verified against `gpui-pre 0.3.8`: the
+element's own scroll listener registers after mouse listeners and bubbles
+first, so the undo-and-clamp in `scroll.rs` is ordered correctly),
+contrast tokens, Settings render without a keychain read, named rail and
+task rows. Its regression tests cover the wheel policy and contrast only;
+the layout and accessibility changes have no automated test and rely on the
+partial live checks recorded above. It left U05 open and missed the three
+defects below (U13–U15).
+
+### Findings and fixes
+
+| Finding | Change | Evidence / limit |
+|---|---|---|
+| U05 / P2 | Transcript policy in `kai-app/src/follow.rs`. Steps and Terminal follow the newest entry. Any upward move off the end (wheel, trackpad nudge, scrollbar, keyboard focus) stops following; content that grows under a still offset (new step, a card finishing, a shorter window) keeps following. While reading older entries, new arrivals never move the view; a "Jump to latest · N new" button (tabbable, named) and ⌘/Ctrl+↓ return and follow again, as does scrolling back within 24 px of the end. One scroll handle and policy per run and tab, pruned when runs are cleared. Screen and Sub-agents tabs do not follow. | 10 unit tests: follow on growth, hold on scroll-up with arrival count, jump, return by scrolling down within the slack, a 5 px upward nudge stops following (a first draft used the slack both ways and would have snapped trackpad scrolling back), a shrinking range at the end, resize while following, content that fits, shrinking counts, per-run/tab state and pruning. The GPUI wiring (`scroll_to_bottom` applied at prepaint, offset read at render) is checked against the pinned GPUI source, not observed live. |
+| U13 / P1 | Keychain reads still ran on the UI thread at app start (`check_connection`), on every run launch and on each connection Test; U06 showed one such read stalling the window 16.7 s. Keys are now resolved on the agent runtime's blocking pool (`kai-app/src/keys.rs`); typed onboarding keys still win (`Keys::or` in `kai-core`). | `the_ui_thread_never_reads_the_keychain` fails if any app source other than `keys.rs` calls the keychain reader; `typed_keys_win_and_stored_keys_fill_the_rest` covers the merge. Explicit Save still writes the keychain on the UI thread (a user action, not render); not measured. |
+| U14 / P2 | `valid_keys` accepted any single character, so a model or native-tool reply with `"\n"`, ESC or NUL reached OS injection as a raw Unicode key. Single keys must now be printable and non-whitespace; the Decision schema drops control-character keys (a key action left with none is rejected for a retry). | `computer_contract` rejects `\n`, ESC, NUL and NBSP; `control_characters_are_never_keys` covers the schema path. |
+| U15 / P2 | The approval dialog's action JSON scrolled on both axes, so the end of a long command could sit off to the right behind an auto-hiding scrollbar, while the dialog promises the exact action. It now scrolls vertically and wraps. | Source change; the existing test proves the JSON holds the full command, not that it is visible. Needs a live check at 720×520. |
+
+`agent.rs` was 509 lines (over the 500-line rule); the approval and
+human-check bridges moved to `asks.rs` unchanged.
+
+### Validation (second pass)
+
+Host: Apple Silicon macOS, rustc 1.99.0, `CARGO_TARGET_DIR=/Users/shashank/KAI/target`.
+
+- `cargo fmt --all -- --check`: passes.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passes (host
+  target only). The first run failed on a test-only accessor; fixed.
+  Ely's 90 existing deprecation warnings are unchanged.
+- `cargo test --workspace`: 631 passed, 0 failed, 2 ignored, 40 suites
+  (618 before; 13 new tests). `kai-app` suite: 52.
+- `kai skill validate skills` and the mock bench (`failures: none`, no
+  model called) pass; `git diff --check` is clean.
+- **Not run:** Windows and Linux clippy (neither target is installed on
+  this host) and any live app, model, keychain or OS-permission check.
+
 ## Remaining work before shipping
 
-- **U05 / P2, open:** define transcript follow-newest versus reading older
-  steps, with a deliberate return-to-latest control and live-run tests.
+- **U05 live check:** run a synthetic live transcript at 720×520 and
+  1180×780: follow during arrivals, scroll up, see the count, jump back,
+  switch tabs and tasks; confirm ⌘/Ctrl+↓ is not taken by a focused input
+  on each OS.
 - Finish the visual matrix: each major page at all three sizes in both themes;
   populated History, Models, Benchmarks, onboarding, failure and human-input
   states; final compact Screen/Home/backend-picker and focus traversal checks.

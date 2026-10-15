@@ -21,6 +21,7 @@ actions!(
         PrevTask,
         TogglePause,
         RetryRun,
+        JumpToLatest,
         Quit
     ]
 );
@@ -46,6 +47,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-up", PrevTask, Some("KaiRoot")),
         KeyBinding::new("secondary-p", TogglePause, Some("KaiRoot")),
         KeyBinding::new("secondary-r", RetryRun, Some("KaiRoot")),
+        KeyBinding::new("secondary-down", JumpToLatest, Some("KaiRoot")),
     ]);
     // A Mac app is quit from its menu bar (⌘Q), not by closing its window.
     if cfg!(target_os = "macos") {

@@ -149,8 +149,10 @@ impl Decision {
             self.amount = Some(a.clamp(1, MAX_SCROLL_AMOUNT));
         }
 
-        // Normalise keys: trim, drop empties, lowercase the modifier names.
-        self.keys.retain(|k| !k.trim().is_empty());
+        // Normalise keys: trim, drop empties and control characters (ESC or
+        // NUL would be injected as raw keys), lowercase the modifier names.
+        self.keys
+            .retain(|k| !k.trim().is_empty() && !k.chars().any(char::is_control));
         for k in &mut self.keys {
             *k = normalise_key(k);
         }
@@ -333,6 +335,20 @@ mod tests {
         .unwrap();
         assert_eq!(d.amount, Some(MAX_SCROLL_AMOUNT));
         assert_eq!(d.direction, Some(Direction::Down));
+    }
+
+    #[test]
+    fn control_characters_are_never_keys() {
+        let only = r#"{"thought":"x","action":"key","keys":["\u001b"],"risk":"none"}"#;
+        assert!(matches!(
+            Decision::parse_checked(only),
+            Err(SchemaError::MissingKeys(Action::Key))
+        ));
+        let mixed = r#"{"thought":"x","action":"key","keys":["ctrl","\u0000","c"],"risk":"none"}"#;
+        assert_eq!(
+            Decision::parse_checked(mixed).unwrap().keys,
+            vec!["ctrl", "c"]
+        );
     }
 
     #[test]
