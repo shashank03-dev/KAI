@@ -129,18 +129,36 @@ and needs no Xcode.
 
 ## How it was checked, and what is not yet checked
 
-From a Linux machine (no Mac in the loop):
+On a real Mac: `.github/workflows/macos.yml` runs on GitHub's `macos-15`
+runner (Apple Silicon, macOS 15, a 1024x768 virtual display at scale 1). It
+runs clippy, the whole test suite, `scripts/macos/bundle.sh` (build, ad hoc
+sign, smoke test), the app's own screenshots of every screen
+(`KAI_CAPTURE`), `scripts/macos/live_check.sh`, and the bench's recorded
+replies on the real desktop. The first runs (2026-10-15) found and fixed:
 
-- `cargo clippy --workspace --all-targets --target aarch64-apple-darwin -- -D warnings`
-  is clean, for the app too. The C parts of `ring` were compiled against
-  stub headers, and GPUI's Mac shader step only runs on a Mac.
-- Unit tests that run on every OS cover the Mac logic: the role mapping
-  and naming, the Retina scaling, AppleScript quoting, the Metal runtime
-  choice and its pinned hash, unified-memory ranking, and the Mac prompt
-  rule being added only on a Mac.
+- The accessibility read asked the system-wide element for
+  `AXFocusedApplication`, which failed although Kai was trusted, so every
+  read fell back to the grid. It now opens the frontmost app by pid.
+- The bench's web server script used `setsid` (absent on macOS), the bench
+  saw no display or browser on a Mac, and two recorded replies used
+  GNU-only flags.
+- After the browser was killed, a call could wait for its timeout because
+  Chrome's helpers kept the pipe open; calls now also watch the process.
+- Home showed "Ctrl K" for a shortcut that is ⌘K on a Mac.
 
-Not yet done: a live run on a real Mac. The release workflow's `macos-15`
-job runs the whole test suite and the packaged-CLI smoke test on Apple
-Silicon. Before claiming success numbers on macOS, run a live
-`kai bench --backend gemini --model gemma-4-26b-a4b-it` A/B on a Mac. Until
-then, macOS is "builds, unit-tested, not yet measured".
+Measured there (run 2, before the last fixes): the tree read of a TextEdit
+window took 20 ms (14 nodes); Kai clicked the document and typed, and the
+tree read the text back; the app drew all 60 screens in both themes;
+replay passed 18 of 19 tasks. The one failure is `dark-mode`, whose
+recorded reply is the GNOME command.
+
+From Linux, `cargo clippy --target aarch64-apple-darwin` keeps the Mac code
+checked between Mac runs (see CLAUDE.md), and unit tests that run on every
+OS cover the Mac logic: role mapping and naming, scroll clipping, Retina
+scaling, AppleScript quoting, the Metal runtime choice and its hash,
+unified-memory ranking, Homebrew on `PATH`, and the Mac prompt rule.
+
+Not measured yet: a live model on a Mac, and a Retina display (the runner's
+display is scale 1; the scaling is unit-tested). Before claiming success
+numbers on macOS, run a live
+`kai bench --backend gemini --model gemma-4-26b-a4b-it` A/B on a Mac.

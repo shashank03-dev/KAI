@@ -921,8 +921,13 @@ Still no model key and no GPU in this session, so there are no live numbers.
 - **Local models on Metal:** llama.cpp `b11429` macOS arm64 build, hashed
   here. Unified memory is counted once in the ranking: no split placement
   on a Mac.
-- **Not measured yet.** Checked from Linux: clippy `-D warnings` for
-  `aarch64-apple-darwin` (whole workspace, app included) and unit tests for
-  the OS-free Mac logic. Not run on a real Mac in this session. The release
-  workflow now builds, tests and smoke-tests on `macos-15`; no live bench
-  number on macOS is claimed.
+- **Run on a real Mac** (`.github/workflows/macos.yml`, GitHub's
+  `macos-15`, Apple Silicon). The first runs found four bugs that no Linux
+  check could: the system-wide `AXFocusedApplication` failed although Kai
+  was trusted (the tree is now read from the frontmost app's pid); the
+  bench's server script used `setsid`; the bench saw no display or browser
+  on a Mac; a killed browser could leave a call waiting on its timeout
+  (calls now watch the process). Run 2: tree read 20 ms, click-and-type in
+  TextEdit read back from the tree, all 60 app screens, replay 18/19 (the
+  miss is `dark-mode`'s GNOME reply). No live model number on macOS is
+  claimed.

@@ -179,6 +179,13 @@ impl Cdp {
                     self.lock_pending().remove(&id);
                     anyhow::bail!("{method}: no reply within {limit:?}")
                 }
+                // The pipe can outlive the browser: its helper processes
+                // hold it open a while after the main one dies (seen on
+                // macOS), so a dead browser is caught here, not at EOF.
+                Err(_) if !self.alive() => {
+                    self.lock_pending().remove(&id);
+                    anyhow::bail!("{method}: the browser closed")
+                }
                 Err(_) => {}
             }
         }
