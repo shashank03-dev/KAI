@@ -1,5 +1,7 @@
 //! A cancelled CDP await still releases held input on the original session.
 //! Unacknowledged cleanup poisons the lane until the browser is restarted.
+//! A call that returned an error (a dialog opened, the tab closed) is not a
+//! cancellation: the release is sent and the lane stays usable.
 use super::cdp::Cdp;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,6 +41,30 @@ impl<'a> Release<'a> {
     pub fn disarm(&mut self) {
         self.armed = false;
     }
+    /// The press or release came back with an error: send the release
+    /// anyway (best effort), without poisoning the lane.
+    pub fn settle(mut self) {
+        self.armed = false;
+        self.sink
+            .send(self.method, self.params.clone(), &self.session);
+    }
+}
+/// Sends input with `release` armed: disarmed once acknowledged, settled
+/// on an error, and left armed (poisoning) only if the await is cancelled.
+pub(super) async fn guarded<T>(
+    mut release: Release<'_>,
+    send: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    match send.await {
+        Ok(v) => {
+            release.disarm();
+            Ok(v)
+        }
+        Err(e) => {
+            release.settle();
+            Err(e)
+        }
+    }
 }
 impl Drop for Release<'_> {
     fn drop(&mut self) {
@@ -77,6 +103,24 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].2, "original");
         assert_eq!(calls[0].1["type"], "mouseReleased");
+    }
+    #[test]
+    fn an_error_releases_without_poisoning_the_lane() {
+        let sink = Sink::default();
+        let poison = AtomicBool::new(false);
+        Release::new(
+            &sink,
+            &poison,
+            "Input.dispatchMouseEvent",
+            serde_json::json!({"type":"mouseReleased"}),
+            "page".into(),
+        )
+        .settle();
+        assert!(
+            !poison.load(Ordering::SeqCst),
+            "a dialog must not kill the lane"
+        );
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
     }
     #[test]
     fn acknowledged_release_needs_no_cleanup_or_poison() {

@@ -1,10 +1,10 @@
 {
   "date": "2026-10-16",
-  "scope": "Source-level second pass: transcript follow policy, keychain off the UI thread, key validation, approval JSON wrap",
+  "scope": "Source-level second pass plus independent review fixes before merging to main",
   "baseline": "6face92",
   "host": "aarch64-apple-darwin",
   "workspace": {
-    "passed": 631,
+    "passed": 641,
     "failed": 0,
     "ignored": 2,
     "suites": 40
@@ -13,8 +13,8 @@
   "checks": {
     "format": "passed",
     "clippy_workspace_all_targets_host": "passed",
-    "clippy_windows": "not run (target not installed)",
-    "clippy_linux": "not run (target not installed)",
+    "clippy_windows": "passed for kai-core, kai-os, kai-cli (cross-check from macOS, stub C headers; kai-app excluded)",
+    "clippy_linux": "not run (wayland-sys needs Linux pkg-config)",
     "skill_validate": "passed",
     "bench_mock": "passed",
     "diff_check": "passed"
@@ -22,9 +22,11 @@
   "live": "none: app not launched, no model calls, no keychain access, no OS permission changes",
   "report": "docs/UI_UX_AUDIT_2026_10_16.md",
   "open": [
+    "live kai bench A/B for the narrower pre-action checks",
     "live transcript follow and jump check at 720x520 and 1180x780",
     "approval JSON wrap visual check",
     "remaining visual and accessibility matrix",
     "Windows and Linux build, clippy and live UI validation"
-  ]
+  ],
+  "review": "two read-only reviewers; 8 core and 6 app findings, fixes listed in the report (R1-R8, U16)"
 }

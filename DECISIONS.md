@@ -959,3 +959,10 @@ Still no model key and no GPU in this session, so there are no live numbers.
 - **Key actions carry printable keys only.** A lone control character
   (newline, ESC, NUL) passed validation and reached OS injection as a raw
   key; both the native tool contract and the Decision schema now refuse it.
+- **Act on what the step targets, not the whole screen** (review before
+  merging the computer-use foundation). The pre-action check compared every
+  element and the exact screen hash, so any clock or caret refused every
+  step; it now compares the target element (or focused field), and pixels
+  only for grids. Batched provider actions continue while the layout holds.
+  Long text is typed, not pasted, under an execution context: the
+  clipboard is not overwritten and a stop lands between keys.

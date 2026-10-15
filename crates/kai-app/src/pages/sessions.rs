@@ -89,7 +89,9 @@ pub fn sidebar(app: &KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -> A
         .map(|(index, e)| {
             let focus = window
                 .use_keyed_state(("session-focus", e.id as usize), cx, |_, cx| {
-                    cx.focus_handle()
+                    // A tracked handle keeps its own tab settings; GPUI's
+                    // default handle is not a tab stop.
+                    cx.focus_handle().tab_stop(true).tab_index(0)
                 })
                 .read(cx)
                 .clone();

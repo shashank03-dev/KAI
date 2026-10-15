@@ -6,11 +6,13 @@ pub enum Mapped {
     Ask(String),
 }
 
-/// Build a [`Decision`] from JSON, so new optional fields keep their defaults.
-pub(super) fn decision(v: serde_json::Value) -> Decision {
-    let mut d: Decision = serde_json::from_value(v).expect("well-formed decision");
+/// Build a [`Decision`] from JSON, so new optional fields keep their
+/// defaults. The model's fields are copied in as sent, so a wrong type
+/// (`"text": 5`) is refused, never a panic.
+fn decision(v: serde_json::Value) -> Option<Decision> {
+    let mut d: Decision = serde_json::from_value(v).ok()?;
     let _ = d.validate_and_clamp();
-    d
+    Some(d)
 }
 
 /// Map a `computer_call.action` to a Kai decision plus a one-element grounding
@@ -59,7 +61,10 @@ pub fn map_action(a: &serde_json::Value, img: (u32, u32), screen: Rect) -> Mappe
     let none = || Grounding::Marks(Vec::new());
     let ty = a["type"].as_str().unwrap_or("");
     let at = || point(&a["x"], &a["y"]);
-    let act = |v: serde_json::Value, g: Grounding| Mapped::Act(decision(v), g);
+    let act = |v: serde_json::Value, g: Grounding| match decision(v) {
+        Some(d) => Mapped::Act(d, g),
+        None => Mapped::Ask("Invalid native action fields".into()),
+    };
     match ty {
         "click" => match a["button"].as_str().unwrap_or("left") {
             "right" => act(

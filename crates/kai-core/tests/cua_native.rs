@@ -263,6 +263,11 @@ fn scroll_keys_and_unsupported() {
         map_action(&json!({"type":"teleport"}), (1, 1), s),
         Mapped::Ask(_)
     ));
+    // A wrong field type from the model is refused, not a panic.
+    assert!(matches!(
+        map_action(&json!({"type":"type","text":5}), (1, 1), s),
+        Mapped::Ask(_)
+    ));
 }
 
 #[test]

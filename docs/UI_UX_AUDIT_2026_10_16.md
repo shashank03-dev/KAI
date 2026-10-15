@@ -152,31 +152,60 @@ defects below (U13–U15).
 
 | Finding | Change | Evidence / limit |
 |---|---|---|
-| U05 / P2 | Transcript policy in `kai-app/src/follow.rs`. Steps and Terminal follow the newest entry. Any upward move off the end (wheel, trackpad nudge, scrollbar, keyboard focus) stops following; content that grows under a still offset (new step, a card finishing, a shorter window) keeps following. While reading older entries, new arrivals never move the view; a "Jump to latest · N new" button (tabbable, named) and ⌘/Ctrl+↓ return and follow again, as does scrolling back within 24 px of the end. One scroll handle and policy per run and tab, pruned when runs are cleared. Screen and Sub-agents tabs do not follow. | 10 unit tests: follow on growth, hold on scroll-up with arrival count, jump, return by scrolling down within the slack, a 5 px upward nudge stops following (a first draft used the slack both ways and would have snapped trackpad scrolling back), a shrinking range at the end, resize while following, content that fits, shrinking counts, per-run/tab state and pruning. The GPUI wiring (`scroll_to_bottom` applied at prepaint, offset read at render) is checked against the pinned GPUI source, not observed live. |
-| U13 / P1 | Keychain reads still ran on the UI thread at app start (`check_connection`), on every run launch and on each connection Test; U06 showed one such read stalling the window 16.7 s. Keys are now resolved on the agent runtime's blocking pool (`kai-app/src/keys.rs`); typed onboarding keys still win (`Keys::or` in `kai-core`). | `the_ui_thread_never_reads_the_keychain` fails if any app source other than `keys.rs` calls the keychain reader; `typed_keys_win_and_stored_keys_fill_the_rest` covers the merge. Explicit Save still writes the keychain on the UI thread (a user action, not render); not measured. |
+| U05 / P2 | Transcript policy in `kai-app/src/follow.rs`. Steps and Terminal follow the newest entry. Any upward move off the end (wheel, trackpad nudge, scrollbar, keyboard focus) stops following; content that grows under a still offset (new step, a card finishing, a shorter window) keeps following. While reading older entries, new arrivals never move the view; a "Jump to latest · N new" button (tabbable, named) and ⌘/Ctrl+↓ return and follow again, as does scrolling back within 24 px of the end. One scroll handle and policy per run and tab, pruned when runs are cleared. Screen and Sub-agents tabs do not follow. | 10 unit tests: follow on growth, hold on scroll-up with arrival count, jump, return by scrolling down within the slack, a half-pixel upward nudge stops following (earlier drafts used the 24 px slack, then 1 px, upward too; review showed slow trackpad scrolling would snap back), a shrinking range at the end, resize while following, content that fits, shrinking counts, per-run/tab state and pruning. The GPUI wiring (`scroll_to_bottom` applied at prepaint, offset read at render) is checked against the pinned GPUI source, not observed live. |
+| U13 / P1 | Keychain reads still ran on the UI thread at app start (`check_connection`), on every run launch and on each connection Test; U06 showed one such read stalling the window 16.7 s. Keys are now resolved on the agent runtime's blocking pool (`kai-app/src/keys.rs`); typed onboarding keys still win (`Keys::or` in `kai-core`). | `the_ui_thread_never_reads_the_keychain` fails if any app source other than `keys.rs` calls `secrets::keys` or `secrets::get` (a text guard: an aliased import would evade it); `typed_keys_win_and_stored_keys_fill_the_rest` covers the merge. Writes still run on the UI thread: Save, the connection Test (it saves typed keys first) and onboarding; a write can wait on a macOS consent prompt. A run whose key read waits on a prompt shows as running, and Stop takes effect only once the read returns. Not measured. |
 | U14 / P2 | `valid_keys` accepted any single character, so a model or native-tool reply with `"\n"`, ESC or NUL reached OS injection as a raw Unicode key. Single keys must now be printable and non-whitespace; the Decision schema drops control-character keys (a key action left with none is rejected for a retry). | `computer_contract` rejects `\n`, ESC, NUL and NBSP; `control_characters_are_never_keys` covers the schema path. |
 | U15 / P2 | The approval dialog's action JSON scrolled on both axes, so the end of a long command could sit off to the right behind an auto-hiding scrollbar, while the dialog promises the exact action. It now scrolls vertically and wraps. | Source change; the existing test proves the JSON holds the full command, not that it is visible. Needs a live check at 720×520. |
+| U16 / P2 | Task rows, listed as tabbable in U07/U08, were not: their tracked focus handles came from `cx.focus_handle()`, which is not a tab stop, and GPUI applies `tab_index` only to handles it creates. Rows now use a tab-stop handle, so Tab reaches them and the U08 reveal can fire. | Found by review against `gpui-pre 0.3.8` `div.rs`/`tab_stop.rs`; live keyboard traversal unverified. |
 
 `agent.rs` was 509 lines (over the 500-line rule); the approval and
 human-check bridges moved to `asks.rs` unchanged.
 
-### Validation (second pass)
+### Independent review before merging to main
+
+Two reviewers (read-only, against the pinned GPUI source and the full
+`origin/main..HEAD` diff) checked every commit on this branch. Confirmed
+findings and their fixes:
+
+| Finding | Change | Evidence / limit |
+|---|---|---|
+| R1 / P1 | Browser lane: a click or key whose CDP call returned an error (a `confirm()` dialog opened, the tab closed) left the input-release guard armed, which poisoned the lane until restart; every later call failed although the click was reported done. An error now sends the release without poisoning; only a cancelled await poisons. | `an_error_releases_without_poisoning_the_lane` (`web/release.rs`). Live browser tests not run on this host. |
+| R2 / P2 | Before every action the engine required the whole fresh element list to equal the old one, so a clock, ticker or a field's typed value refused every step. The check now covers the action's target (or the focused field for untargeted typing): role, name, bounds, enabled, secure; value and focus may change. Grid observations still compare pixels. | 6 tests in `engine/fresh.rs`; `cancellation_e2e` now renames the approved element during the approval (refused) and changes only another label (clicked). No live model run measured the effect on step success. |
+| R3 / P2 | Computer tools refused any action when the exact screen hash changed (a blinking caret flips it). They now compare the element under the action's point or mark; pixels only for a grid. | `a_point_click_compares_the_element_under_it`; the `is_current` port now receives the action. |
+| R4 / P2 | A typed card number was swapped for its label before the trace could remember it, so a reformatted echo elsewhere on screen reached the model. The raw text is remembered first. | `a_reformatted_card_number_elsewhere_on_screen_is_blanked` failed before the fix and passes after. Computer-tool `type` steps are not covered by this path (remaining risk). |
+| R5 / P2 | The native bench stopped at its first click: every coordinate action is high risk and a runner without an approver says Stop. That default stays (`native_side_effect_requires_host_approval`); the bench now passes an explicit `Unattended` approver that approves except passwords, secure fields and sensitive typing, as the native loop did before. | `unattended_runs_go_on_but_never_type_secrets`. No live `openai-native` bench run. |
+| R6 / P2 | Provider-batched actions after the first required a byte-identical screenshot, so every multi-action reply stopped after one action. The queue now continues while the element layout is unchanged (values and focus may differ) and stops when a dialog appears or the page moves. | `a_layout_survives_typing_but_not_a_new_dialog`. |
+| R7 / P3 | Native action mapping panicked on a wrong field type from the model (`"text": 5`). It now asks instead. | `cua_native` maps that input to Ask. |
+| R8 / P3 | Long text is typed key by key, not pasted, whenever an execution context is set (every engine action since `c9054dd`). Kept on purpose: pasting overwrites the clipboard and cannot be cancelled mid-way; typing checks cancellation per key. Slower for long text; not measured. | Decision recorded in `DECISIONS.md`. |
+
+### Validation (second pass, after review fixes)
 
 Host: Apple Silicon macOS, rustc 1.99.0, `CARGO_TARGET_DIR=/Users/shashank/KAI/target`.
 
 - `cargo fmt --all -- --check`: passes.
-- `cargo clippy --workspace --all-targets -- -D warnings`: passes (host
-  target only). The first run failed on a test-only accessor; fixed.
-  Ely's 90 existing deprecation warnings are unchanged.
-- `cargo test --workspace`: 631 passed, 0 failed, 2 ignored, 40 suites
-  (618 before; 13 new tests). `kai-app` suite: 52.
+- `cargo clippy --workspace --all-targets -- -D warnings` (macOS host):
+  passes. Ely's 90 existing deprecation warnings are unchanged.
+- Windows: `cargo clippy --workspace --exclude kai-app --all-targets
+  --target x86_64-pc-windows-gnu -- -D warnings` passes, cross-checked from
+  macOS with clang and stub C headers (`assert.h`, `string.h`, `windows.h`)
+  for `ring` and `stacker`. `kai-app` is excluded: GPUI's Windows build
+  script cannot run off Windows. Type-checks only; nothing ran on Windows.
+- Linux clippy: **not run** (`wayland-sys` needs a Linux `pkg-config`).
+- `cargo test --workspace`: 641 passed, 0 failed, 2 ignored, 40 suites
+  (618 at `f27499b`).
 - `kai skill validate skills` and the mock bench (`failures: none`, no
   model called) pass; `git diff --check` is clean.
-- **Not run:** Windows and Linux clippy (neither target is installed on
-  this host) and any live app, model, keychain or OS-permission check.
+- `crates/kai-core/tests/human_e2e.rs` (530 lines) is over the 500-line
+  rule as it already was on `origin/main`; not changed here.
+- Not run: any live app, model, browser, keychain or OS-permission check.
 
 ## Remaining work before shipping
 
+- **Linux and Windows:** run CI's clippy on Linux (including `kai-app`) and
+  Windows for `kai-app`; neither was possible from this Mac.
+- **Live A/B for R2/R3/R6:** the narrower pre-action checks change how often
+  a live step proceeds; per CLAUDE.md, measure with `kai bench` (two runs
+  per side) before claiming an effect.
 - **U05 live check:** run a synthetic live transcript at 720×520 and
   1180×780: follow during arrivals, scroll up, see the count, jump back,
   switch tabs and tasks; confirm ⌘/Ctrl+↓ is not taken by a focused input

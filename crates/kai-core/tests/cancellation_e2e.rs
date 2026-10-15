@@ -104,6 +104,23 @@ impl Approver for ChangeOnApproval<'_> {
 }
 #[tokio::test]
 async fn approval_for_an_old_screen_cannot_click_after_another_action_changes_it() {
+    // While the approval waits, the approved element (#3) is renamed.
+    let stop = flag();
+    let mut screen = Screen::marks();
+    screen.rename_at = 1;
+    let hands = Hands::new(&screen);
+    let client =
+        MockClient::new([r#"{"thought":"delete","action":"click","target":3,"risk":"high"}"#]);
+    let approver = ChangeOnApproval(&screen);
+    let mut e = engine(&client, &screen, &hands, &approver, &stop);
+    e.config.max_steps = 1;
+    e.run("Delete").await;
+    assert!(hands.log.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_change_elsewhere_on_screen_does_not_refuse_the_approved_click() {
+    // Only a label elsewhere (#10, like a clock) changes during the approval.
     let stop = flag();
     let screen = Screen::marks();
     let hands = Hands::new(&screen);
@@ -113,5 +130,5 @@ async fn approval_for_an_old_screen_cannot_click_after_another_action_changes_it
     let mut e = engine(&client, &screen, &hands, &approver, &stop);
     e.config.max_steps = 1;
     e.run("Delete").await;
-    assert!(hands.log.lock().unwrap().is_empty());
+    assert_eq!(hands.log.lock().unwrap().len(), 1);
 }

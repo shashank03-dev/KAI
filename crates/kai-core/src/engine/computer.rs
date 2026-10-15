@@ -17,7 +17,11 @@ impl ComputerExecutor for Executor<'_> {
     fn capabilities(&self) -> Capabilities {
         self.engine.actuator.computer_capabilities()
     }
-    async fn is_current(&self, _: &ObservationSpace) -> Result<bool, ToolError> {
+    async fn is_current(
+        &self,
+        a: &ComputerAction,
+        _: &ObservationSpace,
+    ) -> Result<bool, ToolError> {
         let mut fresh = if !self.obs.images.screenshot_jpeg.is_empty() {
             self.engine.perceptor.observe().await
         } else {
@@ -27,11 +31,12 @@ impl ComputerExecutor for Executor<'_> {
         self.privacy.sanitise(&mut fresh);
         let mut expected = self.obs.grounding.clone();
         self.privacy.redact(&mut expected);
-        // Tree identities, geometry and foreground scope must still match.
-        Ok((self.obs.images.screenshot_jpeg.is_empty()
-            || fresh.screen_hash == self.obs.screen_hash)
+        // The action's target and the foreground scope must still match;
+        // pixels only where a grid gives nothing else to compare.
+        let grid = matches!(expected, Grounding::Grid { .. });
+        Ok((!grid || fresh.screen_hash == self.obs.screen_hash)
             && fresh.screen == self.obs.screen
-            && fresh.grounding == expected
+            && super::fresh::same_tool_target(&expected, &fresh.grounding, a)
             && fresh.window_title
                 == self
                     .obs

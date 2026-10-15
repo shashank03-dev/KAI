@@ -95,6 +95,13 @@ impl<'t> Run<'t> {
         }
     }
     pub(super) fn push(&mut self, mut rec: crate::trace::StepRecord) {
+        // Remember sensitive text before `record` swaps it for its label, so
+        // it is blanked when the screen shows it again, reformatted or not.
+        if crate::risk::sensitive_typed(&rec.decision).is_some()
+            && let Some(raw) = rec.decision.text.as_deref()
+        {
+            self.trace.typed_secrets.add(raw);
+        }
         self.privacy.record(&mut rec);
         self.trace.push(rec);
     }

@@ -13,7 +13,11 @@ impl ComputerExecutor for Driver {
     fn capabilities(&self) -> Capabilities {
         Capabilities::all()
     }
-    async fn is_current(&self, _: &ObservationSpace) -> Result<bool, ToolError> {
+    async fn is_current(
+        &self,
+        _: &ComputerAction,
+        _: &ObservationSpace,
+    ) -> Result<bool, ToolError> {
         Ok(!self.stale)
     }
     async fn execute(
@@ -167,7 +171,11 @@ impl ComputerExecutor for Exclusive {
     fn capabilities(&self) -> Capabilities {
         Capabilities::all()
     }
-    async fn is_current(&self, _: &ObservationSpace) -> Result<bool, ToolError> {
+    async fn is_current(
+        &self,
+        _: &ComputerAction,
+        _: &ObservationSpace,
+    ) -> Result<bool, ToolError> {
         Ok(true)
     }
     async fn execute(

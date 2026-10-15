@@ -458,7 +458,12 @@ async fn native_trace(
         interrupt: kill,
         sink: &Printer,
     };
-    match runner.run(task).await {
+    // The bench desktop is a sandbox nobody watches: approve what the
+    // native loop always did, never passwords or sensitive typing.
+    match runner
+        .run_with_approver(task, Some(&kai_core::cua::Unattended))
+        .await
+    {
         Ok(run) => {
             if let Some(e) = &run.error {
                 eprintln!("  native loop error: {e}");

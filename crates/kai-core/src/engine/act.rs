@@ -134,7 +134,7 @@ impl Engine<'_> {
                 let mut expected = grounding.clone();
                 privacy.redact(&mut expected);
                 anyhow::ensure!(
-                    fresh.grounding == expected,
+                    super::fresh::same_target(&expected, &fresh.grounding, decision.target),
                     "the approved target changed; observe again"
                 );
                 if let Some(old) = observed {

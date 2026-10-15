@@ -118,11 +118,28 @@ impl CuaRunner<'_> {
         })
     }
 }
+/// Without an approver nothing that needs one happens: every coordinate
+/// action is high risk, so the run stops at its first.
 struct NoApproval;
 #[async_trait::async_trait]
 impl Approver for NoApproval {
     async fn approve(&self, _: &Decision, _: &Grounding) -> ApprovalChoice {
         ApprovalChoice::Stop
+    }
+}
+
+/// For a sandboxed desktop with nobody to ask (the bench), passed
+/// explicitly: approves coordinate actions, but stops where the native loop
+/// always stopped: a password, a secure field or sensitive data typed.
+pub struct Unattended;
+#[async_trait::async_trait]
+impl Approver for Unattended {
+    async fn approve(&self, d: &Decision, g: &Grounding) -> ApprovalChoice {
+        if crate::risk::is_payment_or_password(d, g) {
+            ApprovalChoice::Stop
+        } else {
+            ApprovalChoice::Approve
+        }
     }
 }
 
@@ -147,4 +164,26 @@ pub fn jpeg_size(b: &[u8]) -> Option<(u32, u32)> {
         i += 2 + len;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unattended_runs_go_on_but_never_type_secrets() {
+        let g = Grounding::Marks(vec![]);
+        let click =
+            Decision::parse_checked(r#"{"thought":"x","action":"click","target":1,"risk":"high"}"#)
+                .unwrap();
+        assert_eq!(
+            Unattended.approve(&click, &g).await,
+            ApprovalChoice::Approve
+        );
+        let card = Decision::parse_checked(
+            r#"{"thought":"x","action":"type","target":1,"text":"4111 1111 1111 1111","risk":"low"}"#,
+        )
+        .unwrap();
+        assert_eq!(Unattended.approve(&card, &g).await, ApprovalChoice::Stop);
+    }
 }

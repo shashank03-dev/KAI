@@ -13,9 +13,10 @@ use std::collections::HashMap;
 /// a wheel tick that stops just short counts as reaching the latest.
 pub const END_SLACK: f32 = 24.0;
 
-/// GPUI rounds the scroll range to hundredths; this much off the end is
-/// still the end.
-const AT_END: f32 = 1.0;
+/// GPUI rounds the scroll range to hundredths and pins a jump exactly to
+/// it, so only rounding off the end is still the end: a slow trackpad
+/// moves well under a pixel per frame.
+const AT_END: f32 = 0.01;
 
 /// What one frame's layout says about the view. `offset` is GPUI's: 0 at the
 /// top, negative further down, never below `-max`.
@@ -179,7 +180,10 @@ mod tests {
     fn a_small_scroll_up_stops_following() {
         let mut f = Follow::default();
         f.frame(at(-500.0, 500.0, 4));
-        assert!(!f.frame(at(-495.0, 500.0, 4)), "a trackpad nudge up");
+        assert!(
+            !f.frame(at(-499.5, 500.0, 4)),
+            "a sub-pixel trackpad nudge up"
+        );
         assert!(!f.frame(at(-500.0 + END_SLACK + 1.0, 500.0, 4)));
         assert!(
             f.frame(at(-500.0 + END_SLACK, 500.0, 4)),

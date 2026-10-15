@@ -16,7 +16,6 @@ struct State {
     message: Option<String>,
     error: Option<String>,
     image: Option<(u32, u32)>,
-    origin_image: Vec<u8>,
     origin_tree: Option<crate::Grounding>,
 }
 pub(super) struct Provider<'a> {
@@ -54,7 +53,6 @@ impl<'a> Provider<'a> {
                 message: None,
                 error: None,
                 image: None,
-                origin_image: Vec::new(),
                 origin_tree: None,
             }),
         })
@@ -130,9 +128,13 @@ impl ModelClient for Provider<'_> {
                 .observe_tree_only()
                 .await
                 .map_err(|_| ClientError::EmptyBody)?;
+            // Pixels always differ after an action (a caret, a hover), so
+            // the layout decides: the next queued action still has its place.
             if req.computer_result.is_none_or(|r| r.error.is_some())
-                || req.images.screenshot_jpeg != state.origin_image
-                || state.origin_tree.as_ref() != Some(&fresh.grounding)
+                || !state
+                    .origin_tree
+                    .as_ref()
+                    .is_some_and(|t| crate::engine::fresh::same_layout(t, &fresh.grounding))
             {
                 state.actions.clear();
                 return Ok(ask(
@@ -236,7 +238,6 @@ impl ModelClient for Provider<'_> {
                 state.error = Some(e.to_string());
                 return Ok(ask(&e.to_string(), started));
             }
-            state.origin_image = req.images.screenshot_jpeg.clone();
             state.origin_tree = Some(origin.grounding);
             for call in decoded.calls {
                 state.calls.push(call.call_id);

@@ -41,10 +41,15 @@ mod tests {
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
             &mut files,
         );
-        let call = ["secrets::", "keys()"].concat();
+        let calls = [
+            ["secrets::", "keys("].concat(),
+            ["secrets::", "get("].concat(),
+        ];
         let readers: Vec<&str> = files
             .iter()
-            .filter(|(path, text)| !path.ends_with("keys.rs") && text.contains(&call))
+            .filter(|(path, text)| {
+                !path.ends_with("keys.rs") && calls.iter().any(|c| text.contains(c))
+            })
             .map(|(path, _)| path.as_str())
             .collect();
         assert!(

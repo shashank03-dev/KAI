@@ -121,15 +121,16 @@ async fn the_user_decides_and_the_model_is_told_screen_text_is_data() {
     );
 }
 
-/// The fake screen, where the search field shows the card number once
-/// anything was typed (a form echoing what Kai entered).
-struct Echo<'a>(&'a Screen);
+/// The fake screen, where element `.1` shows the card number once anything
+/// was typed: the field itself (a form echoing what Kai entered), or another
+/// element (a summary line).
+struct Echo<'a>(&'a Screen, usize);
 impl Echo<'_> {
     fn echo(&self, mut o: Observation) -> Observation {
         if self.0.frame.load(std::sync::atomic::Ordering::SeqCst) > 0
             && let Grounding::Marks(els) = &mut o.grounding
         {
-            els[3].value = Some("4111-1111-1111-1111".into());
+            els[self.1].value = Some("4111-1111-1111-1111".into());
         }
         o
     }
@@ -151,7 +152,7 @@ async fn a_card_number_is_confirmed_even_on_autopilot_and_never_saved() {
     let hands = Hands::new(&screen);
     let model = Counting::new(&[typ, DONE]);
     let (approver, stop) = (Recording::default(), flag());
-    let echo = Echo(&screen);
+    let echo = Echo(&screen, 3);
     let mut e = engine(&model, &screen, &hands, &approver, &stop);
     e.perceptor = &echo;
     e.config.approval = ApprovalLevel::Autopilot;
@@ -207,4 +208,22 @@ async fn waiting_for_an_approval_is_not_counted_against_the_time_limit() {
     e.config.max_time = std::time::Duration::from_millis(150);
     let t = e.run("tidy up").await;
     assert_eq!(t.outcome, Some(Outcome::Success));
+}
+
+#[tokio::test]
+async fn a_reformatted_card_number_elsewhere_on_screen_is_blanked() {
+    let typ = r#"{"thought":"enter card","action":"type","target":4,"text":"4111 1111 1111 1111","risk":"low","expect":"typed"}"#;
+    let screen = Screen::marks();
+    let hands = Hands::new(&screen);
+    let model = Counting::new(&[typ, DONE]);
+    let (approver, stop) = (Recording::default(), flag());
+    let echo = Echo(&screen, 0);
+    let mut e = engine(&model, &screen, &hands, &approver, &stop);
+    e.perceptor = &echo;
+    e.config.approval = ApprovalLevel::Autopilot;
+    e.config.tree_only = false;
+    let t = e.run("pay the invoice").await;
+    let later = &model.seen()[1].text;
+    assert!(!later.contains("4111"), "{later}");
+    assert!(!serde_json::to_string(&t).unwrap().contains("4111"));
 }

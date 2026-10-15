@@ -119,16 +119,18 @@ impl BrowserLane {
         self.file_chooser.store(false, Ordering::SeqCst);
         self.mouse("mouseMoved", x, y, "none", 0).await?;
         for n in 1..=times {
-            let mut release = super::release::Release::new(
+            let release = super::release::Release::new(
                 &self.cdp,
                 &self.input_poisoned,
                 "Input.dispatchMouseEvent",
                 json!({"type":"mouseReleased","x":x,"y":y,"button":button,"clickCount":n}),
                 self.current().session,
             );
-            self.mouse("mousePressed", x, y, button, n).await?;
-            self.mouse("mouseReleased", x, y, button, n).await?;
-            release.disarm();
+            super::release::guarded(release, async {
+                self.mouse("mousePressed", x, y, button, n).await?;
+                self.mouse("mouseReleased", x, y, button, n).await
+            })
+            .await?;
         }
         // A file picker opens asynchronously; give its event a moment.
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -146,17 +148,19 @@ impl BrowserLane {
         match keys::chord(chord)? {
             Chord::Keys(downs) => {
                 for down in downs {
-                    let mut release = super::release::Release::new(
+                    let release = super::release::Release::new(
                         &self.cdp,
                         &self.input_poisoned,
                         "Input.dispatchKeyEvent",
                         keys::key_up(&down),
                         self.current().session,
                     );
-                    self.page("Input.dispatchKeyEvent", down.clone()).await?;
-                    self.page("Input.dispatchKeyEvent", keys::key_up(&down))
-                        .await?;
-                    release.disarm();
+                    super::release::guarded(release, async {
+                        self.page("Input.dispatchKeyEvent", down.clone()).await?;
+                        self.page("Input.dispatchKeyEvent", keys::key_up(&down))
+                            .await
+                    })
+                    .await?;
                 }
                 Ok(())
             }

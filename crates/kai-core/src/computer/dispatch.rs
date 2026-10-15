@@ -49,7 +49,11 @@ impl ExecutionContext {
 pub trait ComputerExecutor: Send + Sync {
     fn capabilities(&self) -> Capabilities;
     /// Revalidate captured geometry/state immediately before side effects.
-    async fn is_current(&self, space: &ObservationSpace) -> Result<bool, ToolError>;
+    async fn is_current(
+        &self,
+        action: &ComputerAction,
+        space: &ObservationSpace,
+    ) -> Result<bool, ToolError>;
     async fn execute(
         &self,
         action: &ComputerAction,
@@ -114,7 +118,7 @@ impl<'a> Dispatcher<'a> {
             *owner = Some((request.session, request.id));
             self.policy.authorize(request).await?;
             self.check(&ctx)?;
-            if !self.executor.is_current(space).await? {
+            if !self.executor.is_current(&request.action, space).await? {
                 return Err(ToolError::StaleObservation);
             }
             self.check(&ctx)?;
