@@ -243,7 +243,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         let starter = cx.entity();
         ui::empty(
             "No runs yet",
-            "Every run is saved here with its timeline and the frames Kai saw, on this computer only.",
+            "Saved runs appear here with their timelines and frames. Recording is controlled in Settings › Privacy.",
             Button::new("history-first-task", "Give Kai a task")
                 .variant(ButtonVariant::Primary)
                 .icon(IconName::Play)
@@ -271,7 +271,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             )
             .child(
                 div().flex_1().min_w_0().h_full().child(
-                    ScrollArea::new("trace-detail")
+                    ScrollArea::new("trace-detail").size_full()
                         .vertical()
                         .child(div().w_full().child(detail.unwrap_or_else(|| {
                             div()

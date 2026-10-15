@@ -365,6 +365,7 @@ impl KaiApp {
             None => self.idle.clone(),
         };
         self.page = Page::Run;
+        self.tasks_open = false;
         self.palette = false;
         cx.notify();
     }

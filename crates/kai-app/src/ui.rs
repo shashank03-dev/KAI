@@ -369,3 +369,8 @@ pub fn empty(title: &str, body: &str, action: impl IntoElement, cx: &App) -> Div
         )
         .child(div().pt_2().child(action))
 }
+
+// Exercise the exact vendored wheel policy in the workspace test command.
+#[cfg(test)]
+#[path = "../../../vendor/ely-gpui-component/src/layout/scroll_policy.rs"]
+mod scroll_policy_contract;

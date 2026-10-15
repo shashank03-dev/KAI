@@ -267,41 +267,44 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     div()
         .size_full()
         .child(
-            SettingsLayout::new(
-                "settings",
-                [
-                    ("model", "Model & server", IconName::Server),
-                    ("safety", "Safety", IconName::Shield),
-                    ("appearance", "Appearance", IconName::Sun),
-                    ("privacy", "Privacy", IconName::Lock),
-                    ("memory", "Memory", IconName::BookOpen),
-                    ("shortcuts", "Shortcuts", IconName::Keyboard),
-                    ("about", "About", IconName::Info),
-                ],
-                section,
-                move |key, _, cx| {
-                    picker.update(cx, |a, cx| {
-                        if key == "memory" {
-                            a.pages.reload_memory();
-                        }
-                        a.pages.settings_section = key.to_string();
-                        cx.notify();
-                    })
-                },
-            )
-            // A readable column with room on the right and at the end, so
-            // fields don't run into the window edge on wide windows.
-            .page(
-                ScrollArea::new("settings-page").vertical().child(
-                    div()
-                        .w_full()
-                        .max_w(gpui::rems(46.))
-                        .pt_2()
-                        .pr_6()
-                        .pb_8()
-                        .child(page),
+            ScrollArea::new("settings-page")
+                .size_full()
+                .vertical()
+                .child(
+                    SettingsLayout::new(
+                        "settings",
+                        [
+                            ("model", "Model & server", IconName::Server),
+                            ("safety", "Safety", IconName::Shield),
+                            ("appearance", "Appearance", IconName::Sun),
+                            ("privacy", "Privacy", IconName::Lock),
+                            ("memory", "Memory", IconName::BookOpen),
+                            ("shortcuts", "Shortcuts", IconName::Keyboard),
+                            ("about", "About", IconName::Info),
+                        ],
+                        section,
+                        move |key, _, cx| {
+                            picker.update(cx, |a, cx| {
+                                if key == "memory" {
+                                    a.pages.reload_memory();
+                                }
+                                a.pages.settings_section = key.to_string();
+                                cx.notify();
+                            })
+                        },
+                    )
+                    // A readable column with room on the right and at the end, so
+                    // fields don't run into the window edge on wide windows.
+                    .page(
+                        div()
+                            .w_full()
+                            .max_w(gpui::rems(46.))
+                            .pt_2()
+                            .pr_6()
+                            .pb_8()
+                            .child(page),
+                    ),
                 ),
-            ),
         )
         .children(confirm)
         .children(confirm_memory)

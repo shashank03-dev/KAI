@@ -128,7 +128,7 @@ fn status_line(app: &KaiApp, g: &Glass, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
+pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
     let hour = jiff::Zoned::now().hour() as u8;
     let g = Glass::of(cx);
 
@@ -321,14 +321,19 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         )
     });
 
+    let short = window.viewport_size().height < px(650.);
     let column = div()
         .w_full()
         .max_w(px(760.))
         .flex()
         .flex_col()
         .items_center()
-        .gap(px(22.))
-        .child(anim::enter(div().child(ui::orb(60., &g)), "home-orb", 0))
+        .gap(px(if short { 14. } else { 22. }))
+        .child(anim::enter(
+            div().child(ui::orb(if short { 42. } else { 60. }, &g)),
+            "home-orb",
+            0,
+        ))
         .child(anim::enter(
             div().child(status_line(app, &g, cx)),
             "home-status",
@@ -342,7 +347,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .gap(px(8.))
                 .child(
                     div()
-                        .text_size(px(40.))
+                        .text_size(px(if short { 32. } else { 40. }))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(g.text)
                         .child(format!("{}.", greeting(hour))),
@@ -399,14 +404,14 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .children(offline)
         .children(no_hands)
         .child(
-            div().flex_1().min_h_0().child(
-                ScrollArea::new("home").vertical().child(
+            div().flex_1().min_h_0().overflow_hidden().child(
+                ScrollArea::new("home").size_full().vertical().child(
                     div()
                         .w_full()
                         .flex()
                         .justify_center()
                         .px(px(32.))
-                        .pt(px(64.))
+                        .pt(px(if short { 24. } else { 64. }))
                         .pb(px(56.))
                         .child(column),
                 ),

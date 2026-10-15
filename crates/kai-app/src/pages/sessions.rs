@@ -8,11 +8,11 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::InlineMessage,
     layout::ScrollArea,
-    primitives::{Icon, IconName, Severity},
+    primitives::{FocusRing, Icon, IconName, Severity},
     theme::{ActiveTheme, ControlSize, IconSize, TextSize},
 };
 use gpui::{
-    AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
+    AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement, Role, ScrollHandle,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
 
@@ -75,13 +75,33 @@ fn ahead(app: &KaiApp, id: u64, cx: &Context<KaiApp>) -> usize {
         .count()
 }
 
-pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement {
+pub fn sidebar(app: &KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -> AnyElement {
+    let scroll = window
+        .use_keyed_state("sessions-scroll", cx, |_, _| ScrollHandle::new())
+        .read(cx)
+        .clone();
     let g = Glass::of(cx);
     let fresh = cx.entity();
     let rows: Vec<AnyElement> = app
         .runs
         .iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(index, e)| {
+            let focus = window
+                .use_keyed_state(("session-focus", e.id as usize), cx, |_, cx| {
+                    cx.focus_handle()
+                })
+                .read(cx)
+                .clone();
+            let revealed =
+                window.use_keyed_state(("session-revealed", e.id as usize), cx, |_, _| false);
+            let focused = focus.is_focused(window);
+            if focused != *revealed.read(cx) {
+                revealed.update(cx, |previous, _| *previous = focused);
+                if focused {
+                    scroll.scroll_to_item(index);
+                }
+            }
             let r = e.state.read(cx);
             let (icon, color, line) = status(r, ahead(app, e.id, cx), cx);
             let live = r.is_live() && !r.held;
@@ -90,7 +110,12 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
             let selected = app.selected == Some(id);
             let (hover, ember) = (g.card_hover, g.ember);
             let row = div()
+                .track_focus(&focus)
                 .id(("session", id as usize))
+                .role(Role::Button)
+                .aria_label(format!("{} · {line}", r.task))
+                .tab_index(0)
+                .focus_ring(cx)
                 .relative()
                 .px(px(10.))
                 .py(px(9.))
@@ -187,7 +212,7 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
             .icon(IconName::Trash2)
             .on_click(move |_, _, cx| clearer.update(cx, |a, cx| a.clear_finished(cx)))
     });
-    div()
+    let sidebar = div()
         .w(px(256.))
         .flex_none()
         .h_full()
@@ -220,18 +245,20 @@ pub fn sidebar(app: &KaiApp, _: &mut Window, cx: &Context<KaiApp>) -> AnyElement
         .children(held.map(|h| div().px_3().pb_3().child(h)))
         .child(
             div().flex_1().min_h_0().child(
-                ScrollArea::new("sessions").vertical().child(
-                    div()
-                        .px(px(8.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.))
-                        .children(rows),
-                ),
+                ScrollArea::new("sessions")
+                    .size_full()
+                    .vertical()
+                    .track_scroll(&scroll)
+                    .px(px(8.))
+                    .children(rows),
             ),
         )
-        .children(clear.map(|c| div().p_2().border_t_1().border_color(g.line).child(c)))
-        .into_any_element()
+        .children(clear.map(|c| div().p_2().border_t_1().border_color(g.line).child(c)));
+    if super::compact_run(window) {
+        sidebar.w_full().h(px(180.)).into_any_element()
+    } else {
+        sidebar.into_any_element()
+    }
 }
 
 /// A run waiting for the screen.

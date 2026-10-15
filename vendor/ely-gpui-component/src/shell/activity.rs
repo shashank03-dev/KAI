@@ -2,13 +2,13 @@ use std::rc::Rc;
 
 use gpui::{
     Animation, AnimationExt, App, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
 };
 
 use crate::{
     data_display::CountBadge,
     motion,
-    primitives::{Icon, IconName, Tooltip},
+    primitives::{FocusRing, Icon, IconName, Tooltip},
     theme::{ActiveTheme, IconSize},
 };
 
@@ -104,6 +104,12 @@ impl RenderOnce for ActivityBar {
             let id = item.id.clone();
             div()
                 .id(item.id.clone())
+                .role(Role::Button)
+                .aria_label(item.label.clone())
+                .tab_index(0)
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_ring(cx)
                 .group(group.clone())
                 .relative()
                 .flex()

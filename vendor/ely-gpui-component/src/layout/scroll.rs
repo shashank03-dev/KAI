@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, App, Axis, Bounds, Canvas, Div, ElementId, EmptyView, Entity, EntityId,
     FocusHandle, HoverListenerMode, InteractiveElement, IntoElement, ParentElement, Pixels, Point,
     RenderOnce, ScrollHandle, StatefulInteractiveElement, StyleRefinement, Styled, Window, canvas,
-    div, point, prelude::*,
+    div, point, prelude::*, px,
 };
 use smallvec::SmallVec;
 use web_time::Instant;
@@ -309,6 +309,7 @@ impl RenderOnce for ScrollArea {
             None => state.read(cx).handle.clone(),
         };
         let presence = track_activity(&state, &handle, window, cx);
+        let vertical_only = self.vertical;
         self.base
             .id(self.id)
             .relative()
@@ -334,8 +335,34 @@ impl RenderOnce for ScrollArea {
                         move |event, window, cx| {
                             let delta = event.delta.pixel_delta(window.line_height());
                             let reach = handle.max_offset();
-                            let vertical = delta.y != Pixels::ZERO && reach.y > Pixels::ZERO;
-                            if vertical || (delta.x != Pixels::ZERO && reach.x > Pixels::ZERO) {
+                            // GPUI's default bubble handler runs first. Undo its
+                            // delta to compare the prior bounded position, then
+                            // clamp now so boundary events can reach the parent.
+                            let mut dx = if vertical_only { Pixels::ZERO } else { delta.x };
+                            let mut dy = delta.y;
+                            if vertical_only && dy == Pixels::ZERO {
+                                dy = delta.x;
+                            }
+                            if dx != Pixels::ZERO && dy != Pixels::ZERO {
+                                if dx.abs() > dy.abs() {
+                                    dy = Pixels::ZERO;
+                                } else {
+                                    dx = Pixels::ZERO;
+                                }
+                            }
+                            let offset = handle.offset();
+                            let (x, moved_x) = super::scroll_policy::wheel_axis(
+                                offset.x.into(),
+                                reach.x.into(),
+                                dx.into(),
+                            );
+                            let (y, moved_y) = super::scroll_policy::wheel_axis(
+                                offset.y.into(),
+                                reach.y.into(),
+                                dy.into(),
+                            );
+                            handle.set_offset(point(px(x), px(y)));
+                            if moved_x || moved_y {
                                 cx.stop_propagation();
                             }
                         }

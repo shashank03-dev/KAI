@@ -14,7 +14,7 @@ pub const DARK_SURFACE: u32 = 0x131316;
 pub const DARK_BORDER: u32 = 0x232328;
 pub const DARK_FG: u32 = 0xededef;
 pub const DARK_FG_MUTED: u32 = 0xa1a1aa;
-pub const DARK_FG_SUBTLE: u32 = 0x6b6b74;
+pub const DARK_FG_SUBTLE: u32 = 0x8c8c96;
 pub const DARK_INK: u32 = 0xfafafa;
 pub const DARK_INK_HOVER: u32 = 0xd4d4d8;
 
@@ -24,7 +24,7 @@ pub const LIGHT_SURFACE: u32 = 0xffffff;
 pub const LIGHT_BORDER: u32 = 0xe2e2e6;
 pub const LIGHT_FG: u32 = 0x09090b;
 pub const LIGHT_FG_MUTED: u32 = 0x52525b;
-pub const LIGHT_FG_SUBTLE: u32 = 0x8b8b94;
+pub const LIGHT_FG_SUBTLE: u32 = 0x686872;
 pub const LIGHT_INK: u32 = 0x09090b;
 pub const LIGHT_INK_HOVER: u32 = 0x27272a;
 
@@ -111,8 +111,10 @@ mod tests {
         for (fg, bgs) in [
             (DARK_FG, [DARK_BG, DARK_SURFACE]),
             (DARK_FG_MUTED, [DARK_BG, DARK_SURFACE]),
+            (DARK_FG_SUBTLE, [DARK_BG, DARK_SURFACE]),
             (LIGHT_FG, [LIGHT_BG, LIGHT_SURFACE]),
             (LIGHT_FG_MUTED, [LIGHT_BG, LIGHT_SURFACE]),
+            (LIGHT_FG_SUBTLE, [LIGHT_BG, LIGHT_SURFACE]),
         ] {
             for bg in bgs {
                 assert!(contrast(fg, bg) >= 4.5, "{fg:06x} on {bg:06x}");

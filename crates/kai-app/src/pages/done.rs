@@ -257,7 +257,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         )
     });
 
-    ScrollArea::new("done").vertical().child(
+    ScrollArea::new("done").size_full().vertical().child(
         div()
             .relative()
             .px(px(32.))

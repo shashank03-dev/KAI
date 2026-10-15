@@ -57,7 +57,12 @@ fn shots() -> Vec<&'static str> {
 pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
     let _ = std::fs::create_dir_all(&dir);
     cx.spawn_in(window, async move |this, cx| {
-        for mode in [Mode::Light, Mode::Dark] {
+        let modes = if std::env::var("KAI_CAPTURE_THEME").ok().as_deref() == Some("dark") {
+            vec![Mode::Dark]
+        } else {
+            vec![Mode::Light, Mode::Dark]
+        };
+        for mode in modes {
             for name in shots() {
                 let ok = this.update_in(cx, |app, window, cx| {
                     Theme::set_mode_now(mode, cx);
@@ -70,26 +75,19 @@ pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
                 if ok.is_err() {
                     return;
                 }
+                // Hold a staged synthetic view for bound-window UI inspection.
+                // No screenshot, credential lookup or model call is made here.
+                if std::env::var_os("KAI_CAPTURE_HOLD").is_some() {
+                    return;
+                }
                 cx.background_executor()
                     .timer(Duration::from_millis(900))
                     .await;
                 let suffix = if mode == Mode::Dark { "dark" } else { "light" };
                 let path = dir.join(format!("{name}-{suffix}.png"));
-                let bounds = this.update_in(cx, |_, window, _| {
-                    let b = window.bounds();
-                    let s = window.scale_factor();
-                    (
-                        f32::from(b.origin.x) * s,
-                        f32::from(b.origin.y) * s,
-                        f32::from(b.size.width) * s,
-                        f32::from(b.size.height) * s,
-                    )
-                });
-                if let Ok(b) = bounds {
-                    cx.background_executor()
-                        .spawn(async move { shoot(&path, b) })
-                        .await;
-                }
+                cx.background_executor()
+                    .spawn(async move { shoot(&path) })
+                    .await;
             }
         }
         let _ = cx.update(|_, cx| cx.quit());
@@ -97,19 +95,21 @@ pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
     .detach();
 }
 
-fn shoot(path: &std::path::Path, (x, y, w, h): (f32, f32, f32, f32)) {
+fn shoot(path: &std::path::Path) {
     let r = (|| -> anyhow::Result<()> {
-        let m = xcap::Monitor::all()?
+        // Never crop the desktop: another app or monitor could be captured.
+        let windows: Vec<_> = xcap::Window::all()?
             .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("no display"))?;
-        let img = m.capture_image()?;
-        let (x, y) = (x.max(0.0) as u32, y.max(0.0) as u32);
-        let w = (w as u32).min(img.width().saturating_sub(x));
-        let h = (h as u32).min(img.height().saturating_sub(y));
-        image::imageops::crop_imm(&img, x, y, w, h)
-            .to_image()
-            .save(path)?;
+            .filter(|w| {
+                w.pid().ok() == Some(std::process::id()) && w.title().ok().as_deref() == Some("Kai")
+            })
+            .collect();
+        anyhow::ensure!(
+            windows.len() == 1,
+            "expected exactly one Kai window, found {}",
+            windows.len()
+        );
+        windows[0].capture_image()?.save(path)?;
         Ok(())
     })();
     if let Err(e) = r {

@@ -7,7 +7,7 @@ use crate::pages::settings::row;
 use crate::runs::backend_label;
 use crate::switcher::{backend_from_key, backend_key};
 use ely_gpui_component::{
-    buttons::{Button, ButtonVariant, SegmentedControl},
+    buttons::{Button, ButtonVariant},
     feedback::{ErrorView, InlineMessage, Toast},
     forms::{Choice, PasswordInput, Select, TextInput, UrlInput},
     primitives::{IconName, Severity},
@@ -98,15 +98,11 @@ fn key_row(
     app: &KaiApp,
     label: &str,
     field: &Entity<TextInput>,
-    stored: bool,
     backend: BackendChoice,
     cx: &Context<KaiApp>,
 ) -> AnyElement {
-    let hint = if stored {
-        "A key is stored in the OS keychain (or set in the environment). Type a new one to replace it."
-    } else {
-        "No key stored yet."
-    };
+    // Rendering must not query the credential store: OS consent can block.
+    let hint = "Keys stay in the OS keychain or environment. Leave blank to keep an existing key.";
     let key = backend_key(backend);
     let tester = cx.entity();
     let control = div()
@@ -177,32 +173,32 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         cx.entity(),
         cx.entity(),
     );
-    let keys = kai_os::secrets::keys();
     let models = || MODELS.iter().map(|m| Choice::new(m.id, m.label));
-    let mut segments = SegmentedControl::new("backend", backend_key(app.settings.backend));
-    for (b, label) in [
-        (BackendChoice::Both, "Both"),
-        (BackendChoice::Vllm, "DigitalOcean"),
-        (BackendChoice::Gemini, "Gemini"),
-        (BackendChoice::Gateway, "AI Gateway"),
-        (BackendChoice::OpenAi, "OpenAI"),
-        (BackendChoice::Local, "This computer"),
-    ] {
-        segments = segments.segment(backend_key(b), label, None);
-    }
-    let segments = segments.on_change(move |v, window, cx| {
-        backend.update(cx, |a, cx| {
-            crate::switcher::set_backend(a, backend_from_key(v.as_ref()), cx);
-            a.check_connection(window, cx);
-        })
-    });
+    let choices = [
+        BackendChoice::Both,
+        BackendChoice::Vllm,
+        BackendChoice::Gemini,
+        BackendChoice::Gateway,
+        BackendChoice::OpenAi,
+        BackendChoice::Local,
+    ]
+    .into_iter()
+    .map(|b| Choice::new(backend_key(b), backend_label(b)));
+    let backend_picker = Select::new("backend", choices)
+        .selected(backend_key(app.settings.backend))
+        .on_change(move |v, window, cx| {
+            backend.update(cx, |a, cx| {
+                crate::switcher::set_backend(a, backend_from_key(v.as_ref()), cx);
+                a.check_connection(window, cx);
+            })
+        });
     let tested = backend_key(app.settings.backend);
     SettingsSection::new("Model & server")
         .description("Where the model runs. Screenshots go only to these endpoints.")
         .row(row(
             "Backend",
             "Both tries your DigitalOcean server first and falls back to Gemini for a step. AI Gateway (Vercel) and OpenAI run Gemma 4 or GPT models for comparison.",
-            segments,
+            backend_picker,
             cx,
         ))
         .row(local_row(app, cx))
@@ -212,10 +208,10 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
             UrlInput::new(&app.pages.endpoint),
             cx,
         ))
-        .row(key_row(app, "Server API key", &app.pages.vllm_key, keys.vllm.is_some(), BackendChoice::Vllm, cx))
-        .row(key_row(app, "Gemini API key", &app.pages.gemini_key, keys.gemini.is_some(), BackendChoice::Gemini, cx))
-        .row(key_row(app, "Vercel AI Gateway key", &app.pages.gateway_key, keys.gateway.is_some(), BackendChoice::Gateway, cx))
-        .row(key_row(app, "OpenAI API key", &app.pages.openai_key, keys.openai.is_some(), BackendChoice::OpenAi, cx))
+        .row(key_row(app, "Server API key", &app.pages.vllm_key, BackendChoice::Vllm, cx))
+        .row(key_row(app, "Gemini API key", &app.pages.gemini_key, BackendChoice::Gemini, cx))
+        .row(key_row(app, "Vercel AI Gateway key", &app.pages.gateway_key, BackendChoice::Gateway, cx))
+        .row(key_row(app, "OpenAI API key", &app.pages.openai_key, BackendChoice::OpenAi, cx))
         .row(row(
             "Fast model",
             "Used for every step. Gemma runs on every backend; GPT models need AI Gateway or OpenAI.",

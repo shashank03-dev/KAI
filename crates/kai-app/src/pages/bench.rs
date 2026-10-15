@@ -333,6 +333,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .body("Run `kai bench --backend vllm` (or gemini, gateway) on this machine; results land in bench/results."),
         );
         return ScrollArea::new("bench")
+            .size_full()
             .vertical()
             .child(ui::body(1040., content))
             .into_any_element();
@@ -406,6 +407,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         cx,
     );
     ScrollArea::new("bench")
+        .size_full()
         .vertical()
         .child(ui::body(
             1040.,

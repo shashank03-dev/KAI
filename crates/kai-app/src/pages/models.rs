@@ -205,7 +205,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             })
         })
     });
-    let page = ScrollArea::new("models").vertical().child(ui::body(
+    let page = ScrollArea::new("models").size_full().vertical().child(ui::body(
         1040.,
         ui::page(
             "On this computer",

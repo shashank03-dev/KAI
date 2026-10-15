@@ -96,7 +96,16 @@ fn main() {
                 .map_err(|e| log::warn!("splash: {e}"))
                 .ok();
 
-            let bounds = Bounds::centered(None, size(px(1180.0), px(780.0)), cx);
+            let audit_size = capture_dir
+                .as_ref()
+                .and_then(|_| std::env::var("KAI_CAPTURE_SIZE").ok())
+                .and_then(|s| {
+                    s.split_once('x')
+                        .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+                })
+                .filter(|(w, h)| w.is_finite() && h.is_finite() && *w >= 720. && *h >= 520.);
+            let (w, h) = audit_size.unwrap_or((1180., 780.));
+            let bounds = Bounds::centered(None, size(px(w), px(h)), cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {

@@ -123,12 +123,23 @@ fn steer_box(id: u64, app: &KaiApp, _r: &RunState, cx: &Context<KaiApp>) -> AnyE
 }
 
 /// The left pane's tabs: transcript, terminal, sub-agents.
-pub fn tabs(app: &KaiApp, r: &RunState, live: bool, cx: &Context<KaiApp>) -> AnyElement {
+pub fn tabs(
+    app: &KaiApp,
+    r: &RunState,
+    live: bool,
+    compact: bool,
+    cx: &Context<KaiApp>,
+) -> AnyElement {
     let picker = cx.entity();
-    let tab = app.run_tab.clone();
+    let tab = if !compact && app.run_tab == "screen" {
+        "steps".into()
+    } else {
+        app.run_tab.clone()
+    };
     let panel = match tab.as_str() {
         "terminal" => panes::terminal(r, cx),
         "team" => panes::team_tree(r, cx),
+        "screen" => seen(app, r, cx),
         _ => div()
             .flex()
             .flex_col()
@@ -146,6 +157,9 @@ pub fn tabs(app: &KaiApp, r: &RunState, live: bool, cx: &Context<KaiApp>) -> Any
         Choice::new("steps", format!("Steps ({})", r.steps.len())),
         Choice::new("terminal", format!("Terminal ({})", r.outputs.len())),
     ];
+    if compact {
+        choices.push(Choice::new("screen", "Screen"));
+    }
     if r.team {
         choices.push(Choice::new(
             "team",
@@ -255,7 +269,8 @@ pub fn seen(app: &KaiApp, r: &RunState, cx: &Context<KaiApp>) -> AnyElement {
         .into_any_element()
 }
 
-pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
+pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
+    let compact = super::compact_run(window);
     let id = app.selected.unwrap_or_default();
     let run = app.run.clone();
     let r = run.read(cx);
@@ -286,6 +301,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         g.ember
     };
     let header = div()
+        .flex_none()
         .flex()
         .flex_col()
         .bg(g.pane)
@@ -328,17 +344,20 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
 
     let left = div()
         .size_full()
+        .min_h_0()
         .flex()
         .flex_col()
         .child(
-            div().flex_1().min_h_0().child(
+            div().flex_1().min_h_0().overflow_hidden().child(
                 ScrollArea::new("steps")
+                    .size_full()
                     .vertical()
-                    .child(div().p_4().child(tabs(app, r, true, cx))),
+                    .child(div().p_4().child(tabs(app, r, true, compact, cx))),
             ),
         )
         .child(
             div()
+                .flex_none()
                 .p_3()
                 .border_t_1()
                 .border_color(g.line)
@@ -359,14 +378,24 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     cx,
                 )),
         );
-    let right = ScrollArea::new("seen").vertical().child(seen(app, r, cx));
+    let right = ScrollArea::new("seen")
+        .size_full()
+        .vertical()
+        .child(seen(app, r, cx));
 
-    div().size_full().flex().flex_col().child(header).child(
-        div().flex_1().min_h_0().child(
-            SplitPane::new("run-split", Axis::Horizontal, px(280.))
-                .sizes(&[0.46, 0.54])
-                .pane(left)
-                .pane(right),
-        ),
-    )
+    let body = if compact {
+        left.into_any_element()
+    } else {
+        SplitPane::new("run-split", Axis::Horizontal, px(280.))
+            .sizes(&[0.46, 0.54])
+            .pane(left)
+            .pane(right)
+            .into_any_element()
+    };
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(header)
+        .child(div().flex_1().min_h_0().child(body))
 }

@@ -154,6 +154,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .size_full()
         .child(
             ScrollArea::new("skills-page")
+                .size_full()
                 .vertical()
                 .child(ui::body(1040., content)),
         )

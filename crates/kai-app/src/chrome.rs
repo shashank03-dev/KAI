@@ -11,7 +11,11 @@ use ely_gpui_component::{
 use gpui::{Context, IntoElement};
 
 impl KaiApp {
-    pub(crate) fn status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn status_bar(
+        &self,
+        window: &gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let (state, label) = match &self.conn {
             Conn::Unknown => (
                 Connectivity::Reconnecting,
@@ -48,7 +52,7 @@ impl KaiApp {
         };
         let switcher = crate::switcher::switcher("status-model", self, cx);
         let this = cx.entity();
-        StatusBar::new()
+        let bar = StatusBar::new()
             .left(ConnectionStatus::new("conn", state))
             .left(
                 StatusBarItem::new("conn-label")
@@ -57,8 +61,17 @@ impl KaiApp {
                     .on_click(move |_, window, cx| {
                         this.update(cx, |app, cx| app.check_connection(window, cx))
                     }),
-            )
-            .left(switcher)
+            );
+        if crate::pages::compact_run(window) {
+            return bar.right(
+                StatusBarItem::new("compact-queue").label(if self.queue_held {
+                    format!("{queued} queued · paused")
+                } else {
+                    format!("{queued} queued")
+                }),
+            );
+        }
+        bar.left(switcher)
             .right(
                 StatusBarItem::new("queue")
                     .icon(IconName::ListOrdered)

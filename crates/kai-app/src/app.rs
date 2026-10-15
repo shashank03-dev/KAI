@@ -51,6 +51,7 @@ pub struct KaiApp {
     pub human_draft: Entity<TextInput>,
     /// Which pane the run view shows: "steps", "terminal" or "team".
     pub run_tab: String,
+    pub tasks_open: bool,
     pub settings: Settings,
     pub skills: Vec<Skill>,
     pub toaster: Entity<Toaster>,
@@ -88,7 +89,7 @@ impl KaiApp {
         let steer_draft = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line(1, 4)
-                .placeholder("Tell Kai something mid-run, e.g. \"use Firefox, not Chrome\"")
+                .placeholder("Message Kai during this run…")
         });
         let human_draft = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -110,6 +111,7 @@ impl KaiApp {
             steer_draft,
             human_draft,
             run_tab: "steps".into(),
+            tasks_open: false,
             team: settings.team_mode,
             pages: pages::PageState::new(&settings, window, cx),
             local,
@@ -304,11 +306,13 @@ impl Render for KaiApp {
             },
         )
         .size(ControlSize::Sm)
+        .tooltip("Toggle light and dark theme")
         .on_click(move |_, _, cx| theme_toggler.update(cx, |a, cx| a.toggle_theme(cx)));
         let title = TitleBar::new("title")
             .title(t(cx, "app.name", &[]))
             .action(
                 IconButton::new("palette-btn", IconName::Command)
+                    .tooltip("Open command palette")
                     .size(ControlSize::Sm)
                     .on_click(move |_, _, cx| {
                         palette_btn.update(cx, |app, cx| {
@@ -382,7 +386,7 @@ impl Render for KaiApp {
                 .into_any_element()
         });
         let palette = self.palette.then(|| self.palette(cx).into_any_element());
-        let status = self.status_bar(cx).into_any_element();
+        let status = self.status_bar(window, cx).into_any_element();
 
         let (on_palette, on_stop, on_new, on_short, on_theme) = (
             cx.entity(),

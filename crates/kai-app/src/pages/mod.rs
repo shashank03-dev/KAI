@@ -131,6 +131,11 @@ impl PageState {
     }
 }
 
+/// Below this width, tasks and the screen use switchable views.
+pub fn compact_run(window: &Window) -> bool {
+    window.viewport_size().width < gpui::px(1100.)
+}
+
 /// Run: the sessions list, and beside it the composer for a new task, a
 /// queued run, the live run, or a finished run's result.
 pub fn run_page(
@@ -147,6 +152,34 @@ pub fn run_page(
     };
     if app.runs.is_empty() {
         return content;
+    }
+    if compact_run(window) {
+        let picker = cx.entity();
+        let label = format!(
+            "{} tasks ({})",
+            if app.tasks_open { "Hide" } else { "Show" },
+            app.runs.len()
+        );
+        let tasks = app.tasks_open.then(|| sessions::sidebar(app, window, cx));
+        return div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(
+                div().flex_none().px_3().py_1().child(
+                    ely_gpui_component::buttons::Button::new("tasks-toggle", label)
+                        .variant(ely_gpui_component::buttons::ButtonVariant::Ghost)
+                        .on_click(move |_, _, cx| {
+                            picker.update(cx, |a, cx| {
+                                a.tasks_open = !a.tasks_open;
+                                cx.notify();
+                            })
+                        }),
+                ),
+            )
+            .children(tasks)
+            .child(div().flex_1().min_h_0().child(content))
+            .into_any_element();
     }
     div()
         .size_full()
