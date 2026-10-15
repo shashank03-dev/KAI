@@ -16,6 +16,8 @@ pub enum Variant {
     Vulkan,
     /// NVIDIA CUDA 12.4 (Windows only; needs a driver for CUDA 12).
     Cuda,
+    /// Apple Silicon's GPU (the macOS build always has Metal).
+    Metal,
 }
 
 impl Variant {
@@ -24,6 +26,7 @@ impl Variant {
             Variant::Cpu => "cpu",
             Variant::Vulkan => "vulkan",
             Variant::Cuda => "cuda",
+            Variant::Metal => "metal",
         }
     }
 }
@@ -146,6 +149,16 @@ const TABLE: &[Row] = &[
         ],
     ),
     (
+        "macos",
+        "aarch64",
+        Variant::Metal,
+        &[(
+            "llama-b11429-bin-macos-arm64.tar.gz",
+            "740288ec6887be94280a5dfa25b5e23a78285cab104519e6c7e218904ee82459",
+            11_971_406,
+        )],
+    ),
+    (
         "windows",
         "aarch64",
         Variant::Cpu,
@@ -161,6 +174,7 @@ const TABLE: &[Row] = &[
 /// else Vulkan for any other dedicated GPU, else CPU. Linux: Vulkan when a
 /// dedicated GPU and the Vulkan loader (`libvulkan.so.1`) are present, else
 /// CPU (the Linux CUDA build needs a 567 MB runtime or a system CUDA 12.8).
+/// macOS on Apple Silicon: Metal, the only build there.
 pub fn choose_variant(hw: &HardwareSummary, vulkan_loader: bool) -> Variant {
     let gpu = hw.gpu_vram_gb.is_some_and(|v| v >= 1.0);
     let nvidia = hw
@@ -171,12 +185,14 @@ pub fn choose_variant(hw: &HardwareSummary, vulkan_loader: bool) -> Variant {
         "windows" if gpu && nvidia && hw.arch == "x86_64" => Variant::Cuda,
         "windows" if gpu && hw.arch == "x86_64" => Variant::Vulkan,
         "linux" if gpu && vulkan_loader => Variant::Vulkan,
+        "macos" => Variant::Metal,
         _ => Variant::Cpu,
     }
 }
 
 /// The pinned build for an OS, architecture and variant (falls back to the
-/// CPU build when that variant does not exist there).
+/// CPU build, or the only build there is, when that variant does not exist
+/// there).
 pub fn pinned(os: &str, arch: &str, variant: Variant) -> Option<RuntimeSpec> {
     let row = TABLE
         .iter()
@@ -185,7 +201,8 @@ pub fn pinned(os: &str, arch: &str, variant: Variant) -> Option<RuntimeSpec> {
             TABLE
                 .iter()
                 .find(|r| r.0 == os && r.1 == arch && r.2 == Variant::Cpu)
-        })?;
+        })
+        .or_else(|| TABLE.iter().find(|r| r.0 == os && r.1 == arch))?;
     Some(RuntimeSpec {
         name: format!("llama.cpp-{LLAMA_CPP_TAG}-{os}-{arch}-{}", row.2.name()),
         variant: row.2,
@@ -211,7 +228,8 @@ pub fn for_hardware(hw: &HardwareSummary) -> anyhow::Result<RuntimeSpec> {
     let v = choose_variant(hw, vulkan_loader_present());
     pinned(&hw.os, &hw.arch, v).ok_or_else(|| {
         anyhow::anyhow!(
-            "no llama.cpp build for {} {}; Kai supports Linux and Windows on x86_64 and arm64",
+            "no llama.cpp build for {} {}; Kai supports Linux and Windows on x86_64 and \
+             arm64, and macOS on Apple Silicon",
             hw.os,
             hw.arch
         )
@@ -306,7 +324,18 @@ mod tests {
         assert_eq!(choose_variant(&hw("linux", None), true), Variant::Cpu);
         let s = pinned("linux", "x86_64", Variant::Cuda).unwrap();
         assert_eq!(s.variant, Variant::Cpu, "no Linux CUDA row: falls back");
-        assert!(pinned("macos", "aarch64", Variant::Cpu).is_none());
+        assert!(pinned("macos", "x86_64", Variant::Cpu).is_none());
+    }
+
+    #[test]
+    fn apple_silicon_gets_the_metal_build() {
+        let mut mac = hw("macos", None);
+        mac.arch = "aarch64".into();
+        assert_eq!(choose_variant(&mac, false), Variant::Metal);
+        let s = pinned("macos", "aarch64", Variant::Cpu).unwrap();
+        assert_eq!(s.variant, Variant::Metal, "the only macOS build");
+        assert_eq!(s.server_exe, "llama-server");
+        assert_eq!(s.name, "llama.cpp-b11429-macos-aarch64-metal");
     }
 
     #[test]

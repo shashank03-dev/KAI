@@ -12,7 +12,7 @@ pub struct LaneArgs {
     /// Do the task in Kai's own browser over the DevTools Protocol instead
     /// of on the desktop: the page's own tree, background input, the real
     /// page address for checks. Needs Chrome, Chromium, Edge or Brave
-    /// (`KAI_BROWSER` to pick one). Linux for now.
+    /// (`KAI_BROWSER` to pick one). Linux and macOS for now.
     #[arg(long)]
     pub browser: bool,
     /// With --browser: no window (servers, CI).

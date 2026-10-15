@@ -85,6 +85,14 @@ fn place(e: &ModelEntry, hw: &HardwareSummary) -> Place {
     if vram > 0.0 && vram >= need_gpu {
         return Place::Gpu;
     }
+    // A Mac's GPU memory is part of its RAM: there is nothing to split across.
+    if hw.os == "macos" {
+        return if ram >= need {
+            Place::Cpu
+        } else {
+            Place::Nowhere
+        };
+    }
     if vram >= SPLIT_MIN_GPU_SHARE * need && vram + ram >= need {
         return Place::Split {
             comfortable: vram + ram >= need * SPLIT_COMFORT,

@@ -64,6 +64,11 @@ pub trait Perceptor: Send + Sync {
     fn reads_pages(&self) -> bool {
         false
     }
+    /// Whether these eyes look at a Mac desktop, where shortcuts use `cmd`.
+    /// The system prompt adds the Mac rule only then.
+    fn mac(&self) -> bool {
+        false
+    }
     /// The visible page's text, for a reading step the model asked for with
     /// `read_page`: `(text cut to at most max_chars, full length in chars)`.
     /// `None` where there is no page to read.

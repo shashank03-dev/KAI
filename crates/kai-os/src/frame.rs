@@ -157,6 +157,25 @@ pub fn downscale_with(src: &RgbaImage, cfg: &FrameConfig) -> Frame {
     Frame { image, scale }
 }
 
+/// Resize a capture to the display's size in the OS's input coordinates.
+/// On a Retina Mac the capture has two pixels per point while clicks and the
+/// accessibility tree use points; elsewhere the sizes match and the capture
+/// comes back untouched.
+pub fn to_display(src: RgbaImage, w: u32, h: u32) -> RgbaImage {
+    if src.dimensions() == (w, h) || w == 0 || h == 0 {
+        return src;
+    }
+    let (sw, sh) = src.dimensions();
+    let src_img = FirImage::from_vec_u8(sw, sh, src.into_raw(), PixelType::U8x4)
+        .expect("buffer matches dimensions");
+    let mut dst = FirImage::new(w, h, PixelType::U8x4);
+    let opts = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Bilinear));
+    Resizer::new()
+        .resize(&src_img, &mut dst, &opts)
+        .expect("same pixel type");
+    RgbaImage::from_raw(w, h, dst.into_vec()).expect("buffer matches dimensions")
+}
+
 fn rgba_to_rgb(src: &RgbaImage) -> RgbImage {
     let (w, h) = src.dimensions();
     let mut out = Vec::with_capacity((w * h * 3) as usize);
@@ -294,6 +313,15 @@ mod tests {
         let f = downscale_with(&gradient(1920, 1080, false), &side);
         assert_eq!(f.image.dimensions(), (1024, 576));
         assert!((f.scale - 1.875).abs() < 1e-3);
+    }
+
+    #[test]
+    fn retina_capture_maps_to_display_points() {
+        let px = gradient(2880, 1864, false);
+        let pt = to_display(px, 1440, 932);
+        assert_eq!(pt.dimensions(), (1440, 932));
+        let same = to_display(gradient(1920, 1080, false), 1920, 1080);
+        assert_eq!(same.dimensions(), (1920, 1080));
     }
 
     #[test]

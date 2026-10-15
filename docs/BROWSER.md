@@ -4,7 +4,7 @@
 browser") does a task in **Kai's own Chromium**, driven over the Chrome
 DevTools Protocol (CDP), instead of through the desktop. Why, and what was
 rejected: [RESEARCH_2026_10_VENDORS.md](RESEARCH_2026_10_VENDORS.md) §5.1.
-Off unless asked for; Linux for now.
+Off unless asked for; Linux and macOS for now (Chrome, Chromium, Edge or Brave).
 
 ## In the app
 

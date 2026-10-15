@@ -40,16 +40,37 @@ const BROWSER_NAMES: &[&str] = &[
     "brave-browser",
 ];
 
+/// Chromium-family app bundles on a Mac, in order (the executable inside
+/// each, under `/Applications` or `~/Applications`).
+const MAC_APPS: &[&str] = &[
+    "Google Chrome.app/Contents/MacOS/Google Chrome",
+    "Chromium.app/Contents/MacOS/Chromium",
+    "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "Brave Browser.app/Contents/MacOS/Brave Browser",
+];
+
 /// The browser to drive: `KAI_BROWSER` if set, else the first Chromium-family
-/// executable on `PATH`.
+/// executable on `PATH`, else (macOS) the first installed app bundle.
 pub fn find_browser() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("KAI_BROWSER").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .flat_map(|dir| BROWSER_NAMES.iter().map(move |n| dir.join(n)))
-        .find(|p| p.is_file())
+    let on_path = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .flat_map(|dir| BROWSER_NAMES.iter().map(move |n| dir.join(n)))
+            .find(|p| p.is_file())
+    });
+    on_path.or_else(|| {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        let home = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Applications"));
+        [Some(PathBuf::from("/Applications")), home]
+            .into_iter()
+            .flatten()
+            .flat_map(|dir| MAC_APPS.iter().map(move |a| dir.join(a)))
+            .find(|p| p.is_file())
+    })
 }
 
 /// What a mark stands for.

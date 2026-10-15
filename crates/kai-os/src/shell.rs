@@ -146,7 +146,31 @@ fn command(cmd: &str) -> Command {
     let mut c = Command::new("sh");
     c.args(["-c", cmd]);
     c.process_group(0);
+    #[cfg(target_os = "macos")]
+    c.env(
+        "PATH",
+        with_mac_tools(&std::env::var("PATH").unwrap_or_default()),
+    );
     c
+}
+
+/// Where Mac command-line tools live that an app opened from the Finder
+/// does not see (its `PATH` is only `/usr/bin:/bin:/usr/sbin:/sbin`):
+/// Homebrew on Apple Silicon, then Homebrew on Intel and manual installs.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+const MAC_TOOL_DIRS: &[&str] = &["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"];
+
+/// `path` plus each of [`MAC_TOOL_DIRS`] it is missing, appended so the
+/// person's own order still wins.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn with_mac_tools(path: &str) -> String {
+    let have: Vec<&str> = path.split(':').filter(|d| !d.is_empty()).collect();
+    let missing = MAC_TOOL_DIRS.iter().filter(|d| !have.contains(d));
+    have.iter()
+        .copied()
+        .chain(missing.copied())
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn home() -> std::path::PathBuf {
@@ -243,5 +267,19 @@ mod tests {
         let out = sh.run("sleep 10").await.unwrap();
         assert!(out.contains("stopped by the kill switch"));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn finder_path_gains_homebrew_without_reordering() {
+        assert_eq!(
+            with_mac_tools("/usr/bin:/bin:/usr/sbin:/sbin"),
+            "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin"
+        );
+        let mine = "/Users/me/bin:/opt/homebrew/bin:/usr/bin";
+        assert_eq!(
+            with_mac_tools(mine),
+            "/Users/me/bin:/opt/homebrew/bin:/usr/bin:/opt/homebrew/sbin:/usr/local/bin"
+        );
+        assert_eq!(with_mac_tools(""), MAC_TOOL_DIRS.join(":"));
     }
 }

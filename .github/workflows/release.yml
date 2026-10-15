@@ -19,6 +19,8 @@ jobs:
             archive: kai-linux-x86_64.tar.gz
           - os: windows-latest
             archive: kai-windows-x86_64.zip
+          - os: macos-15
+            archive: kai-macos-aarch64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +53,13 @@ jobs:
           ./kai skill validate skills
           ./kai models list
           ./kai bench --backend mock --out ../bench
+      - name: Package and smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          scripts/macos/bundle.sh
+          mv dist/kai-macos-aarch64.zip dist/kai-macos-aarch64.zip.sha256 .
+          ditto -x -k ${{ matrix.archive }} smoke
+          smoke/Kai.app/Contents/MacOS/kai bench --backend mock --out smoke/bench
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

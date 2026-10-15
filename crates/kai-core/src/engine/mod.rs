@@ -154,6 +154,9 @@ impl Engine<'_> {
             system.push_str(crate::web::READ_RULE);
             schema = StepReply::with_read_page(&schema);
         }
+        if self.perceptor.mac() {
+            system.push_str(prompt::MAC_RULE);
+        }
         if self.config.memo {
             system.push_str(crate::memo::RULE);
             schema = crate::memo::with_memo(&schema);

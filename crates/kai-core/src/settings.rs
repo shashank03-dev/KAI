@@ -137,7 +137,7 @@ pub struct Settings {
     pub task_checks: bool,
     /// Do tasks in Kai's own browser over the DevTools Protocol instead of
     /// on the desktop (docs/BROWSER.md): background input, the page's own
-    /// tree. Off by default; Linux for now.
+    /// tree. Off by default; Linux and macOS for now.
     pub use_browser: bool,
     /// Catalog id of the model on this computer (`BackendChoice::Local`).
     pub local_model: String,

@@ -319,7 +319,21 @@ fn pid_is_server(info: &ServerInfo) -> bool {
     has("--alias", &info.served_name) && has("--port", &info.port.to_string())
 }
 
-#[cfg(target_os = "linux")]
+/// macOS has no `/proc`: read the command line from `ps`.
+#[cfg(target_os = "macos")]
+fn pid_is_server(info: &ServerInfo) -> bool {
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-p", &info.pid.to_string(), "-o", "command="])
+        .output()
+    else {
+        return false;
+    };
+    let cmd = String::from_utf8_lossy(&out.stdout);
+    cmd.contains(&format!("--alias {}", info.served_name))
+        && cmd.contains(&format!("--port {}", info.port))
+}
+
+#[cfg(unix)]
 fn kill_pid(pid: u32) {
     let pid = pid as libc::pid_t;
     // SAFETY: plain signal sends to a pid we verified carries our flags.
@@ -364,12 +378,12 @@ impl NoWindow for std::process::Command {
     }
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn pid_is_server(_: &ServerInfo) -> bool {
     false
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(unix, windows)))]
 fn kill_pid(_: u32) {}
 
 #[cfg(test)]

@@ -69,12 +69,26 @@ pub struct HumanPending {
     pub reply: oneshot::Sender<HumanReply>,
 }
 
+/// How often a missing mouse/keyboard handle is tried again.
+const HANDS_RETRY: Duration = Duration::from_secs(2);
+
+struct Hands {
+    now: Option<Arc<DesktopActuator>>,
+    tried: Instant,
+}
+
+fn hands(kill: &KillSwitch) -> anyhow::Result<Arc<DesktopActuator>> {
+    DesktopActuator::new(kill.clone()).map(Arc::new)
+}
+
 /// Lives for the app: the runtime, the hands (one input thread) and the stop flag.
 pub struct Agent {
     pub runtime: tokio::runtime::Runtime,
     pub kill: KillSwitch,
     pub perceptor: Arc<DesktopPerceptor>,
-    actuator: Option<Arc<DesktopActuator>>,
+    /// `None` until the OS lets Kai control input (a Mac asks for the
+    /// Accessibility permission first); retried now and then.
+    actuator: std::sync::Mutex<Hands>,
     pub running: Arc<AtomicBool>,
     /// Kai's own browser, when Settings › use_browser is on.
     lanes: Arc<crate::browser::Lanes>,
@@ -88,25 +102,37 @@ impl Agent {
             .enable_all()
             .build()?;
         let kill = KillSwitch::new();
-        let actuator = match DesktopActuator::new(kill.clone()) {
-            Ok(a) => Some(Arc::new(a)),
-            Err(e) => {
-                log::error!("agent: no mouse/keyboard control: {e}");
-                None
-            }
-        };
+        let actuator = hands(&kill)
+            .map_err(|e| log::error!("agent: no mouse/keyboard control: {e}"))
+            .ok();
         Ok(Self {
             runtime,
             kill,
             perceptor: Arc::new(DesktopPerceptor::new()),
-            actuator,
+            actuator: std::sync::Mutex::new(Hands {
+                now: actuator,
+                tried: Instant::now(),
+            }),
             running: Arc::new(AtomicBool::new(false)),
             lanes: Arc::default(),
         })
     }
 
     pub fn can_act(&self) -> bool {
-        self.actuator.is_some()
+        self.actuator().is_some()
+    }
+
+    /// The hands, created now if an earlier try had no permission (at most
+    /// once per [`HANDS_RETRY`]: this runs on every repaint of Home).
+    fn actuator(&self) -> Option<Arc<DesktopActuator>> {
+        let mut h = self.actuator.lock().unwrap_or_else(|e| e.into_inner());
+        if h.now.is_none() && h.tried.elapsed() >= HANDS_RETRY {
+            h.tried = Instant::now();
+            h.now = hands(&self.kill)
+                .map_err(|e| log::debug!("agent: still no mouse/keyboard control: {e}"))
+                .ok();
+        }
+        h.now.clone()
     }
 
     pub fn stop(&self) {
@@ -125,7 +151,7 @@ impl Agent {
         control: Arc<RunControl>,
     ) -> mpsc::UnboundedReceiver<Ui> {
         let (tx, rx) = mpsc::unbounded();
-        let Some(actuator) = self.actuator.clone() else {
+        let Some(actuator) = self.actuator() else {
             let _ = tx.unbounded_send(Ui::Failed(
                 "Kai can't move the mouse or type on this desktop. Open Settings › Permissions."
                     .into(),

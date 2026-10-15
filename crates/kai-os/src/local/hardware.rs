@@ -4,6 +4,8 @@
 //! - Linux: `/proc/meminfo`; `nvidia-smi` when installed; AMD cards through
 //!   `/sys/class/drm/card*/device/mem_info_vram_total`.
 //! - Windows: `GlobalMemoryStatusEx`; DXGI adapters' `DedicatedVideoMemory`.
+//! - macOS: `sysctl hw.memsize`; Apple Silicon's GPU shares that memory, and
+//!   macOS lets it use about two thirds of it (three quarters above 36 GB).
 //!
 //! Sizes are GiB (2^30 bytes), the unit the OS and GPU tools report.
 
@@ -163,12 +165,41 @@ fn gpu() -> Option<(String, f32)> {
     best
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+fn ram_bytes() -> Option<u64> {
+    run_quick("sysctl", &["-n", "hw.memsize"])?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Apple Silicon's GPU, named after the chip, with the share of RAM macOS
+/// lets it use. Intel Macs report no GPU (Kai has no Intel Mac build).
+#[cfg(target_os = "macos")]
+fn gpu() -> Option<(String, f32)> {
+    let chip = run_quick("sysctl", &["-n", "machdep.cpu.brand_string"])?;
+    let chip = chip.trim();
+    if !chip.starts_with("Apple") {
+        return None;
+    }
+    let ram = ram_bytes()? as f64 / GIB;
+    Some((format!("{chip} GPU"), apple_gpu_gib(ram)))
+}
+
+/// GiB of unified memory macOS lets the GPU use by default
+/// (`recommendedMaxWorkingSetSize`): 2/3 of RAM up to 36 GiB, 3/4 above.
+#[cfg(any(target_os = "macos", test))]
+pub fn apple_gpu_gib(ram_gib: f64) -> f32 {
+    let share = if ram_gib <= 36.0 { 2.0 / 3.0 } else { 0.75 };
+    (ram_gib * share) as f32
+}
+
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn ram_bytes() -> Option<u64> {
     None
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 fn gpu() -> Option<(String, f32)> {
     None
 }
@@ -193,8 +224,14 @@ mod tests {
         let hw = detect_hardware();
         assert!(hw.cpu_threads >= 1);
         assert!(!hw.os.is_empty() && !hw.arch.is_empty());
-        if cfg!(target_os = "linux") {
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
             assert!(hw.ram_gb > 0.5, "{hw:?}");
         }
+    }
+
+    #[test]
+    fn apple_gpu_share_follows_macos_limits() {
+        assert!((apple_gpu_gib(16.0) - 10.67).abs() < 0.01);
+        assert!((apple_gpu_gib(64.0) - 48.0).abs() < 0.01);
     }
 }

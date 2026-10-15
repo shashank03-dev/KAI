@@ -1,5 +1,5 @@
 //! Accessibility trees → Set-of-Marks. Each OS reads raw nodes (Windows UI
-//! Automation, Linux AT-SPI); this module keeps the visible, interactive ones,
+//! Automation, Linux AT-SPI, the macOS Accessibility API); this module keeps the visible, interactive ones,
 //! numbers them in reading order, and falls back to a grid when the tree is
 //! empty or useless (games, canvases, some Electron apps).
 
@@ -11,6 +11,12 @@ mod linux;
 #[cfg(target_os = "linux")]
 mod linux_act;
 pub mod live;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+mod macos_act;
+#[cfg(any(target_os = "macos", test))]
+mod macos_roles;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -20,12 +26,15 @@ use kai_core::{Element, Grounding, Rect, Role};
 use std::time::Duration;
 
 /// A handle back to the live accessible object a node came from: bus name +
-/// object path on AT-SPI, the UI Automation element on Windows.
+/// object path on AT-SPI, the UI Automation element on Windows, the
+/// `AXUIElement` on macOS.
 #[cfg(target_os = "linux")]
 pub type NodeRef = atspi::ObjectRefOwned;
 #[cfg(target_os = "windows")]
 pub type NodeRef = windows::UiaRef;
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+pub type NodeRef = macos::AxRef;
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 pub type NodeRef = ();
 
 /// One node as the OS reported it.
@@ -79,6 +88,11 @@ async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
     tokio::task::spawn_blocking(windows::read).await?
 }
 
+#[cfg(target_os = "macos")]
+async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
+    tokio::task::spawn_blocking(macos::read).await?
+}
+
 /// A running count of accessibility events from the active app (Linux,
 /// AT-SPI); `None` where events are not wired (Windows) or not running.
 pub fn ui_events() -> Option<u64> {
@@ -93,7 +107,7 @@ pub fn ui_events() -> Option<u64> {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
     anyhow::bail!("no accessibility reader on this OS; using the grid")
 }
@@ -126,7 +140,12 @@ async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Re
     tokio::task::spawn_blocking(move || windows_act::act(&node, &plan, role)).await?
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
+async fn platform_act(node: NodeRef, plan: live::Plan, role: Role) -> anyhow::Result<bool> {
+    tokio::task::spawn_blocking(move || macos_act::act(&node, &plan, role)).await?
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 async fn platform_act(_: NodeRef, _: live::Plan, _: Role) -> anyhow::Result<bool> {
     Ok(false)
 }

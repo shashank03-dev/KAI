@@ -39,6 +39,11 @@ pub const PLAN_RULE: &str = "\n- When the steps after this one are predictable, 
 open_url, open_app, shell or done; name elements in words, not numbers). An \
 executor carries them out and calls you back on any doubt.";
 
+/// Added for eyes on a Mac (`Perceptor::mac`): models default to `ctrl`.
+pub const MAC_RULE: &str = "\n- This computer is a Mac: shortcuts use `cmd` where \
+Windows and Linux use `ctrl` (cmd+c, cmd+v, cmd+s, cmd+l, cmd+w, cmd+q); \
+cmd+space opens Spotlight.";
+
 const SYSTEM_BASE: &str = "\
 You are Kai, an agent that operates a computer for the user by looking at the \
 screen and choosing the next action.

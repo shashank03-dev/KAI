@@ -15,6 +15,10 @@ pub const DEFAULT_HOTKEY: &str = "ctrl+alt+Escape";
 pub const FALLBACK_HOTKEY: &str = "ctrl+alt+End";
 /// Pixels from the top-left corner that count as "in the corner".
 pub const CORNER: i32 = 3;
+/// Whether a global hotkey fires without a UI event loop. macOS delivers
+/// hotkey events only through the main thread's run loop, which the app
+/// runs and the `kai` command line does not; there the corner is the stop.
+pub const HOTKEY_WITHOUT_EVENT_LOOP: bool = !cfg!(target_os = "macos");
 
 /// Shared stop flag. Clone freely.
 #[derive(Clone, Default)]

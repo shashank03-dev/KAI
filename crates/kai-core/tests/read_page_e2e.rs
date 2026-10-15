@@ -1,6 +1,7 @@
 //! `read_page`: the browser lane's eyes can read the page's text. The rule
 //! and the schema field appear only for such eyes; the text arrives with the
-//! next turn, fenced as data; hostile text is withheld.
+//! next turn, fenced as data; hostile text is withheld. The Mac shortcut rule
+//! is added the same way, only for eyes on a Mac.
 
 mod common;
 
@@ -15,6 +16,7 @@ use std::sync::Mutex;
 struct Page {
     screen: Screen,
     text: Option<String>,
+    mac: bool,
 }
 
 #[async_trait]
@@ -27,6 +29,9 @@ impl Perceptor for Page {
     }
     fn reads_pages(&self) -> bool {
         self.text.is_some()
+    }
+    fn mac(&self) -> bool {
+        self.mac
     }
     async fn page_text(&self, max: usize) -> Option<(String, usize)> {
         let t = self.text.clone()?;
@@ -60,6 +65,10 @@ const READ: &str =
 const DONE: &str = r#"{"thought":"Blue Kettle costs 34.99","action":"done","risk":"none"}"#;
 
 async fn run(text: Option<&str>) -> (Recording, Trace) {
+    run_on(text, false).await
+}
+
+async fn run_on(text: Option<&str>, mac: bool) -> (Recording, Trace) {
     let client = Recording {
         inner: Counting::new(&[READ, DONE]),
         systems: Mutex::new(Vec::new()),
@@ -67,6 +76,7 @@ async fn run(text: Option<&str>) -> (Recording, Trace) {
     let page = Page {
         screen: Screen::marks(),
         text: text.map(str::to_string),
+        mac,
     };
     let hands = Hands::new(&page.screen);
     let approve = approve_all();
@@ -138,4 +148,16 @@ async fn the_desktop_prompt_does_not_change() {
     assert!(systems[0].1["properties"].get("read_page").is_none());
     assert!(!client.inner.seen()[1].text.contains("page text"));
     assert!(!client.inner.seen()[1].text.contains("<<<page"));
+}
+
+/// Eyes on a Mac add the `cmd` shortcut rule, and only they do.
+#[tokio::test]
+async fn the_mac_rule_is_added_only_on_a_mac() {
+    let (client, _) = run_on(None, true).await;
+    assert_eq!(
+        client.systems.lock().unwrap()[0].0,
+        format!("{}{}", prompt::system_prompt(&[]), prompt::MAC_RULE)
+    );
+    let (desktop, _) = run(None).await;
+    assert!(!desktop.systems.lock().unwrap()[0].0.contains("Mac"));
 }

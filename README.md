@@ -1,7 +1,7 @@
 # Kai
 
-**Give Gemma a hand.** Kai is an open-source desktop app for Linux and Windows
-that lets Gemma 4 use your computer: it looks at the screen, decides, clicks,
+**Give Gemma a hand.** Kai is an open-source desktop app for Linux, Windows
+and macOS (Apple Silicon) that lets Gemma 4 use your computer: it looks at the screen, decides, clicks,
 types and runs commands one visible step at a time, while you watch and can
 stop it instantly.
 
@@ -30,7 +30,7 @@ pixels.*
 - **Sub-agents:** turn on *Team* and Kai splits a task into parallel
   sub-agents — terminal subtasks run at the same time, screen subtasks take
   turns — then writes one report.
-- **Web tasks in Kai's own browser (experimental, Linux):** `kai run
+- **Web tasks in Kai's own browser (experimental, Linux and macOS):** `kai run
   --browser` drives a Chromium-family browser over the DevTools Protocol
   instead of the desktop: the page's own accessibility tree, input that never
   moves your pointer or takes focus, and the real page address for checks.
@@ -54,8 +54,9 @@ pixels.*
 crates/
   kai-core   the harness: loop, schema, risk, prompts, skills, sub-agents,
              model backends (vLLM, Gemini, failover, mock). OS-free, tested.
-  kai-os     eyes and hands: capture, AT-SPI / UI Automation, Set-of-Marks,
-             input, launcher, shell, kill switch, keychain. Linux + Windows.
+  kai-os     eyes and hands: capture, AT-SPI / UI Automation / macOS AX,
+             Set-of-Marks, input, launcher, shell, kill switch, keychain.
+             Linux, Windows, macOS.
   kai-cli    `kai`: run tasks headless, validate skills, benchmark, doctor.
   kai-app    the desktop app (GPUI + Ely).
 deploy/digitalocean   one-command GPU Droplet with vLLM + Caddy TLS.
@@ -163,7 +164,7 @@ a mock); Jev (free tier: 403). How we plan to make Gemma beat frontier models:
   settings, destructive commands — and typing into a password field, which is
   always high risk whatever the model says. Autopilot still always asks for
   payments and passwords.
-- **Three ways to stop:** `Ctrl+Alt+Esc` from any app, push the mouse into the
+- **Three ways to stop:** `Ctrl+Alt+Esc` (Control-Option-Esc on a Mac) from any app, push the mouse into the
   top-left corner, or press Stop. Kai stops within one step and kills any
   command it started.
 - **Your screen stays yours.** Screenshots go only to the model endpoint you
@@ -174,10 +175,12 @@ a mock); Jev (free tier: 403). How we plan to make Gemma beat frontier models:
 ## Quick start
 
 ### Download
-Grab `kai-linux-x86_64.tar.gz` or `kai-windows-x86_64.zip` from Releases,
-unpack, and run `kai-app` (the `kai` command-line tool is next to it).
+Grab `kai-linux-x86_64.tar.gz`, `kai-windows-x86_64.zip` or
+`kai-macos-aarch64.zip` from Releases, unpack, and run `kai-app` (the `kai`
+command-line tool is next to it; on a Mac, open `Kai.app`).
 The Windows build is unsigned: on the SmartScreen prompt choose
-*More info › Run anyway*.
+*More info › Run anyway*. The Mac build is signed ad hoc: the first time,
+Control-click Kai.app › Open ([docs/MACOS.md](docs/MACOS.md)).
 
 ### Build
 ```sh
@@ -188,6 +191,10 @@ cargo run --release -p kai-app          # the app
 cargo run --release -p kai-cli -- --help  # the CLI
 ```
 Windows: install Rust (MSVC) and run the same `cargo` commands.
+macOS (Apple Silicon): install Rust and the Command Line Tools
+(`xcode-select --install`), then `scripts/macos/bundle.sh --install` builds
+and installs `Kai.app`. Allow Screen Recording and Accessibility when asked
+([docs/MACOS.md](docs/MACOS.md)).
 
 **Linux note:** use an Xorg session for full control. On Wayland, Kai can
 capture the screen (through the portal) but can only click and type into
@@ -235,6 +242,7 @@ optional deterministic steps in `metadata.kai`. Validate with
 - [docs/BROWSER.md](docs/BROWSER.md) — the browser lane (`kai run --browser`)
 - [docs/MODEL_STORE.md](docs/MODEL_STORE.md) — the model store: curated open models and `kai models pull`
 - [docs/LONG_RUNS.md](docs/LONG_RUNS.md) — the run memo for long tasks (experimental, off by default)
+- [docs/MACOS.md](docs/MACOS.md) — building, permissions and what is different on a Mac
 - [docs/SHIP_PLAN.md](docs/SHIP_PLAN.md) — Kai vs OpenAI's computer-use loop, and what is left before release
 - [docs/RESEARCH_2026_10_VENDORS.md](docs/RESEARCH_2026_10_VENDORS.md) — how Anthropic and OpenAI do computer use, and where Kai differs
 - [docs/DEMO.md](docs/DEMO.md) — the 3-minute demo

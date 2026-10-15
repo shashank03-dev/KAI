@@ -33,9 +33,11 @@ fn primary_rect() -> anyhow::Result<Rect> {
     ))
 }
 
+/// The primary display, in the coordinates input and the accessibility tree
+/// use (points on a Retina Mac, see [`frame::to_display`]).
 fn grab() -> anyhow::Result<(RgbaImage, Rect)> {
     let m = primary()?;
-    let img = m.capture_image()?;
+    let img = frame::to_display(m.capture_image()?, m.width()?, m.height()?);
     let at = Rect::new(
         m.x()? as f32,
         m.y()? as f32,
@@ -226,6 +228,10 @@ impl DesktopPerceptor {
 impl Perceptor for DesktopPerceptor {
     async fn observe(&self) -> anyhow::Result<Observation> {
         self.full(None).await
+    }
+
+    fn mac(&self) -> bool {
+        cfg!(target_os = "macos")
     }
 
     /// The tree alone: no capture, no encode, an empty screenshot. Falls back

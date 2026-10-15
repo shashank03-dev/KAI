@@ -208,3 +208,25 @@ fn reserve_and_needed_ram() {
         assert!(r - os_reserve_gb(r) >= need - 1e-3, "{need}");
     }
 }
+
+/// A Mac's GPU memory is part of its RAM: a model runs on the GPU or not,
+/// never "on the GPU with the rest in RAM" (that would count memory twice).
+#[test]
+fn macs_never_split_unified_memory() {
+    let cat = Catalog::builtin();
+    for (ram, gpu) in [(16.0, 10.67), (24.0, 16.0), (32.0, 21.33)] {
+        let mut mac = hw(ram, 10, Some(("Apple M5 GPU", gpu)));
+        mac.os = "macos".into();
+        mac.arch = "aarch64".into();
+        let r = rank(&cat, &mac);
+        assert_eq!(r[0].fit, Fit::Best, "{ram} GB Mac: {}", r[0].reason);
+        if ram == 16.0 {
+            assert_eq!(r[0].entry.id, "gemma-4-e4b-it-q4", "{}", r[0].reason);
+            assert!(r[0].reason.contains("runs fully on your Apple M5 GPU"));
+        }
+        assert!(
+            r.iter().all(|x| !x.reason.contains("with the rest in")),
+            "{ram} GB Mac"
+        );
+    }
+}

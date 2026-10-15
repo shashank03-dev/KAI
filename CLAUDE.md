@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-Kai is an open-source **desktop app for Linux and Windows** that lets an
+Kai is an open-source **desktop app for Linux, Windows and macOS (Apple
+Silicon)** that lets an
 open model (Gemma 4 by default) use the computer: it looks at the screen,
 decides, clicks, types and runs commands one visible step at a time. Rust,
 MIT. Start with `README.md`; decisions and their evidence are in
@@ -37,8 +38,9 @@ MIT. Start with `README.md`; decisions and their evidence are in
    So you are the CI. Every change must build and pass clippy for **both**
    targets before it is pushed (see Checks). Gate OS code with
    `#[cfg(target_os = "linux")]` / `#[cfg(target_os = "windows")]`, and make
-   sure nothing is left unused on the other OS (CI uses `-D warnings`). No
-   macOS work.
+   sure nothing is left unused on the other OS (CI uses `-D warnings`).
+   macOS (Apple Silicon) is supported since 2026-10-15 (`docs/MACOS.md`):
+   gate it with `#[cfg(target_os = "macos")]` and run its clippy check too.
 
 6. Before running any build command which takes time i need you to think before and make me build ship and proceed faster rather than just waiting for the build to complete
 
@@ -93,6 +95,7 @@ Use the same Rust as CI's `stable` (clippy lints change between versions:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings
+cargo clippy --workspace --all-targets --target aarch64-apple-darwin -- -D warnings  # see below
 cargo test --workspace
 cargo run -q -p kai-cli -- skill validate skills
 cargo run -q -p kai-cli -- bench --backend mock --out target/bench
@@ -101,6 +104,15 @@ cargo run -q -p kai-cli -- bench --backend mock --out target/bench
 The Windows check needs `rustup target add x86_64-pc-windows-gnu` (and
 `gcc-mingw-w64-x86-64` on Ubuntu). It type-checks Windows code without a
 Windows machine; it does not run it.
+
+The macOS check from Linux needs `rustup target add aarch64-apple-darwin`.
+No macOS SDK is available off a Mac, so `ring`'s C code is compiled against
+stub headers (`TargetConditionals.h`, `string.h`, `assert.h` in a scratch
+directory, with `CC_aarch64_apple_darwin=clang` and
+`CFLAGS_aarch64_apple_darwin="--target=aarch64-apple-darwin -ffreestanding -nostdlibinc -I<stubs>"`),
+and GPUI's shader file only exists after its build script ran on a Mac: an
+empty `stitched_shaders.metal` in the `gpui-pre-apple-*/out` build folder
+lets the check finish. On a Mac, run the plain command.
 
 Live tests that need a browser or a desktop skip themselves without one:
 - Browser lane: `KAI_BROWSER=/path/to/chrome cargo test -p kai-os --test browser_lane --test browser_edges`.

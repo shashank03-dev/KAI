@@ -897,3 +897,32 @@ Still no model key and no GPU in this session, so there are no live numbers.
   (different tasks failed). At ~60 s per call, Holo 4B on a CPU stays
   `untested`. Also found and fixed: a second local run started right after
   the first failed on a busy port (`652175e`).
+
+## macOS on Apple Silicon (2026-10-15)
+
+- **Kai runs on macOS (Apple Silicon), at the owner's request for the first
+  release.** Design, permissions and what was rejected: `docs/MACOS.md`.
+  The earlier "no macOS work" rule is lifted for this; Linux and Windows
+  behaviour does not change.
+- **Captures are scaled to points** (`frame::to_display`). xcap reports a
+  Mac display in points but captures in pixels (2x on a MacBook), while
+  clicks and the AX tree use points, so every click would have landed at
+  twice its coordinates. Where the sizes already match (Linux, Windows) the
+  capture is untouched.
+- **An AX reader, not the grid.** `a11y/macos.rs` reads the frontmost
+  window and menu bar with one `AXUIElementCopyMultipleAttributeValues` per
+  element, under a 0.25 s messaging timeout and the shared 600 ms budget.
+  Press is `AXPress`; fill sets `AXValue` on an empty field and reads it
+  back. Secure fields are never filled or pressed this way.
+- **`runtime_shaders` for GPUI on macOS.** The default build needs
+  `xcrun metal`, which only the full Xcode has.
+- **The Mac prompt rule** (`prompt::MAC_RULE`, shortcuts use `cmd`) is added
+  only when `Perceptor::mac()` is true, so other prompts stay byte-stable.
+- **Local models on Metal:** llama.cpp `b11429` macOS arm64 build, hashed
+  here. Unified memory is counted once in the ranking: no split placement
+  on a Mac.
+- **Not measured yet.** Checked from Linux: clippy `-D warnings` for
+  `aarch64-apple-darwin` (whole workspace, app included) and unit tests for
+  the OS-free Mac logic. Not run on a real Mac in this session. The release
+  workflow now builds, tests and smoke-tests on `macos-15`; no live bench
+  number on macOS is claimed.

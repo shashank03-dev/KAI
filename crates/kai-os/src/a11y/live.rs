@@ -194,8 +194,16 @@ mod tests {
     fn dummy() -> NodeRef {
         atspi::ObjectRefOwned::from_static_str_unchecked(":1.42", "/org/a11y/atspi/accessible/7")
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     fn dummy() -> NodeRef {}
+
+    #[cfg(target_os = "macos")]
+    fn dummy() -> NodeRef {
+        // SAFETY: creating the system-wide element has no preconditions.
+        super::super::macos::AxRef(unsafe {
+            objc2_application_services::AXUIElement::new_system_wide()
+        })
+    }
 
     #[cfg(not(target_os = "windows"))]
     #[test]

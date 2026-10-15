@@ -110,15 +110,24 @@ enum SkillCmd {
     List,
 }
 
-/// Built-in skills next to the binary or in the repo, plus the user's own.
+/// Built-in skills in the repo or next to the binary (in a macOS app
+/// bundle, its `Resources`), plus the user's own.
 fn all_skills() -> Vec<Skill> {
     let mut v = Vec::new();
-    for dir in ["skills", "../skills", "../../skills"] {
-        let p = Path::new(dir);
-        if p.is_dir() {
-            v.extend(kai_core::skill::load_dir(p, true));
-            break;
-        }
+    let exe_dir = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let near_exe = ["skills", "../Resources/skills"]
+        .into_iter()
+        .filter_map(|d| exe_dir.as_ref().map(|e| e.join(d)));
+    let found = ["skills", "../skills", "../../skills"]
+        .into_iter()
+        .map(PathBuf::from)
+        .chain(near_exe)
+        .find(|p| p.is_dir());
+    if let Some(p) = found {
+        v.extend(kai_core::skill::load_dir(&p, true));
     }
     v.extend(kai_core::skill::load_dir(&Settings::skills_dir(), false));
     v
@@ -359,14 +368,20 @@ async fn run_task(
     };
     let skills = all_skills();
     let kill = kai_os::KillSwitch::new();
-    let _hotkey = kai_os::kill::install_hotkey(&kill, &s.kill_hotkey)
-        .map(|h| {
-            eprintln!(
-                "Stop any time: {} (or move the pointer to the top-left corner)",
-                h.shortcut
-            )
-        })
-        .map_err(|e| log::warn!("no global stop hotkey: {e}"));
+    let _hotkey = if kai_os::kill::HOTKEY_WITHOUT_EVENT_LOOP {
+        kai_os::kill::install_hotkey(&kill, &s.kill_hotkey)
+            .inspect(|h| {
+                eprintln!(
+                    "Stop any time: {} (or move the pointer to the top-left corner)",
+                    h.shortcut
+                )
+            })
+            .map_err(|e| log::warn!("no global stop hotkey: {e}"))
+            .ok()
+    } else {
+        eprintln!("Stop any time: move the pointer to the top-left corner");
+        None
+    };
     // `--browser`: Kai's own browser is both the eyes and the hands.
     let web = lane.open(&kill).await?;
     let desktop = match web {

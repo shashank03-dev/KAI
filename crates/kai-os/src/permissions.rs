@@ -31,7 +31,7 @@ pub fn all_granted(checks: &[Check]) -> bool {
 
 async fn screen() -> Check {
     let ok = tokio::task::spawn_blocking(|| {
-        xcap::Monitor::all().map(|m| !m.is_empty()).unwrap_or(false)
+        xcap::Monitor::all().map(|m| !m.is_empty()).unwrap_or(false) && screen_allowed()
     })
     .await
     .unwrap_or(false);
@@ -42,10 +42,37 @@ async fn screen() -> Check {
         fix: if cfg!(target_os = "linux") {
             "Allow the screen-sharing prompt from your desktop (Wayland asks once per session)."
                 .into()
+        } else if cfg!(target_os = "macos") {
+            format!(
+                "Turn Kai on under System Settings › Privacy & Security › Screen & System Audio Recording, then reopen Kai. {MAC_TERMINAL}"
+            )
         } else {
             "Make sure a display is attached and Kai is not running in a locked session.".into()
         },
     }
+}
+
+/// On a Mac, run from a terminal, the permission belongs to the terminal app.
+const MAC_TERMINAL: &str = "(Running `kai` from a terminal? Then allow the terminal app instead.)";
+
+/// Whether macOS lets this process record the screen. Without it a capture
+/// still succeeds but shows only the wallpaper and Kai's own windows.
+#[cfg(target_os = "macos")]
+fn screen_allowed() -> bool {
+    objc2_core_graphics::CGPreflightScreenCaptureAccess()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn screen_allowed() -> bool {
+    true
+}
+
+/// Whether macOS lets this process read other apps' accessibility trees and
+/// send mouse and keyboard events (one permission covers both).
+#[cfg(target_os = "macos")]
+fn mac_trusted() -> bool {
+    // SAFETY: no arguments, no preconditions.
+    unsafe { objc2_application_services::AXIsProcessTrusted() }
 }
 
 #[cfg(target_os = "linux")]
@@ -61,7 +88,23 @@ async fn accessibility() -> Check {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+async fn accessibility() -> Check {
+    Check {
+        name: "Accessibility",
+        status: if mac_trusted() {
+            Status::Granted
+        } else {
+            Status::Missing
+        },
+        why: "Kai reads button and field names so it clicks the right thing, and moves the pointer and types for you.",
+        fix: format!(
+            "Turn Kai on under System Settings › Privacy & Security › Accessibility. {MAC_TERMINAL}"
+        ),
+    }
+}
+
+#[cfg(target_os = "windows")]
 async fn accessibility() -> Check {
     Check {
         name: "Accessibility",
@@ -71,6 +114,22 @@ async fn accessibility() -> Check {
     }
 }
 
+/// On a Mac, input rides on the Accessibility permission checked above.
+#[cfg(target_os = "macos")]
+fn input() -> Check {
+    Check {
+        name: "Mouse and keyboard",
+        status: if mac_trusted() {
+            Status::Granted
+        } else {
+            Status::Missing
+        },
+        why: "Kai moves the pointer and types for you, one visible step at a time.",
+        fix: "Granted together with Accessibility.".into(),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn input() -> Check {
     let wayland = std::env::var("XDG_SESSION_TYPE")
         .map(|v| v.eq_ignore_ascii_case("wayland"))
@@ -107,7 +166,30 @@ pub async fn enable_accessibility() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Ask macOS for Accessibility and Screen Recording: each shows the system
+/// prompt that opens the right System Settings pane (once per app; after a
+/// refusal the person turns it on there).
+#[cfg(target_os = "macos")]
+pub async fn enable_accessibility() -> anyhow::Result<()> {
+    use objc2_application_services::{AXIsProcessTrustedWithOptions, kAXTrustedCheckOptionPrompt};
+    use objc2_core_foundation::{CFBoolean, CFDictionary};
+    tokio::task::spawn_blocking(|| {
+        // SAFETY: the key is the framework's own constant; the dictionary
+        // maps a CFString to a CFBoolean as the API documents.
+        unsafe {
+            let opts =
+                CFDictionary::from_slices(&[kAXTrustedCheckOptionPrompt], &[CFBoolean::new(true)]);
+            AXIsProcessTrustedWithOptions(Some(opts.as_opaque()));
+        }
+        if !objc2_core_graphics::CGPreflightScreenCaptureAccess() {
+            objc2_core_graphics::CGRequestScreenCaptureAccess();
+        }
+    })
+    .await?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 pub async fn enable_accessibility() -> anyhow::Result<()> {
     Ok(())
 }

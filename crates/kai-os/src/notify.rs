@@ -1,8 +1,8 @@
 //! A desktop notification for the moment Kai needs the person (a CAPTCHA, a
 //! one-time code, a question; `docs/HUMAN_CHECKS.md`). Best effort: Linux
-//! goes through the freedesktop notification service on the session bus;
-//! elsewhere this returns `false` and the app's always-on-top mini window
-//! (or the terminal bell) is the signal. Never carries a code or an answer:
+//! goes through the freedesktop notification service on the session bus,
+//! macOS through `osascript`; elsewhere this returns `false` and the app's
+//! always-on-top mini window (or the terminal bell) is the signal. Never carries a code or an answer:
 //! only Kai's own title and prompt.
 
 /// Never wait longer than this: with no notification daemon a D-Bus call
@@ -25,10 +25,60 @@ pub async fn desktop(title: &str, body: &str) -> bool {
             }
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        let shown = tokio::time::timeout(LIMIT, mac::notify(title, body)).await;
+        matches!(shown, Ok(Ok(s)) if s.success())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (title, body, LIMIT);
         false
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+mod mac {
+    /// An AppleScript string literal: backslashes and quotes escaped, so the
+    /// text can never end the literal and run as script.
+    pub fn quoted(s: &str) -> String {
+        let escaped: String = s
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .flat_map(|c| match c {
+                '\\' | '"' => vec!['\\', c],
+                _ => vec![c],
+            })
+            .collect();
+        format!("\"{escaped}\"")
+    }
+
+    #[cfg(target_os = "macos")]
+    pub async fn notify(title: &str, body: &str) -> std::io::Result<std::process::ExitStatus> {
+        let script = format!(
+            "display notification {} with title {} sound name \"Glass\"",
+            quoted(body),
+            quoted(title)
+        );
+        tokio::process::Command::new("osascript")
+            .args(["-e", &script])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .status()
+            .await
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn text_cannot_escape_the_applescript_string() {
+            assert_eq!(super::quoted("Code needed"), "\"Code needed\"");
+            let q = super::quoted("a\" & (do shell script \"rm x\") & \"\\");
+            assert_eq!(q, r#""a\" & (do shell script \"rm x\") & \"\\""#);
+            assert_eq!(super::quoted("line\nbreak"), "\"line break\"");
+        }
     }
 }
 

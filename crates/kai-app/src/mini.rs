@@ -70,7 +70,13 @@ pub fn exclude_windows(agent: &Agent, cx: &mut App) {
     for handle in cx.windows() {
         let _ = handle.update(cx, |_, window, _| {
             let b = window.bounds();
-            let s = window.scale_factor();
+            // Screen captures are in device pixels, except on a Mac where
+            // Kai scales them to points (`kai_os::frame::to_display`).
+            let s = if cfg!(target_os = "macos") {
+                1.0
+            } else {
+                window.scale_factor()
+            };
             rects.push(Rect::new(
                 f32::from(b.origin.x) * s,
                 f32::from(b.origin.y) * s,

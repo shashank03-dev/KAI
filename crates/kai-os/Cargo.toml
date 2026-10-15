@@ -38,6 +38,11 @@ libc = "0.2"
 uiautomation = "0.25"
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "HIServices", "AXUIElement", "AXError", "AXValue", "libc"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFCGTypes", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 atspi = { version = "0.30", features = ["proxies", "connection", "tokio"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }

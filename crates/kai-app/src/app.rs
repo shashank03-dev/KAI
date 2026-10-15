@@ -257,6 +257,8 @@ fn load_skills() -> Vec<Skill> {
         Some(PathBuf::from("skills")),
         exe_dir.as_ref().map(|d| d.join("skills")),
         exe_dir.as_ref().map(|d| d.join("../../skills")),
+        // Inside the macOS app bundle: Kai.app/Contents/Resources/skills.
+        exe_dir.as_ref().map(|d| d.join("../Resources/skills")),
     ];
     if let Some(dir) = candidates.into_iter().flatten().find(|p| p.is_dir()) {
         v.extend(kai_core::skill::load_dir(&dir, true));

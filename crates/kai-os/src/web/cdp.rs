@@ -20,11 +20,11 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often a waiting call checks whether a page dialog froze its page.
 const DIALOG_POLL: Duration = Duration::from_millis(20);
 /// Events kept for the lane to read; older ones are dropped.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 const MAX_EVENTS: usize = 256;
 /// The events the lane acts on (tabs, crashes, file pickers). Dialogs are
 /// tracked separately, per session, as they arrive.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 const KEPT_EVENTS: &[&str] = &[
     "Target.targetCreated",
     "Target.targetDestroyed",
@@ -65,7 +65,7 @@ pub struct Cdp {
 
 impl Cdp {
     /// Start `browser` with `args` and the debugging pipe attached.
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     pub fn launch(browser: &Path, args: &[String]) -> anyhow::Result<Self> {
         use std::os::fd::{FromRawFd, OwnedFd};
         use std::os::unix::process::CommandExt;
@@ -97,7 +97,7 @@ impl Cdp {
         }
         let child = cmd.spawn()?;
         drop((child_reads, child_writes));
-        // SAFETY: both fds came from pipe2 above and are owned only here.
+        // SAFETY: both fds came from `pipe` above and are owned only here.
         let writer = unsafe { std::fs::File::from(OwnedFd::from_raw_fd(we_write.into_raw())) };
         let reader = unsafe { std::fs::File::from(OwnedFd::from_raw_fd(we_read.into_raw())) };
 
@@ -116,9 +116,9 @@ impl Cdp {
         })
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     pub fn launch(_browser: &Path, _args: &[String]) -> anyhow::Result<Self> {
-        anyhow::bail!("Kai's browser lane runs on Linux for now (docs/BROWSER.md)")
+        anyhow::bail!("Kai's browser lane runs on Linux and macOS for now (docs/BROWSER.md)")
     }
 
     /// Send one command (to the browser, or to an attached page `session`)
@@ -230,7 +230,7 @@ impl Drop for Cdp {
 /// Route each NUL-terminated reply to its waiting caller, track page
 /// dialogs, and keep the events the lane reads. On EOF every waiting call
 /// fails.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn read_loop(reader: std::fs::File, pending: Pending, shared: Arc<Mutex<Shared>>) {
     use std::io::{BufRead, BufReader};
     let mut r = BufReader::new(reader);
@@ -271,7 +271,7 @@ fn read_loop(reader: std::fs::File, pending: Pending, shared: Arc<Mutex<Shared>>
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn event(v: &Value, shared: &Mutex<Shared>) {
     let method = v["method"].as_str().unwrap_or("");
     let session = v["sessionId"].as_str().map(str::to_string);
@@ -294,10 +294,10 @@ fn event(v: &Value, shared: &Mutex<Shared>) {
 }
 
 /// A pipe end that closes itself unless handed on.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 struct Fd(i32);
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl Fd {
     fn raw(&self) -> i32 {
         self.0
@@ -309,7 +309,7 @@ impl Fd {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl Drop for Fd {
     fn drop(&mut self) {
         // SAFETY: we own this fd and close it once.
@@ -327,4 +327,24 @@ fn pipe() -> anyhow::Result<(Fd, Fd)> {
         return Err(std::io::Error::last_os_error().into());
     }
     Ok((Fd(fds[0]), Fd(fds[1])))
+}
+
+/// macOS has no `pipe2`: close-on-exec is set right after `pipe`. A child
+/// another thread spawns in that instant could inherit an end; holding it
+/// open would only delay the end-of-pipe Kai sees when the browser exits.
+#[cfg(target_os = "macos")]
+fn pipe() -> anyhow::Result<(Fd, Fd)> {
+    let mut fds = [0i32; 2];
+    // SAFETY: `fds` has room for the two descriptors pipe writes.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let (r, w) = (Fd(fds[0]), Fd(fds[1]));
+    for fd in [r.raw(), w.raw()] {
+        // SAFETY: plain fcntl on a descriptor we own.
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+    }
+    Ok((r, w))
 }

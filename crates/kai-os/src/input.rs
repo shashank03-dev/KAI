@@ -44,7 +44,14 @@ impl Input {
         thread::Builder::new()
             .name("kai-input".into())
             .spawn(move || {
-                let mut enigo = match Enigo::new(&Settings::default()) {
+                // macOS: the app asks for the permission when the person
+                // chooses to (`permissions::enable_accessibility`), not on
+                // every retry here.
+                let settings = Settings {
+                    open_prompt_to_get_permissions: false,
+                    ..Settings::default()
+                };
+                let mut enigo = match Enigo::new(&settings) {
                     Ok(e) => {
                         let _ = ready_tx.send(Ok(()));
                         e
