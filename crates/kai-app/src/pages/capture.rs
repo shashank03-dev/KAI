@@ -27,6 +27,8 @@ const SHOTS: &[&str] = &[
     "23-run-team",
     "24-run-steered",
     "25-run-queued",
+    "26-run-reading-older",
+    "27-approval-long-command",
     "30-done-success",
     "31-done-failure",
     "40-skills",
@@ -75,6 +77,14 @@ pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
                 if ok.is_err() {
                     return;
                 }
+                // Some states need a laid-out view first (a scroll position).
+                cx.background_executor()
+                    .timer(Duration::from_millis(400))
+                    .await;
+                let _ = this.update(cx, |app, cx| {
+                    then(app, name, cx);
+                    cx.notify();
+                });
                 // Hold a staged synthetic view for bound-window UI inspection.
                 // No screenshot, credential lookup or model call is made here.
                 if std::env::var_os("KAI_CAPTURE_HOLD").is_some() {
@@ -266,6 +276,43 @@ fn fake_runs(app: &mut KaiApp, cx: &mut Context<KaiApp>, f: impl FnOnce(&mut Run
     app.select(Some(id), cx);
 }
 
+/// `n` more clicked steps after the first `from`, so the transcript is long.
+fn more_steps(r: &mut RunState, from: u32, n: u32) {
+    for step in from..from + n {
+        r.apply(Ui::Event(EngineEvent::Decided {
+            step,
+            decision: Box::new(decision(&format!(
+                r#"{{"thought":"Open result {step} and check it is the IEEE CS page","action":"click","target":{},"risk":"none"}}"#,
+                step + 1
+            ))),
+            target: None,
+        }));
+        r.apply(Ui::Event(EngineEvent::Acted {
+            step,
+            timings: Timings::default(),
+        }));
+    }
+}
+
+/// The second half of a shot, once the first is laid out: the user scrolled
+/// up to read older steps, and two more arrive.
+fn then(app: &mut KaiApp, name: &str, cx: &mut Context<KaiApp>) {
+    if name != "26-run-reading-older" {
+        return;
+    }
+    let Some(id) = app.selected else { return };
+    let tab = app.run_tab.clone();
+    app.transcripts
+        .view(id, &tab)
+        .0
+        .set_offset(gpui::point(gpui::px(0.), gpui::px(-40.)));
+    app.run.update(cx, |r, cx| {
+        let from = r.steps.len() as u32;
+        more_steps(r, from, 2);
+        cx.notify();
+    });
+}
+
 fn add_outputs(r: &mut RunState) {
     for (step, command, output) in [
         (
@@ -367,6 +414,27 @@ fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiAp
             let queued = app.runs.last().map(|e| e.id);
             app.select(queued, cx);
         }
+        "26-run-reading-older" => fake_runs(app, cx, |r| {
+            fake_run(r, None);
+            more_steps(r, 3, 12);
+        }),
+        "27-approval-long-command" => fake_runs(app, cx, |r| {
+            fake_run(r, None);
+            let (reply, _) = futures::channel::oneshot::channel();
+            let command = format!(
+                "find ~/Downloads -type f -name '*.tmp' -mtime +30 -print0 | xargs -0 ls -l {} && rm -rf ~/Downloads/old-backups",
+                "--sort=size ".repeat(12)
+            );
+            r.apply(Ui::Approval(Pending {
+                decision: decision(
+                    &serde_json::json!({"thought":"Clear out old temporary files","action":"shell","text":command,"risk":"high"})
+                        .to_string(),
+                ),
+                element: None,
+                explain: None,
+                reply,
+            }));
+        }),
         "21-approval" => {
             fake_runs(app, cx, |r| {
                 fake_run(r, None);
