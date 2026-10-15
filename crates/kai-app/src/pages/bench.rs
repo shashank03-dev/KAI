@@ -18,7 +18,7 @@ use ely_gpui_component::{
     tables::{Cell, Column, DataTable, Row},
     theme::{ActiveTheme, TextSize},
 };
-use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div};
+use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, rems};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -213,13 +213,17 @@ fn ms(v: Option<f64>) -> String {
 /// One row per backend: what each measured.
 fn overview(results: &[Results]) -> DataTable {
     let columns = vec![
-        Column::new("backend", "Backend · model"),
-        Column::new("date", "Date"),
-        Column::new("rate", "Success"),
-        Column::new("p50", "Step p50"),
-        Column::new("p95", "Step p95"),
-        Column::new("total", "Total"),
-        Column::new("os", "OS"),
+        // Fixed widths: on a narrow window the table scrolls sideways with
+        // the backend pinned, instead of cutting names and dates short.
+        Column::new("backend", "Backend · model")
+            .width(rems(15.))
+            .pinned(),
+        Column::new("date", "Date").width(rems(7.)),
+        Column::new("rate", "Success").width(rems(5.5)),
+        Column::new("p50", "Step p50").width(rems(6.5)),
+        Column::new("p95", "Step p95").width(rems(6.5)),
+        Column::new("total", "Total").width(rems(6.)),
+        Column::new("os", "OS").width(rems(5.)),
     ];
     let rows = results.iter().map(|r| {
         Row::new(

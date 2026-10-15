@@ -66,7 +66,8 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
             .map(|e| format!("{e} "))
             .unwrap_or_default()
     ))
-    .children(frame)
+    // The exact action first, in view without scrolling at the smallest
+    // window; then a small picture of where it lands.
     .child(
         ScrollArea::new("approval-action")
             .h(px(160.))
@@ -77,6 +78,7 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
                     .child(SelectableText::new("approval-json", json)),
             ),
     )
+    .children(frame.map(|f| div().w_full().max_w(px(360.)).child(f)))
     .action(|close| {
         Button::new("approval-stop", "Stop")
             .variant(ButtonVariant::Danger)

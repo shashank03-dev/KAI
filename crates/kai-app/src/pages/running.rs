@@ -199,17 +199,15 @@ fn transcript_scroll(
     (scroll, Some(jump))
 }
 
-/// The left pane's tabs: transcript, terminal, sub-agents.
-pub fn tabs(
+/// The shown tab's content: transcript, terminal, screen or sub-agents.
+fn panel(
     app: &KaiApp,
     r: &RunState,
     live: bool,
     compact: bool,
     cx: &Context<KaiApp>,
 ) -> AnyElement {
-    let picker = cx.entity();
-    let tab = shown_tab(app, compact);
-    let panel = match tab.as_str() {
+    match shown_tab(app, compact).as_str() {
         "terminal" => panes::terminal(r, cx),
         "team" => panes::team_tree(r, cx),
         "screen" => seen(app, r, cx),
@@ -225,7 +223,13 @@ pub fn tabs(
                     .then(|| ThinkingIndicator::new("thinking").label(t(cx, "run.thinking", &[]))),
             )
             .into_any_element(),
-    };
+    }
+}
+
+/// The left pane's tab strip. It stays above the scrolled panel, so the
+/// tabs remain in reach while the transcript follows its newest step.
+fn strip(app: &KaiApp, r: &RunState, compact: bool, cx: &Context<KaiApp>) -> AnyElement {
+    let picker = cx.entity();
     let mut choices = vec![
         Choice::new("steps", format!("Steps ({})", r.steps.len())),
         Choice::new("terminal", format!("Terminal ({})", r.outputs.len())),
@@ -239,14 +243,13 @@ pub fn tabs(
             format!("Sub-agents ({})", r.team_view.subs.len()),
         ));
     }
-    Tabs::new("run-tabs", choices, tab)
+    Tabs::new("run-tabs", choices, shown_tab(app, compact))
         .on_change(move |v, _, cx| {
             picker.update(cx, |a, cx| {
                 a.run_tab = v.to_string();
                 cx.notify();
             })
         })
-        .panel(div().pt_3().child(panel))
         .into_any_element()
 }
 
@@ -423,6 +426,13 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .flex_col()
         .child(
             div()
+                .flex_none()
+                .px_4()
+                .pt_3()
+                .child(strip(app, r, compact, cx)),
+        )
+        .child(
+            div()
                 .flex_1()
                 .min_h_0()
                 .overflow_hidden()
@@ -432,7 +442,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                         .size_full()
                         .vertical()
                         .track_scroll(&scroll)
-                        .child(div().p_4().child(tabs(app, r, true, compact, cx))),
+                        .child(div().p_4().child(panel(app, r, true, compact, cx))),
                 )
                 .children(jump),
         )

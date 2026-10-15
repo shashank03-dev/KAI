@@ -42,7 +42,7 @@ jobs:
             libvulkan-dev libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \
             libfontconfig-dev libdbus-1-dev libxdo-dev libxtst-dev libxrandr-dev libxi-dev \
             libgbm-dev libegl-dev libpipewire-0.3-dev libclang-dev \
-            xvfb mesa-vulkan-drivers libvulkan1 fonts-dejavu-core
+            xvfb xauth openbox mesa-vulkan-drivers libvulkan1 fonts-dejavu-core
       - name: Build the app
         run: cargo build --release -p kai-app
       - name: Capture
@@ -50,7 +50,10 @@ jobs:
           rm -f screenshots/*.png
           export KAI_CAPTURE=screenshots
           export HOME="$RUNNER_TEMP/home" && mkdir -p "$HOME"
-          timeout 600 xvfb-run -a -s "-screen 0 1600x1000x24" target/release/kai-app || echo "app exited with $?"
+          # Capture finds Kai's own window through the window manager's
+          # client list, so one must run (Xvfb alone lists no windows).
+          timeout 600 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            bash -c 'openbox & sleep 1; exec target/release/kai-app' || echo "app exited with $?"
           ls -la screenshots
           test "$(ls screenshots/*.png | wc -l)" -gt 10
       - uses: actions/upload-artifact@v4

@@ -199,10 +199,46 @@ Host: Apple Silicon macOS, rustc 1.99.0, `CARGO_TARGET_DIR=/Users/shashank/KAI/t
   rule as it already was on `origin/main`; not changed here.
 - Not run: any live app, model, browser, keychain or OS-permission check.
 
+## Live verification — 2026-10-16
+
+Tools installed for this pass: Chrome for Testing 155.0.8059.79 (macOS
+arm64, from Google's storage), colima + Docker running a Debian trixie
+arm64 VM with CI's Linux packages, Chromium, Xvfb and openbox. macOS
+Screen Recording is not granted to this host, so app screenshots come
+from Linux under Xvfb (the path CI's screenshot workflow uses); macOS and
+Windows rendering are still not captured.
+
+| Check | Result |
+|---|---|
+| Linux (Debian arm64): `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings` (kai-app included) | pass |
+| Linux: `cargo test --workspace` | 652 passed, 0 failed, 2 ignored, 40 suites |
+| Live browser lane, macOS + Chrome for Testing | `browser_edges` 6/6, `browser_lane` 3/3 (1 ignored: needs AT-SPI and a headed browser) |
+| Live browser lane, Linux + Chromium | same: 9 passed, 1 ignored |
+| R1 regression, live | with the pre-fix `web/act.rs` + `release.rs` (from `78299fd`), `alert_confirm_and_prompt_become_marks_and_are_answered` fails: "browser input cleanup was not acknowledged; restart the browser". With the fix it passes. |
+| Linux skills validate, mock bench | pass |
+| App screens under Xvfb | 32 states × light/dark at 720×520, 1024×768 and 1180×780 (192 images), reviewed by eye; fixes below re-captured |
+
+Defects seen in the screenshots and fixed:
+
+| Finding | Change | Evidence |
+|---|---|---|
+| U17 / P2 | The run's tab strip (Steps / Terminal / Screen / Sub-agents) sat inside the scrolled pane, so while the transcript followed its newest step the tabs scrolled out of view at 720×520 and 1024×768. The strip now stays above the scrolled panel. | Before: 20-running and 22-run-terminal at 720×520 show no tabs. After: tabs visible while following and while reading older steps. |
+| U18 / P1 | Onboarding's scroll area had no size, so it grew with its content and never scrolled: at 720×520 step 4's Next button sat below the window, unreachable. It now fills its bounded parent and scrolls (the U10 fix, missed here). | Before: 04-onboarding-safety shows the button cut off at the bottom edge. After: bounded and scrollable at source level; the static capture shows the top of the scroll. |
+| U19 / P2 | The approval dialog showed the screenshot first; at 720×520 the exact action JSON sat below the fold. The JSON now comes first and the screenshot is capped at 360 px wide. | After: 21-approval and 27-approval-long-command at 720×520 show the full wrapped command above the picture with Stop / Skip / Approve in view (U15 confirmed live). |
+| U20 / P3 | Benchmarks table: equal-width columns cut backend names and dates ("gemini ·…", "2026-10…") and the first header ran into "Date" at 720×520. Columns now have fixed widths with the backend pinned; the table scrolls sideways. | After: 60-bench at 720×520 shows full names and dates. |
+| U21 / P2 | CI's screenshot workflow captured nothing after U04: capture finds Kai's window through the window manager's client list, and the workflow ran Xvfb with no window manager. The workflow now installs and starts openbox (and `xauth`, which `xvfb-run` needs). | Without a WM: 0 of 64 shots; with openbox: 64 of 64 per size. |
+
+Confirmed live as working: U05's "Jump to latest · 2 new" appears while
+reading older steps and the shortcut list shows Ctrl+↓; compact run layout
+and controls at 720×520; dark theme contrast across pages. The black area
+in every screen viewer is part of the sample frame (a GTK window on a
+black desktop), not a rendering fault.
+
 ## Remaining work before shipping
 
-- **Linux and Windows:** run CI's clippy on Linux (including `kai-app`) and
-  Windows for `kai-app`; neither was possible from this Mac.
+- **Windows:** `kai-app` clippy and any live run (GPUI's Windows build
+  script cannot run off Windows). macOS app screenshots need Screen
+  Recording granted to the capturing process.
 - **Live A/B for R2/R3/R6:** the narrower pre-action checks change how often
   a live step proceeds; per CLAUDE.md, measure with `kai bench` (two runs
   per side) before claiming an effect.

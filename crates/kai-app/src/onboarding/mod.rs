@@ -388,6 +388,7 @@ impl Render for Onboarding {
         let (walk, done, skip) = (cx.entity(), cx.entity(), cx.entity());
         // Scrolls on short windows (the Connect step is the tallest).
         ely_gpui_component::layout::ScrollArea::new("onboarding-scroll")
+            .size_full()
             .vertical()
             .child(
                 div().w_full().flex().justify_center().p_8().child(
