@@ -37,7 +37,7 @@ echo "== screen and tree"
 open_doc mouse
 screencapture -x "$out/screen.png" || echo "(screencapture unavailable)"
 "$probe" tree 3 | tee "$out/tree.txt"
-grep -q "marks [1-9]" "$out/tree.txt" \
+grep -q "raw nodes [1-9]" "$out/tree.txt" \
     || fail "no marks: is Accessibility allowed for this terminal?"
 "$probe" frames "$out" | tee "$out/frames.txt"
 
