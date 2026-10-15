@@ -10,10 +10,11 @@ use crate::state::{RunState, describe};
 use ely_gpui_component::{
     agent::ComputerUseViewer,
     buttons::{Button, ButtonVariant},
-    chat::CodeBlock,
+    layout::ScrollArea,
     overlays::Dialog,
+    typography::SelectableText,
 };
-use gpui::{Entity, IntoElement, ParentElement, Styled, div, point};
+use gpui::{Entity, IntoElement, ParentElement, Styled, div, point, px};
 use kai_core::ApprovalChoice;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -22,13 +23,8 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     let what = describe(&p.decision, p.element.as_deref());
     let chosen = Rc::new(Cell::new(ApprovalChoice::Stop));
     let (on_close, skip, approve) = (chosen.clone(), chosen.clone(), chosen);
-    // The dialog is narrow and the code block doesn't wrap: a long line (the
-    // thought, typed text) ran off its edge. The full reason is in the
-    // detail above, so long lines are shortened here.
-    let json = fit_lines(
-        &serde_json::to_string_pretty(&p.decision).unwrap_or_default(),
-        JSON_LINE_CHARS,
-    );
+    // Approve the exact action, including suffixes beyond the compact title.
+    let json = approval_json(&p.decision);
 
     let frame = run.frames.last().map(|f| {
         let mut v = ComputerUseViewer::new("approval-frame", f.to_string_lossy().to_string())
@@ -72,9 +68,11 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     ))
     .children(frame)
     .child(
-        div()
-            .w_full()
-            .child(CodeBlock::new("approval-json", json).language("json")),
+        ScrollArea::new("approval-action").h(px(160.)).child(
+            div()
+                .p_2()
+                .child(SelectableText::new("approval-json", json)),
+        ),
     )
     .action(|close| {
         Button::new("approval-stop", "Stop")
@@ -99,38 +97,28 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     })
 }
 
-/// Longest JSON line the approval dialog shows in full.
-const JSON_LINE_CHARS: usize = 48;
-
-/// Cut every line longer than `max` characters to `max - 1` plus "…".
-fn fit_lines(text: &str, max: usize) -> String {
-    text.lines()
-        .map(|l| {
-            if l.chars().count() > max {
-                let mut cut: String = l.chars().take(max.saturating_sub(1)).collect();
-                cut.push('…');
-                cut
-            } else {
-                l.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+fn approval_json(decision: &kai_core::Decision) -> String {
+    serde_json::to_string_pretty(decision).expect("Decision serializes without fallible values")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::fit_lines;
+    use super::approval_json;
 
     #[test]
-    fn long_json_lines_are_shortened_short_ones_kept() {
-        let text = "{\n  \"thought\": \"Send the drafted email to the professor now\",\n  \"target\": 12\n}";
-        let out = fit_lines(text, 20);
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines[0], "{");
-        assert_eq!(lines[1].chars().count(), 20);
-        assert!(lines[1].ends_with('…'));
-        assert_eq!(lines[2], "  \"target\": 12");
-        assert_eq!(lines[3], "}");
+    fn approval_preserves_commands_that_differ_after_the_summary() {
+        for suffix in ["keep", "delete"] {
+            let command = format!("echo '{}'\n{suffix}", "界".repeat(60));
+            let decision = kai_core::Decision::parse_checked(
+                &serde_json::json!({
+                    "thought":"run", "action":"shell", "text":command, "risk":"high"
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let displayed: serde_json::Value =
+                serde_json::from_str(&approval_json(&decision)).unwrap();
+            assert_eq!(displayed["text"].as_str(), Some(command.as_str()));
+        }
     }
 }
