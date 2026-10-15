@@ -76,13 +76,7 @@ fn greeting(hour: u8) -> &'static str {
 fn keys(combo: &str, cx: &App) -> Vec<AnyElement> {
     combo
         .split('-')
-        .map(|k| {
-            let mut cap = k.to_string();
-            if let Some(first) = cap.get_mut(0..1) {
-                first.make_ascii_uppercase();
-            }
-            ui::kbd(cap, cx).into_any_element()
-        })
+        .map(|k| ui::kbd(ui::key_label(k), cx).into_any_element())
         .collect()
 }
 
@@ -203,7 +197,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
 
     let mut hints = vec![
         hint(vec![ui::kbd("↵", cx).into_any_element()], "run", &g),
-        hint(keys("ctrl-k", cx), "commands", &g),
+        hint(keys("secondary-k", cx), "commands", &g),
     ];
     if let Some(stop) = crate::StopHotkey::label(cx) {
         hints.push(hint(keys(&stop, cx), "stops Kai anywhere", &g));

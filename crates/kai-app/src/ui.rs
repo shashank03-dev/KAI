@@ -172,6 +172,25 @@ pub const ALT_KEY: &str = if cfg!(target_os = "macos") {
     "Alt"
 };
 
+/// How a key in a gpui chord (`secondary-k`, `ctrl-alt-escape`) reads on
+/// this OS's keyboard: ⌘ ⌥ ⌃ on a Mac, words elsewhere.
+pub fn key_label(key: &str) -> String {
+    let mac = cfg!(target_os = "macos");
+    match key {
+        "secondary" => MOD_KEY.into(),
+        "alt" => ALT_KEY.into(),
+        "ctrl" if mac => "⌃".into(),
+        "cmd" | "super" | "platform" if mac => "⌘".into(),
+        _ => {
+            let mut cap = key.to_string();
+            if let Some(first) = cap.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            cap
+        }
+    }
+}
+
 /// A key cap: "Ctrl", "K", "↵".
 pub fn kbd(key: impl Into<SharedString>, cx: &App) -> Div {
     let g = Glass::of(cx);
