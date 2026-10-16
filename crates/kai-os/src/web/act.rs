@@ -245,7 +245,17 @@ impl BrowserLane {
             (
                 Action::Click | Action::DoubleClick,
                 Some(MarkTarget::Dialog(DialogTarget::Accept)),
-            ) => self.answer(true).await,
+            ) => {
+                // The full dialog may contain high-risk words beyond the
+                // 80-character visible mark. Refuse if the model was only
+                // approved for a lower-risk (truncated) target.
+                if dialog::accept_is_high_risk(open)
+                    && kai_core::risk::classify(d, g) != kai_core::Risk::High
+                {
+                    anyhow::bail!("page dialog requires approval; its message is high risk");
+                }
+                self.answer(true).await
+            },
             (
                 Action::Click | Action::DoubleClick,
                 Some(MarkTarget::Dialog(DialogTarget::Dismiss)),
@@ -255,7 +265,14 @@ impl BrowserLane {
                 Ok(())
             }
             (Action::Click, Some(MarkTarget::Dialog(DialogTarget::Field))) => Ok(()),
-            (Action::Key, _) if d.keys == ["enter"] => self.answer(true).await,
+            (Action::Key, _) if d.keys == ["enter"] => {
+                if dialog::accept_is_high_risk(open) {
+                    anyhow::bail!(
+                        "high-risk page dialog: click its OK mark to request approval"
+                    );
+                }
+                self.answer(true).await
+            },
             (Action::Key, _) if d.keys == ["esc"] => self.answer(false).await,
             (Action::Wait | Action::AskUser | Action::Done, _) => Ok(()),
             _ => anyhow::bail!(

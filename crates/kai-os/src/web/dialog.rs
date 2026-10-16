@@ -116,6 +116,36 @@ pub fn marks(params: &Value, typed: Option<&str>, view: Rect) -> Vec<(Element, D
         .collect()
 }
 
+/// Classify the real, complete dialog text, including content beyond
+/// the short on-screen label. Keypresses have no mark and would otherwise
+/// bypass the risk classifier's target element check.
+pub fn accept_is_high_risk(params: &Value) -> bool {
+    use kai_core::{Action, Decision, Grounding, Risk, risk};
+    let mut elements = marks(params, None, Rect::new(0.0, 0.0, 1.0, 1.0));
+    let Some((accept, _)) = elements.iter_mut().find(|(_, target)| *target == DialogTarget::Accept)
+    else {
+        return true; // An unknown dialog must never be accepted by a shortcut.
+    };
+    let mark = accept.mark;
+    if let Some(full) = params["message"].as_str() {
+        accept.name.push(' ');
+        accept.name.push_str(full);
+    }
+    let decision = Decision {
+        thought: String::new(),
+        action: Action::Click,
+        target: Some(mark),
+        text: None,
+        keys: vec![],
+        direction: None,
+        amount: None,
+        risk: Risk::None,
+        expect: String::new(),
+    };
+    let grounding = Grounding::Marks(elements.into_iter().map(|(e, _)| e).collect());
+    risk::classify(&decision, &grounding) == Risk::High
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +232,23 @@ mod tests {
         assert_eq!(click(&leave, 0), Risk::High);
         let fine = marks(&json!({"type": "alert", "message": "Saved"}), None, VIEW);
         assert_eq!(click(&fine, 0), Risk::None);
+    }
+
+    #[test]
+    fn shortcuts_do_not_bypass_destructive_dialog_risk() {
+        assert!(accept_is_high_risk(&json!({
+            "type":"confirm", "message":"Delete all files?"
+        })));
+        assert!(accept_is_high_risk(&json!({
+            "type":"beforeunload", "message":""
+        })));
+        assert!(!accept_is_high_risk(&json!({
+            "type":"confirm", "message":"Proceed to next page?"
+        })));
+        let long = format!("{} Delete the account?", "x".repeat(200));
+        assert!(accept_is_high_risk(&json!({
+            "type":"confirm", "message":long
+        })));
     }
 
     #[test]
