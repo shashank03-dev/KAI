@@ -27,23 +27,11 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp target/release/kai-app target/release/kai "$app/Contents/MacOS/"
 cp -R skills bench LICENSE README.md "$app/Contents/Resources/"
 
-# The icon, when the SVG can be rendered here (Quick Look is on every Mac).
-icon_key=""
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-if qlmanage -t -s 1024 -o "$tmp" assets/icons/kai-hand.svg >/dev/null 2>&1 \
-    && [[ -f "$tmp/kai-hand.svg.png" ]]; then
-    set_dir="$tmp/Kai.iconset"
-    mkdir -p "$set_dir"
-    for s in 16 32 128 256 512; do
-        sips -z $s $s "$tmp/kai-hand.svg.png" --out "$set_dir/icon_${s}x${s}.png" >/dev/null
-        d=$((s * 2))
-        sips -z $d $d "$tmp/kai-hand.svg.png" --out "$set_dir/icon_${s}x${s}@2x.png" >/dev/null
-    done
-    if iconutil -c icns "$set_dir" -o "$app/Contents/Resources/Kai.icns"; then
-        icon_key="<key>CFBundleIconFile</key><string>Kai</string>"
-    fi
-fi
+# The finished app icon: the cobalt orbit. `assets/icons/Kai.icns` is rebuilt
+# from the master render by `scripts/icons/build.sh`; the same ribbon is the
+# in-app mark (docs/APP_ICON.md).
+cp assets/icons/Kai.icns "$app/Contents/Resources/Kai.icns"
+icon_key="<key>CFBundleIconFile</key><string>Kai</string>"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

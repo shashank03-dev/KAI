@@ -38,6 +38,10 @@ all = { level = "warn", priority = -1 }
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
 
+# build.rs embeds assets/icons/Kai.ico into kai-app.exe on Windows.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 # The Metal shaders are compiled when the app starts instead of by
 # `xcrun metal` at build time, which needs the full Xcode (the Command Line
 # Tools most Macs have do not ship the Metal compiler).

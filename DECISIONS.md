@@ -996,3 +996,42 @@ Research: `docs/RESEARCH_2026_10_OPENAI_PARITY.md` (sources dated 2026-10-16).
 - **Browser lane offers click, type and keys through the shared contract**,
   reusing the lane's live-tested paths. Drag and held modifiers stay off in
   the browser until they have fixtures.
+
+## The cobalt orbit icon, everywhere (2026-10-16)
+
+- **The owner's render is the icon, and every surface is derived from it.**
+  `assets/icons/kai-app-v3.png` (1254×1254, the attached image, md5
+  `7189935daafc31e32ec7e7a4f2d10ed3`) is the master. `scripts/icons/build.sh`
+  rebuilds from it: `Kai.iconset/` + `Kai.icns` (the macOS bundle icon,
+  copied by `scripts/macos/bundle.sh`), `Kai.ico` (6 PNG entries), and
+  `kai-app-512.png` (the runtime window icon through `WindowOptions::icon`).
+  Design and regeneration: `docs/APP_ICON.md`.
+- **The in-app mark is the ribbon on transparency**, extracted from the
+  master by `scripts/icons/extract-mark.swift` (blueness mask, connected
+  components, gloss and crevice handling; mean core `#3769E3`), drawn by
+  `ui::orb` with an orbit-cobalt halo (`brand::ORBIT`) and on the splash
+  screen. Ember stays the app's signal colour (`brand.rs`).
+- **The Windows executable carries the icon** through
+  `crates/kai-app/build.rs` + `winresource`, a Windows-target build
+  dependency; a cross check without an rc/windres toolchain warns instead of
+  failing, and Explorer and the taskbar read the embedded resource (the
+  runtime `WindowOptions::icon` alone would not reach them).
+- **The splash takes an image, not a widget** (`SplashScreen::icon_image`,
+  vendored ely): an `AnyElement` would break the `Clone` bound `Hosted<T>`
+  needs.
+- **Rejected:** keeping the amber hand (`assets/icons/kai-hand.svg`,
+  deleted) and tinting the old ember halo in place of the ribbon (the
+  ribbon's own cobalt is the mark; the halo matches it). The v1 (amber
+  hand) and v2 (folded K) renders stay for comparison; the redundant
+  `Kai-v3.icns` export was dropped (byte-identical to `Kai.icns`).
+- **Screenshots** in the repository are captured on Linux by the
+  Screenshots workflow; the committed set predates the new mark and
+  refreshes on that workflow's next run. The mark was verified in a live
+  macOS capture, light and dark (`docs/APP_ICON.md`).
+- **Checks:** `cargo fmt --all --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings` (host and `--target x86_64-pc-windows-gnu`,
+  mingw-w64), `cargo test --workspace` and `scripts/macos/bundle.sh`
+  (ad hoc sign, 10 checks, 0 failed) pass, and a live home-screen capture,
+  light and dark, shows the mark. The Windows-only build-script calls are
+  type-checked against the locked `winresource` crate, since a non-Windows
+  host never compiles that branch; `windows.yml` covers it natively too.
