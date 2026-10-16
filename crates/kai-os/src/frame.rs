@@ -137,7 +137,7 @@ pub fn mask(img: &mut RgbaImage, rects: &[Rect]) {
         // One slice fill per row: a maximised window on a 4K display is
         // millions of pixels per frame.
         for row in buf.chunks_exact_mut(stride).take(y1).skip(y0) {
-            for px in row[x0 * 4..x1 * 4].chunks_exact_mut(4) {
+            for px in row[x0 * 4..x1 * 4].as_chunks_mut::<4>().0 {
                 px.copy_from_slice(&FILL);
             }
         }

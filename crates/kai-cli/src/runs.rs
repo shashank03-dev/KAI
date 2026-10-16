@@ -108,9 +108,11 @@ mod tests {
     #[test]
     fn recorder_names_the_model_that_will_answer() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Settings::default();
-        s.backend = BackendChoice::Local;
-        s.local_model = "holo-3.1-4b-q4".into();
+        let mut s = Settings {
+            backend: BackendChoice::Local,
+            local_model: "holo-3.1-4b-q4".into(),
+            ..Settings::default()
+        };
         let local = run_recorder(dir.path(), "local task", BackendArg::Local, &s)
             .unwrap()
             .meta();
