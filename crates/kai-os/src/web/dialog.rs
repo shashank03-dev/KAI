@@ -54,6 +54,10 @@ pub fn accept_risk(params: &Value) -> Risk {
     risk_for_text(&text)
 }
 
+pub fn accept_is_high_risk(params: &Value) -> bool {
+    accept_risk(params) == Risk::High
+}
+
 fn risk_for_text(text: &str) -> Risk {
     risk::classify(
         &Decision {
@@ -178,7 +182,14 @@ impl BrowserLane {
             (
                 Action::Click | Action::DoubleClick,
                 Some(MarkTarget::Dialog(DialogTarget::Accept)),
-            ) => self.answer(true).await,
+            ) => {
+                if accept_is_high_risk(open) && risk::classify(d, g) != Risk::High {
+                    anyhow::bail!(
+                        "page dialog requires approval; its complete message is high risk"
+                    );
+                }
+                self.answer(true).await
+            }
             (
                 Action::Click | Action::DoubleClick,
                 Some(MarkTarget::Dialog(DialogTarget::Dismiss)),
@@ -289,6 +300,23 @@ mod tests {
         assert_eq!(click(&leave, 0), Risk::High);
         let fine = marks(&json!({"type": "alert", "message": "Saved"}), None, VIEW);
         assert_eq!(click(&fine, 0), Risk::None);
+    }
+
+    #[test]
+    fn shortcuts_do_not_bypass_destructive_dialog_risk() {
+        assert!(accept_is_high_risk(&json!({
+            "type":"confirm", "message":"Delete all files?"
+        })));
+        assert!(accept_is_high_risk(&json!({
+            "type":"beforeunload", "message":""
+        })));
+        assert!(!accept_is_high_risk(&json!({
+            "type":"confirm", "message":"Proceed to next page?"
+        })));
+        let long = format!("{} Delete the account?", "x".repeat(200));
+        assert!(accept_is_high_risk(&json!({
+            "type":"confirm", "message":long
+        })));
     }
 
     #[test]

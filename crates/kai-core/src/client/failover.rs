@@ -99,6 +99,11 @@ mod tests {
     use super::*;
     use crate::client::{Images, MockClient};
 
+    #[test]
+    fn rate_limit_is_a_failover_error() {
+        assert!(ClientError::from_status(429, "busy").is_failover());
+    }
+
     struct AlwaysFails;
     #[async_trait]
     impl ModelClient for AlwaysFails {

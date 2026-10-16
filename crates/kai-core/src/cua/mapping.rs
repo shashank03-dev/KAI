@@ -59,7 +59,6 @@ pub fn map_action(a: &serde_json::Value, img: (u32, u32), screen: Rect) -> Mappe
         }])
     };
     let none = || Grounding::Marks(Vec::new());
-    let ty = a["type"].as_str().unwrap_or("");
     let at = || point(&a["x"], &a["y"]);
     let act = |v: serde_json::Value, g: Grounding| match decision(v) {
         Some(d) => Mapped::Act(d, g),

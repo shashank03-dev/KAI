@@ -238,10 +238,12 @@ impl Report {
             .any(|r| r.trace.outcome == Some(Outcome::Stopped))
         {
             Outcome::Stopped
-        } else if self
-            .results
-            .iter()
-            .all(|r| r.trace.outcome == Some(Outcome::Success))
+        } else if !self.results.is_empty()
+            && self.results.len() == self.plan.subtasks.len()
+            && self
+                .results
+                .iter()
+                .all(|r| r.trace.outcome == Some(Outcome::Success))
         {
             Outcome::Success
         } else {
@@ -431,6 +433,16 @@ mod tests {
             kind: Kind::Shell,
             depends_on: deps.iter().map(|d| d.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn empty_team_report_is_not_success() {
+        let report = Report {
+            plan: Plan::single("some work"),
+            results: vec![],
+            summary: String::new(),
+        };
+        assert_eq!(report.outcome(), Outcome::Failed);
     }
 
     #[test]

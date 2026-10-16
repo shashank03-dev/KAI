@@ -107,15 +107,32 @@ impl ModelClient for VllmClient {
 
     async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
         let started = Instant::now();
-        let resp = self
-            .http
-            .post(format!("{}/chat/completions", self.endpoint))
-            .bearer_auth(&self.api_key)
-            .json(&self.body(req))
-            .timeout(self.timeout)
-            .send()
-            .await
-            .map_err(|e| send_error(e, self.timeout))?;
+        // A transient rate limit must not fail the whole task. After three
+        // attempts, return 429 so a configured secondary can take over.
+        let mut rate_limited = 0;
+        let resp = loop {
+            let response = self
+                .http
+                .post(format!("{}/chat/completions", self.endpoint))
+                .bearer_auth(&self.api_key)
+                .json(&self.body(req))
+                .timeout(self.timeout)
+                .send()
+                .await
+                .map_err(|e| send_error(e, self.timeout))?;
+            if response.status().as_u16() != 429 || rate_limited >= 2 {
+                break response;
+            }
+            rate_limited += 1;
+            let after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(rate_limited)
+                .min(10);
+            tokio::time::sleep(Duration::from_secs(after)).await;
+        };
 
         let status = resp.status();
         if !status.is_success() {

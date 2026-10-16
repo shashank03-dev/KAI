@@ -40,7 +40,7 @@ pixels.*
 - **Fully offline:** Holo3.1 4B (H Company, Apache-2.0) runs locally in
   about 4.4 GB of RAM (`kai models install holo-3.1-4b-q4`); see
   [docs/LOCAL_MODELS.md](docs/LOCAL_MODELS.md).
-- **A store of open models:** 17 pinned, hash-checked models ranked for your
+- **A store of open models:** 16 pinned, hash-checked models ranked for your
   computer (Gemma 4, Holo4, Holo3.1, Fara, Qwen, GLM, UI-TARS), and any
   other GGUF vision model on Hugging Face with `kai models search` and
   `kai models pull <owner/repo>` ([docs/MODEL_STORE.md](docs/MODEL_STORE.md)).

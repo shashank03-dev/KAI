@@ -199,11 +199,15 @@ pub fn entry_from_hub(
     })?;
     for selected in [model, mmproj] {
         anyhow::ensure!(
-            selected.size.is_some_and(|size| size > 0)
-                && selected.sha256.as_ref().is_some_and(|hash| {
-                    hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
-                }),
-            "{} has no verified size and SHA-256 in the Hub listing; refusing an unverified pull",
+            selected.size.is_some_and(|size| size > 0),
+            "{} has no verified byte size in the Hub listing",
+            selected.path
+        );
+        anyhow::ensure!(
+            selected.sha256.as_ref().is_some_and(|hash| {
+                hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+            }),
+            "{} has no verified SHA-256 in the Hub listing",
             selected.path
         );
     }

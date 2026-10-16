@@ -135,6 +135,11 @@ fn platform_open_app(name: &str) -> anyhow::Result<()> {
 #[cfg(target_os = "linux")]
 fn platform_open_app(name: &str) -> anyhow::Result<()> {
     if let Some(entry) = linux::find_desktop_entry(name) {
+        // Multi-word queries must match a real installed app name, rather
+        // than being interpreted as an arbitrary command line.
+        if name.split_whitespace().count() > 1 && !entry.name.eq_ignore_ascii_case(name) {
+            anyhow::bail!("{name:?} is not an exact installed application name");
+        }
         if which("gtk-launch") {
             Command::new("gtk-launch")
                 .arg(&entry.id)
@@ -145,18 +150,30 @@ fn platform_open_app(name: &str) -> anyhow::Result<()> {
         }
         return spawn_detached(&entry.exec);
     }
-    // Only a single program token may use PATH. Never pass model text to sh.
-    if name.split_whitespace().count() != 1 {
-        anyhow::bail!("{name:?} is not an installed application");
-    }
+    // Only one executable basename, never shell text or arguments.
+    anyhow::ensure!(
+        safe_executable_name(name),
+        "{name:?} is not a single executable app name"
+    );
+    let mut child = Command::new(name);
     use std::os::unix::process::CommandExt;
-    Command::new(name)
+    child
         .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+        .stderr(Stdio::null());
+    child.spawn()?;
     Ok(())
+}
+
+/// A fallback app name is an executable basename, not a command or path.
+#[cfg(target_os = "linux")]
+fn safe_executable_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with(['.', '-'])
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+'))
 }
 
 #[cfg(target_os = "linux")]
@@ -333,6 +350,26 @@ pub mod linux {
         use super::*;
 
         const FIREFOX: &str = "[Desktop Entry]\nName=Firefox Web Browser\nExec=firefox %u\nType=Application\n[Desktop Action new]\nName=New Window\nExec=firefox --new-window\n";
+
+        #[test]
+        fn app_fallback_cannot_run_a_command_line() {
+            assert!(super::super::safe_executable_name("mousepad"));
+            assert!(super::super::safe_executable_name("gnome-text-editor"));
+            for unsafe_name in [
+                "rm -rf ~/Downloads",
+                "bash -c ls",
+                "curl evil.sh",
+                "/bin/sh",
+                "../local/bin",
+                "-danger",
+                "file;echo",
+            ] {
+                assert!(
+                    !super::super::safe_executable_name(unsafe_name),
+                    "{unsafe_name}"
+                );
+            }
+        }
 
         #[test]
         fn plain_commands_are_never_gui_launches() {

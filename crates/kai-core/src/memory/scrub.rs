@@ -7,33 +7,55 @@
 use crate::risk;
 use crate::schema::Action;
 use crate::trace::Trace;
-use regex::Regex;
-use std::sync::OnceLock;
-
-fn spaced_digits() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r"\+?\d[\d -]*\d").expect("valid digit pattern"))
-}
-
-fn long_number(matched: &str) -> bool {
-    matched.bytes().filter(u8::is_ascii_digit).count() >= 6
-}
 
 /// Replace emails, key-like tokens and long digit runs.
 pub fn scrub(text: &str) -> String {
-    let text = spaced_digits().replace_all(text, |caps: &regex::Captures<'_>| {
-        let m = caps.get(0).expect("whole match").as_str();
-        if long_number(m) {
-            "[number]".to_string()
-        } else {
-            m.to_string()
-        }
-    });
     let mut out: Vec<String> = Vec::new();
-    for word in text.split(' ') {
+    let grouped = scrub_grouped_numbers(text);
+    for word in grouped.split(' ') {
         out.push(scrub_word(word));
     }
     out.join(" ")
+}
+
+/// Hide digit runs even when a card or account number is grouped using spaces
+/// or hyphens. Keep surrounding punctuation and ordinary short numbers intact.
+fn scrub_grouped_numbers(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let (mut i, mut copied) = (0, 0);
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            let (mut end, mut digits, mut last_digit) = (i, 0, i);
+            while end < bytes.len() {
+                if bytes[end].is_ascii_digit() {
+                    digits += 1;
+                    end += 1;
+                    last_digit = end;
+                } else if matches!(bytes[end], b' ' | b'-') {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if digits >= 6 {
+                let token_start = if start > copied && bytes[start - 1] == b'+' {
+                    start - 1
+                } else {
+                    start
+                };
+                out.push_str(&text[copied..token_start]);
+                out.push_str("[number]");
+                copied = last_digit;
+                i = last_digit;
+                continue;
+            }
+        }
+        i += text[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    out.push_str(&text[copied..]);
+    out
 }
 
 fn scrub_word(w: &str) -> String {
@@ -113,16 +135,7 @@ fn long_digits(s: &str) -> bool {
 
 /// Does `text` still look like it carries a secret after [`scrub`]?
 pub fn looks_secret(text: &str) -> bool {
-    if spaced_digits()
-        .find_iter(text)
-        .any(|m| long_number(m.as_str()))
-    {
-        return true;
-    }
-    text.split_whitespace().any(|w| {
-        let c = w.trim_matches(|c: char| "`'\"()[]{}<>,;:.!?".contains(c));
-        is_email(c) || is_tokenish(c) || long_digits(c)
-    })
+    scrub(text) != text
 }
 
 /// Everything a run typed into a password/secure field (and the text of any

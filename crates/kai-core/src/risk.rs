@@ -102,80 +102,105 @@ const DELETE_COMMANDS: &[&str] = &[
     "-delete",
 ];
 
-/// Risk of a shell command: destructive or privileged is high, the rest low.
+/// Commands that invoke an interpreter, transfer local data or access credentials
+/// require review. This is a conservative safety classifier, not a shell parser:
+/// ambiguous commands should be treated as high-risk, never trusted as safe.
+fn shell_interpreter(word: &str) -> bool {
+    let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
+    matches!(
+        name,
+        "sh" | "bash"
+            | "zsh"
+            | "dash"
+            | "ksh"
+            | "fish"
+            | "python"
+            | "python3"
+            | "perl"
+            | "ruby"
+            | "node"
+            | "osascript"
+            | "powershell"
+            | "pwsh"
+    ) || name.starts_with("python3.")
+}
+
+/// Risk of a shell command: destructive, credential-related, remote execution
+/// and uploads are high; routine read-only commands remain low.
 pub fn classify_shell(cmd: &str) -> Risk {
     let c = cmd.to_ascii_lowercase();
-    let deletes = c
-        .split(|ch: char| ch.is_whitespace() || ";|&()`'\"".contains(ch))
-        .map(|w| w.rsplit(['/', '\\']).next().unwrap_or(w))
-        .any(|w| DELETE_COMMANDS.contains(&w));
-    let credential = [
-        ".ssh/",
+    let words: Vec<&str> = c
+        .split(|ch: char| ch.is_whitespace() || ";|&()`'\"$".contains(ch))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let deletes = words.iter().any(|w| {
+        let base = w.rsplit(['/', '\\']).next().unwrap_or(w);
+        DELETE_COMMANDS.contains(&base)
+    });
+    let inline_code = words.windows(2).any(|pair| {
+        shell_interpreter(pair[0])
+            && matches!(pair[1], "-c" | "-e" | "-command" | "-encodedcommand")
+            && (matches!(
+                pair[0].rsplit(['/', '\\']).next().unwrap_or(pair[0]),
+                "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish" | "powershell" | "pwsh"
+            ) || ["curl", "wget", "irm ", "invoke-restmethod"]
+                .iter()
+                .any(|fetch| c.contains(fetch)))
+    });
+    let pipe_to_interpreter = c.split('|').skip(1).any(|segment| {
+        let parts: Vec<&str> = segment
+            .split(|ch: char| ch.is_whitespace() || ";&()`'\"$".contains(ch))
+            .filter(|w| !w.is_empty())
+            .collect();
+        parts.first().is_some_and(|first| {
+            shell_interpreter(first)
+                || (matches!(
+                    first.rsplit(['/', '\\']).next().unwrap_or(first),
+                    "env" | "sudo" | "nohup" | "timeout"
+                ) && parts.iter().skip(1).take(5).any(|w| shell_interpreter(w)))
+        })
+    });
+    // Credential files and keychain reads are high risk even without an
+    // obvious network destination: their content is a secret.
+    let credentials = [
+        "/.ssh/",
+        "~/.ssh",
+        "id_rsa",
+        "id_ed25519",
         ".aws/credentials",
         ".netrc",
         "/etc/shadow",
-        "keychain",
-        "find-generic-password",
-        "find-internet-password",
-        "credential manager",
+        "login.keychain",
+        "security find-generic-password",
+        "security find-internet-password",
+        "secret-tool lookup",
+        "pass show",
+        "get-storedcredential",
     ]
     .iter()
-    .any(|p| c.contains(p));
-    let outbound_data = [
-        "--data",
-        "-d @",
-        "-t ",
-        "--upload-file",
-        "--post-file",
-        "--post-data",
-    ]
-    .iter()
-    .any(|p| c.contains(p))
-        && ["curl", "wget", "scp", "rsync", "nc ", "netcat"]
+    .any(|needle| c.replace('\\', "/").contains(needle));
+    let outbound = words
+        .iter()
+        .any(|w| matches!(*w, "curl" | "wget" | "nc" | "netcat" | "scp" | "rsync"));
+    let upload = outbound
+        && (words.iter().any(|w| {
+            matches!(
+                *w,
+                "-d" | "-t" | "--data" | "--data-binary" | "--upload-file" | "--post-file"
+            ) || w.starts_with("--data=")
+                || w.starts_with("--data-binary=")
+                || w.starts_with("-d@")
+        }) || words
             .iter()
-            .any(|p| c.contains(p));
-    let interpreter = |word: &str| {
-        let name = word
-            .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '/' && ch != '-')
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("");
-        matches!(
-            name,
-            "sh" | "bash"
-                | "zsh"
-                | "dash"
-                | "ksh"
-                | "fish"
-                | "perl"
-                | "ruby"
-                | "node"
-                | "osascript"
-                | "iex"
-                | "invoke-expression"
-        ) || name.starts_with("python")
-    };
-    let piped_to_interpreter = c.split('|').skip(1).any(|segment| {
-        let mut words = segment.split_whitespace();
-        let first = words.next().unwrap_or("");
-        interpreter(first) || (first == "env" && words.next().is_some_and(interpreter))
-    });
-    let nested_interpreter = c
-        .split(|ch: char| ch.is_whitespace() || ";&|`'\"()".contains(ch))
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|w| interpreter(w[0]) && w[1] == "-c");
-    let expression = c.contains("iex(") || c.contains("invoke-expression(");
+            .any(|w| matches!(*w, "nc" | "netcat" | "scp" | "rsync")));
     if deletes
-        || credential
-        || outbound_data
-        || piped_to_interpreter
-        || (nested_interpreter
-            && ["curl", "wget", "irm ", "invoke-restmethod"]
-                .iter()
-                .any(|p| c.contains(p)))
-        || expression
         || DESTRUCTIVE_SHELL.iter().any(|p| c.contains(p))
+        || inline_code
+        || pipe_to_interpreter
+        || c.contains("iex(")
+        || words.contains(&"iex")
+        || credentials
+        || upload
     {
         Risk::High
     } else {
@@ -251,6 +276,36 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
     // Only what the action touches counts here: the model's own `thought`
     // ("avoid password/payment") must not turn an email field into a payment,
     // and "pay" inside "display" is not a payment either.
+    if decision.action == Action::Shell
+        && classify_shell(decision.text.as_deref().unwrap_or("")) == Risk::High
+        && [
+            "/.ssh/",
+            "~/.ssh",
+            "id_rsa",
+            "id_ed25519",
+            ".aws/credentials",
+            ".netrc",
+            "/etc/shadow",
+            "login.keychain",
+            "security find-generic-password",
+            "security find-internet-password",
+            "secret-tool lookup",
+            "pass show",
+        ]
+        .iter()
+        .any(|p| {
+            decision
+                .text
+                .as_deref()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .replace('\\', "/")
+                .contains(p)
+        })
+    {
+        // Reading credentials is a password operation even in Autopilot.
+        return true;
+    }
     let mut h = decision.text.clone().unwrap_or_default();
     if let Some(el) = decision.target.and_then(|t| grounding.element(t)) {
         h.push(' ');
@@ -267,13 +322,17 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
         "purchase",
         "place order",
         "order now",
+        "complete order",
+        "confirm order",
         "paypal",
         "subscribe",
+        "subscription",
         "donate",
         "give now",
         "tip",
         "top up",
         "recharge",
+        "add payment",
         "card number",
         "cvv",
     ]

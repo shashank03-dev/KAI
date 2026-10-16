@@ -299,3 +299,38 @@ fn the_same_text_learned_twice_at_once_keeps_two_ids() {
     assert_ne!(a.id, b.id);
     assert_ne!(a.id, c.id);
 }
+
+#[test]
+fn grouped_card_phone_and_account_numbers_are_redacted_everywhere() {
+    for text in [
+        "4111 1111 1111 1111",
+        "4111-1111-1111-1111",
+        "+91 98765 43210",
+        "1234567890123456",
+    ] {
+        let redacted = scrub(text);
+        assert!(!redacted.contains("1111"), "{redacted}");
+        assert!(redacted.contains("[number]"), "{redacted}");
+        assert!(super::scrub::looks_secret(text), "{text}");
+        assert!(!allowed(text, &[], true));
+    }
+    assert_eq!(scrub("order 12, room 31"), "order 12, room 31");
+}
+
+#[test]
+fn reflection_never_sends_secret_error_output_to_the_model() {
+    let t = trace(
+        "inspect command",
+        vec![step(
+            0,
+            SHELL_MP,
+            true,
+            Some("ERROR: authorization failed with ghp_A1b2C3d4E5f6G7h8I9j0kLmN"),
+            "",
+        )],
+        Outcome::Failed,
+    );
+    let summary = super::reflect::summary(&t, None);
+    assert!(summary.contains("[secret]"), "{summary}");
+    assert!(!summary.contains("ghp_A1b2"), "{summary}");
+}
