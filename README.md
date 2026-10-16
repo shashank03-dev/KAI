@@ -1,5 +1,7 @@
 # Kai
 
+<p align="center"><img src="assets/icons/kai-app-512.png" alt="Kai app icon" width="96"></p>
+
 **Give Gemma a hand.** Kai is an open-source desktop app for Linux, Windows
 and macOS (Apple Silicon) that lets Gemma 4 use your computer: it looks at the screen, decides, clicks,
 types and runs commands one visible step at a time, while you watch and can

@@ -39,8 +39,9 @@ do, and how to stop it.
 
 ## Brand
 
-- **Mark:** an open hand of five rounded strokes (`assets/icons/kai-hand.svg`),
-  registered as an icon through Ely's asset source (`Assets::before`).
+- **Mark:** the cobalt orbit ribbon (`assets/icons/kai-mark.png`), embedded
+  through Ely's asset source (`Assets::before`) and drawn by `ui::orb` with
+  an orbit-cobalt halo.
 - **Name:** "Kai" in the title bar and on the splash.
 - **Accent:** saffron. Light `#B45309` on Ely's light background, dark
   `#F59E0B` on Ely's dark background — both checked for WCAG AA (4.5:1 for
@@ -74,7 +75,7 @@ respect a solid fallback), and dark product UIs in the Raycast/Linear family
   in light). The primary colour is *ink* (white on dark, black on light), so
   the main action is the brightest thing on screen without a hue. Kai's
   saffron becomes **ember** (`#F5A524` / `#C2410C`) and marks only what is
-  alive: the brand orb, a running run's dot and progress line, the
+  alive: a running run's dot and progress line, the
   composer's halo, the mini window's edge. Green/amber/red keep their meaning.
 - **Glass as layers, not blur everywhere.** `ui.rs` tokens: `pane` (task list,
   run header), `card`, `raised`, each a low-alpha fill with a hairline border
@@ -119,7 +120,7 @@ light and dark; dark is designed (surfaces lift, accents lighten), not
 inverted — Ely's palettes do this per mode.
 
 ### 1. Splash
-`shell::SplashScreen` with the hand mark, "Kai", tagline "Gemma 4's hands
+`shell::SplashScreen` with the orbit mark, "Kai", tagline "Gemma 4's hands
 on your computer", and status `typography::ShimmerText` "Waking Gemma…". Under
 one second: it closes as soon as settings load; the model warm-up continues in
 the background and reports into the status bar.

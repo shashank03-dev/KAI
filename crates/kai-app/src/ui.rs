@@ -12,7 +12,7 @@ use crate::brand;
 use ely_gpui_component::theme::ActiveTheme;
 use gpui::{
     AnyElement, App, BoxShadow, Div, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
-    Styled, div, hsla, linear_color_stop, linear_gradient, px, rgb,
+    Styled, div, hsla, img, linear_color_stop, linear_gradient, px, rgb,
 };
 
 /// Corner radii, smallest to largest.
@@ -217,7 +217,7 @@ pub fn dot(color: Hsla, live: bool, g: &Glass) -> Div {
     }
 }
 
-/// Kai's mark: the hand in a glass orb with an ember halo.
+/// Kai's mark: the cobalt orbit ribbon in a glass orb with a halo.
 pub fn orb(size: f32, g: &Glass) -> Div {
     div()
         .size(px(size))
@@ -229,13 +229,11 @@ pub fn orb(size: f32, g: &Glass) -> Div {
         .bg(g.raised)
         .border_1()
         .border_color(g.line_strong)
-        .shadow(vec![g.sheen_shadow(), g.glow(g.ember, size * 0.6)])
-        .child(
-            gpui::svg()
-                .path(crate::assets::HAND)
-                .size(px(size * 0.5))
-                .text_color(g.ember),
-        )
+        .shadow(vec![
+            g.sheen_shadow(),
+            g.glow(hex(brand::ORBIT), size * 0.6),
+        ])
+        .child(img(crate::assets::MARK).size(px(size * 0.68)))
 }
 
 /// A soft light leak along the top of a view: ember fading into the canvas.

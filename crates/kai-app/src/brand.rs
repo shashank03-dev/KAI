@@ -1,9 +1,10 @@
 //! Kai Glass: a monochrome graphite palette laid over Ely's. The primary
 //! colour is ink (white on dark, black on light), so actions read as the
-//! brightest thing on screen without a hue. Kai's one hue, ember, is kept for
-//! what is alive (the brand mark, a running run, focus glow) and is drawn by
-//! `ui.rs`, never as an Ely accent. Status colours (green, amber, red) stay
-//! Ely's, so colour still carries meaning. Contrast is checked in the tests.
+//! brightest thing on screen without a hue. Kai's signal hue, ember, is kept
+//! for what is alive (a running run, focus glow); the brand mark draws the
+//! orbit cobalt of the app icon. Both live in `ui.rs`, never as an Ely
+//! accent. Status colours (green, amber, red) stay Ely's, so colour still
+//! carries meaning. Contrast is checked in the tests.
 
 use ely_gpui_component::theme::{Mode, Palette, Theme};
 use gpui::{App, Hsla, rgb};
@@ -31,6 +32,9 @@ pub const LIGHT_INK_HOVER: u32 = 0x27272a;
 /// Ember: Kai's signal hue (the old saffron, kept as the brand).
 pub const EMBER_DARK: u32 = 0xf5a524;
 pub const EMBER_LIGHT: u32 = 0xc2410c;
+
+/// Orbit: the cobalt of the app icon's ribbon; the brand mark's halo.
+pub const ORBIT: u32 = 0x3769e3;
 
 /// How see-through the window canvas is when the glass material is on.
 pub const GLASS_ALPHA: f32 = 0.78;

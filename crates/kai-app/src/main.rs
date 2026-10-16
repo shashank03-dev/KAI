@@ -68,6 +68,7 @@ fn main() {
         }
     };
     let capture_dir = std::env::var_os("KAI_CAPTURE").map(std::path::PathBuf::from);
+    let app_icon = assets::app_icon();
 
     gpui_platform::application()
         .with_assets(Assets::before(assets::KaiAssets))
@@ -92,7 +93,7 @@ fn main() {
             app::bind_keys(cx);
 
             let splash = SplashScreen::new(i18n::t(cx, "app.name", &[]))
-                .icon(ely_gpui_component::primitives::IconName::Hand)
+                .icon_image(assets::MARK)
                 .tagline(i18n::t(cx, "app.tagline", &[]))
                 .status(i18n::t(cx, "splash.waking", &[]))
                 .open(cx)
@@ -118,6 +119,7 @@ fn main() {
                 }),
                 window_min_size: Some(size(px(720.0), px(520.0))),
                 app_id: Some("dev.kai.Kai".into()),
+                icon: Some(app_icon),
                 window_background: material(settings.glass),
                 ..Default::default()
             };

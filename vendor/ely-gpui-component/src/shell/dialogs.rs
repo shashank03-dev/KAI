@@ -1,7 +1,7 @@
 use gpui::{
-    Animation, AnimationExt, App, AppContext, Bounds, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window, WindowBounds, WindowHandle, WindowOptions, div, prelude::*,
-    relative,
+    Animation, AnimationExt, App, AppContext, Bounds, ImageSource, IntoElement, ParentElement,
+    RenderOnce, SharedString, Styled, Window, WindowBounds, WindowHandle, WindowOptions, div, img,
+    prelude::*, relative,
 };
 
 use super::{Hosted, open_hosted};
@@ -12,7 +12,12 @@ use crate::{
     typography::{Caption, CopyableText, ExternalLink, Paragraph, Title},
 };
 
-fn mark(name: &SharedString, icon: Option<IconName>, cx: &App) -> impl IntoElement + use<> {
+fn mark(
+    name: &SharedString,
+    icon: Option<IconName>,
+    image: Option<ImageSource>,
+    cx: &App,
+) -> impl IntoElement + use<> {
     let theme = cx.theme();
     let initial: SharedString = name.chars().take(1).collect::<String>().into();
     div()
@@ -26,9 +31,12 @@ fn mark(name: &SharedString, icon: Option<IconName>, cx: &App) -> impl IntoEleme
         .border_color(theme.colors.border)
         .text_size(theme.text_size(TextSize::Xxl))
         .text_color(theme.colors.fg)
-        .map(|tile| match icon {
-            Some(icon) => tile.child(Icon::new(icon).size(IconSize::Xxl)),
-            None => tile.child(initial),
+        .map(|tile| match image {
+            Some(image) => tile.child(img(image).size(theme.icon_size(IconSize::Xxl))),
+            None => match icon {
+                Some(icon) => tile.child(Icon::new(icon).size(IconSize::Xxl)),
+                None => tile.child(initial),
+            },
         })
 }
 
@@ -93,7 +101,7 @@ impl RenderOnce for AboutDialog {
             .px_8()
             .pt_4()
             .pb_8()
-            .child(mark(&self.name, self.icon, cx))
+            .child(mark(&self.name, self.icon, None, cx))
             .child(div().pt_3().child(Title::new(self.name.clone())))
             .child(CopyableText::new(
                 "about-version",
@@ -129,6 +137,7 @@ impl RenderOnce for AboutDialog {
 pub struct SplashScreen {
     name: SharedString,
     icon: Option<IconName>,
+    icon_image: Option<ImageSource>,
     tagline: Option<SharedString>,
     status: Option<SharedString>,
     progress: Option<f32>,
@@ -139,6 +148,7 @@ impl SplashScreen {
         Self {
             name: name.into(),
             icon: None,
+            icon_image: None,
             tagline: None,
             status: None,
             progress: None,
@@ -147,6 +157,13 @@ impl SplashScreen {
 
     pub fn icon(mut self, icon: IconName) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    /// An app-mark image in place of the Lucide glyph; wins over `icon`
+    /// when both are set.
+    pub fn icon_image(mut self, image: impl Into<ImageSource>) -> Self {
+        self.icon_image = Some(image.into());
         self
     }
 
@@ -216,7 +233,7 @@ impl RenderOnce for SplashScreen {
                     .flex_col()
                     .items_center()
                     .gap_2()
-                    .child(mark(&self.name, self.icon, cx))
+                    .child(mark(&self.name, self.icon, self.icon_image, cx))
                     .child(div().pt_2().child(Title::new(self.name.clone())))
                     .when_some(self.tagline, |block, text| block.child(Caption::new(text)))
                     .with_animation(
