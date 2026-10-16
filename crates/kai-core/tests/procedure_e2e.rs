@@ -167,3 +167,86 @@ async fn off_records_and_replays_nothing() {
     e.run_with("find alpha@x.io", opts).await;
     assert!(store.list().is_empty());
 }
+
+/// Hands whose every click fails with a clear OS-level reason.
+struct Broken;
+#[async_trait::async_trait]
+impl Actuator for Broken {
+    async fn act(&self, _: &Decision, _: &Grounding) -> anyhow::Result<()> {
+        anyhow::bail!("the Save button vanished")
+    }
+    async fn open_app(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn open_url(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn shell(&self, _: &str) -> anyhow::Result<String> {
+        Ok(String::new())
+    }
+}
+
+#[tokio::test]
+async fn a_failed_replay_step_is_recorded_and_explained_to_the_model() {
+    let store = learned().await;
+    let screen = Screen::marks();
+    let model = Counting::new(&[DONE]);
+    let (approver, stop) = (approve_all(), flag());
+    let mut e = engine(&model, &screen, &Broken, &approver, &stop);
+    e.config = Config {
+        procedures: true,
+        tree_only: false,
+        ..Config::default()
+    };
+    let trace = e
+        .run_with(
+            "find beta@y.io",
+            RunOptions {
+                procedures: Some(&store),
+                ..Default::default()
+            },
+        )
+        .await;
+    let failed = &trace.steps[0];
+    assert_eq!(failed.path.as_deref(), Some("error"));
+    assert!(
+        failed
+            .output
+            .as_deref()
+            .unwrap()
+            .contains("Save button vanished")
+    );
+    let first = &model.seen()[0].text;
+    assert!(
+        first.contains("step failed (ERROR: the Save button vanished)"),
+        "{first}"
+    );
+}
+
+#[tokio::test]
+async fn a_replay_stops_at_the_time_limit() {
+    let store = learned().await;
+    let screen = Screen::marks();
+    let hands = Hands::new(&screen);
+    let model = Counting::new(&[DONE]);
+    let (approver, stop) = (approve_all(), flag());
+    let mut e = engine(&model, &screen, &hands, &approver, &stop);
+    e.config = Config {
+        procedures: true,
+        tree_only: false,
+        max_time: std::time::Duration::ZERO,
+        ..Config::default()
+    };
+    let trace = e
+        .run_with(
+            "find beta@y.io",
+            RunOptions {
+                procedures: Some(&store),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert_eq!(trace.outcome, Some(Outcome::TimeLimit));
+    assert!(hands.log().is_empty(), "no replay step after the deadline");
+    assert!(model.seen().is_empty());
+}

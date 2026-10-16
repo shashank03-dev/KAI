@@ -18,9 +18,12 @@ impl Lanes {
     /// The open lane, or a new one.
     pub async fn get(&self, desktop: Arc<DesktopActuator>) -> anyhow::Result<Arc<BrowserLane>> {
         let mut slot = self.0.lock().await;
-        if let Some(lane) = slot.as_ref().filter(|l| l.is_open()) {
+        if let Some(lane) = slot.as_ref().filter(|l| l.is_open() && !l.is_poisoned()) {
             return Ok(lane.clone());
         }
+        // Drop the unusable lane before starting another browser on the same
+        // profile. A cancelled key/click can leave input state uncertain.
+        *slot = None;
         let browser = find_browser().ok_or_else(|| {
             anyhow::anyhow!(
                 "Kai's browser needs Chrome, Chromium, Edge or Brave on this computer \

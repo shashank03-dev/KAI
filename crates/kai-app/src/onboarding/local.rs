@@ -4,12 +4,12 @@
 
 use super::Onboarding;
 use crate::local::{bytes_text, fraction, stage_text};
-use crate::local_api::Fit;
+use crate::local_models::Fit;
 use crate::pages::models_card::{fit_badge, meta};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::{Callout, ErrorView, InlineMessage},
-    motion::{ProgressBar, Spinner},
+    motion::ProgressBar,
     primitives::{IconName, Severity},
     theme::{ActiveTheme, ControlSize, TextSize},
 };
@@ -26,13 +26,10 @@ impl Onboarding {
         let theme = cx.theme();
         let l = self.local.read(cx);
         if l.hardware.is_none() {
-            return div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(Spinner::new("ob-hw"))
-                .child("Looking at this computer's memory and graphics…")
-                .into_any_element();
+            let retry = self.app.clone();
+            return crate::pages::models_card::hardware_probe(l.probe_failed, "ob-hw", move |cx| {
+                let _ = retry.update(cx, |a, cx| a.detect_local(cx));
+            });
         }
         let Some(best) = l.ranked.iter().find(|r| r.fit == Fit::Best) else {
             return Callout::new(Severity::Warning)

@@ -1,6 +1,7 @@
 //! Model backends behind one trait. The harness talks only to [`ModelClient`];
 //! swapping vLLM for Gemini for a mock changes nothing above this line.
 
+mod codex;
 mod failover;
 mod gemini;
 pub mod jev;
@@ -11,6 +12,7 @@ mod openai;
 pub mod stream;
 mod vllm;
 
+pub use codex::CodexClient;
 pub use failover::FailoverClient;
 pub use gemini::GeminiClient;
 pub use jev::{Answer, DecisionClient, JevVerifier, Question};
@@ -73,6 +75,8 @@ pub enum Backend {
     OpenAiNative,
     /// A model running on this computer (`llama-server`, OpenAI-compatible).
     Local,
+    /// A model reached through the Codex CLI and the user's ChatGPT sign-in.
+    Codex,
     Mock,
 }
 
@@ -84,6 +88,7 @@ impl Backend {
             Backend::OpenAi => "OpenAI-compatible (Gateway/OpenAI)",
             Backend::OpenAiNative => "OpenAI computer use (native protocol)",
             Backend::Local => "This computer (local model)",
+            Backend::Codex => "Codex (ChatGPT sign-in)",
             Backend::Mock => "Mock",
         }
     }
@@ -116,6 +121,7 @@ impl ClientError {
             self,
             ClientError::Transport(_)
                 | ClientError::Timeout(_)
+                | ClientError::Status(429, _)
                 | ClientError::Status(500..=599, _)
                 | ClientError::Unavailable(_)
         )

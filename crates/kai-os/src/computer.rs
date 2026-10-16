@@ -7,9 +7,12 @@ pub fn capabilities() -> Capabilities {
     let mut c = Capabilities::all();
     // Pixel deltas (OpenAI's) become notches by OpenAI's own recipe.
     c.scroll_units = vec![ScrollUnit::WheelNotches, ScrollUnit::Pixels];
-    // macOS back/forward buttons have platform-specific behavior; do not
-    // advertise them until the native fixture verifies their semantics.
-    c.buttons = vec![MouseButton::Left, MouseButton::Middle, MouseButton::Right];
+    // macOS has no system meaning for the back/forward mouse buttons (apps
+    // differ); do not advertise them there until a native fixture verifies
+    // their semantics. X11 (buttons 8/9) and Windows (XBUTTON1/2) do.
+    if cfg!(target_os = "macos") {
+        c.buttons = vec![MouseButton::Left, MouseButton::Middle, MouseButton::Right];
+    }
     c
 }
 
@@ -48,14 +51,16 @@ pub async fn act(
     grounding: &Grounding,
     ctx: &ExecutionContext,
 ) -> Result<(), ToolError> {
-    let request = ToolRequest {
+    // The core's request checks (capabilities, buttons, modifiers, session);
+    // what runs below is `action` itself.
+    ToolRequest {
         version: 1,
         id: 0,
         session: space.session,
         timeout_ms: 30_000,
         action: action.clone(),
-    };
-    request.validate(&capabilities(), space)?;
+    }
+    .validate(&capabilities(), space)?;
     ctx.check()?;
     let input = hands
         .input
@@ -145,4 +150,17 @@ pub async fn act(
         }
     };
     result.map_err(|_| ctx.check().err().unwrap_or(ToolError::Failed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn back_and_forward_buttons_are_held_back_only_on_a_mac() {
+        let b = capabilities().buttons;
+        assert!(b.contains(&MouseButton::Left) && b.contains(&MouseButton::Right));
+        let side = b.contains(&MouseButton::Back) && b.contains(&MouseButton::Forward);
+        assert_eq!(side, !cfg!(target_os = "macos"));
+    }
 }

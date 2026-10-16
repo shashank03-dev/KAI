@@ -28,6 +28,10 @@ use std::time::Duration;
 
 /// The protocol version answered when the client names none.
 pub const PROTOCOL: &str = "2025-06-18";
+/// Versions whose tool calls Kai answers the same way. A client asking for
+/// any other version is answered with [`PROTOCOL`], as the spec says, never
+/// told Kai speaks a version it does not know.
+const SUPPORTED: [&str; 3] = ["2024-11-05", "2025-03-26", PROTOCOL];
 /// Longest an OS probe may run.
 const PROBE_LIMIT: Duration = Duration::from_secs(2);
 
@@ -94,6 +98,7 @@ impl<'a> Server<'a> {
                 "protocolVersion": params
                     .get("protocolVersion")
                     .and_then(Value::as_str)
+                    .filter(|v| SUPPORTED.contains(v))
                     .unwrap_or(PROTOCOL),
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "kai", "version": env!("CARGO_PKG_VERSION")},

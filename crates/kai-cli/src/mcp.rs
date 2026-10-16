@@ -66,6 +66,7 @@ pub async fn serve(o: &BackendOpts) -> anyhow::Result<ExitCode> {
     let approver = SkipRisky;
     let runner = model.as_ref().map(|(config, (fast, careful))| {
         Runner(Engine {
+            grounder: None,
             client: fast.as_ref(),
             careful: careful.as_deref(),
             perceptor: &screen,

@@ -45,7 +45,20 @@ impl BrowserLane {
             .and_then(|p| p["value"]["value"].as_str())
             .unwrap_or("")
             .to_string();
-        let (nodes, info) = snapshot::nodes(&ax, &snap, view);
+        // Each same-process iframe's tree is its own read; a frame that went
+        // away in between is left out.
+        let mut trees = vec![ax];
+        for frame in snapshot::frames(&snap) {
+            match self
+                .page("Accessibility.getFullAXTree", json!({"frameId": frame}))
+                .await
+            {
+                Ok(t) => trees.push(t),
+                Err(e) if is_dialog(&e) => return Err(e),
+                Err(e) => log::debug!("browser lane: frame {frame} unreadable ({e})"),
+            }
+        }
+        let (nodes, info) = snapshot::nodes(&snapshot::merged(trees), &snap, view);
         if !tree_url.is_empty() && !info.url.is_empty() && tree_url != info.url {
             anyhow::bail!("the page changed while it was read");
         }

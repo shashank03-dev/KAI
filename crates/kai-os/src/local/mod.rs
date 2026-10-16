@@ -227,6 +227,15 @@ impl LocalManager {
         self.cancel.reset();
         let problems = entry.problems();
         anyhow::ensure!(problems.is_empty(), "{}: {}", entry.id, problems.join("; "));
+        for file in &entry.files {
+            if file.url.starts_with("https://") {
+                anyhow::ensure!(
+                    file.size_bytes.is_some() && file.sha256.is_some(),
+                    "{} has no size or SHA-256; refusing an unverified remote model",
+                    file.url
+                );
+            }
+        }
         std::fs::create_dir_all(&self.root)?;
         let spec = self.runtime_spec()?;
         let need_runtime = !self.runtime_ready(&spec);

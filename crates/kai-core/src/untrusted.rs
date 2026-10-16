@@ -116,7 +116,8 @@ pub fn suspicious_text(text: &str) -> Option<&'static str> {
 /// `ID number`, `API key` or `private key`.
 pub fn sensitive(text: &str) -> Option<&'static str> {
     let t = text.trim();
-    if t.contains("-----BEGIN") && t.contains("PRIVATE KEY") {
+    let upper = t.to_ascii_uppercase();
+    if upper.contains("-----BEGIN") && upper.contains("PRIVATE KEY") {
         return Some("private key");
     }
     let digits: String = t.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -130,7 +131,7 @@ pub fn sensitive(text: &str) -> Option<&'static str> {
         return Some("ID number");
     }
     let compact: String = t.chars().filter(|c| !c.is_whitespace()).collect();
-    if is_iban(&compact) {
+    if is_iban(&compact.to_ascii_uppercase()) {
         return Some("IBAN");
     }
     if t.split_whitespace().any(is_secret_token) {
@@ -270,8 +271,16 @@ fn is_secret_token(w: &str) -> bool {
         "AKIA",
         "AIza",
     ];
-    if PREFIXES.iter().any(|p| w.starts_with(p)) && w.len() >= 16 {
+    let lower = w.to_ascii_lowercase();
+    if PREFIXES
+        .iter()
+        .any(|p| lower.starts_with(&p.to_ascii_lowercase()))
+        && w.len() >= 16
+    {
         return true;
+    }
+    if matches!(w.len(), 40 | 64) && w.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return false;
     }
     w.len() >= 32
         && w.chars()
@@ -339,12 +348,18 @@ mod tests {
         assert_eq!(sensitive("4111 1111 1111 1111"), Some("card number"));
         assert_eq!(sensitive("4111-1111-1111-1112"), None, "fails Luhn");
         assert_eq!(sensitive("DE89 3704 0044 0532 0130 00"), Some("IBAN"));
+        assert_eq!(sensitive("de89 3704 0044 0532 0130 00"), Some("IBAN"));
         assert_eq!(sensitive("123-45-6789"), Some("ID number"));
         assert_eq!(sensitive("sk-proj-abcdefghijklmnop1234"), Some("API key"));
         assert_eq!(
             sensitive("-----BEGIN OPENSSH PRIVATE KEY-----"),
             Some("private key")
         );
+        assert_eq!(
+            sensitive("-----begin openssh private key-----"),
+            Some("private key")
+        );
+        assert_eq!(sensitive("0a3b4c5d6e7f801234567890abcdef1234567890"), None);
     }
 
     #[test]

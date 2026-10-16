@@ -78,6 +78,8 @@ pub enum BackendChoice {
     OpenAi,
     /// A model on this computer (`llama-server`, see `crate::models`).
     Local,
+    /// Through the Codex CLI and the user's ChatGPT sign-in (comparisons).
+    Codex,
     Mock,
 }
 
@@ -88,6 +90,8 @@ pub struct Settings {
     /// Open models on OpenAI's computer-tool contract, in this coordinate
     /// frame (`crate::oai_contract`). Off (`None`) by default.
     pub oai_contract: Option<crate::oai_contract::CoordFrame>,
+    /// Kai's own off-task and sensitive-site checks (`crate::safety_checks`).
+    pub local_safety_checks: bool,
     pub backend: BackendChoice,
     /// e.g. `https://1-2-3-4.sslip.io/v1`
     pub vllm_endpoint: String,
@@ -165,6 +169,7 @@ impl Default for Settings {
         Self {
             computer_tools_v1: false,
             oai_contract: None,
+            local_safety_checks: false,
             backend: BackendChoice::Both,
             vllm_endpoint: String::new(),
             fast_model: MODELS[0].id.to_string(),
@@ -228,18 +233,7 @@ impl Keys {
 impl Settings {
     /// `~/.config/kai` on Linux, `%APPDATA%\Kai` on Windows.
     pub fn dir() -> PathBuf {
-        if cfg!(windows) {
-            std::env::var_os("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_default()
-                .join("Kai")
-        } else {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-                .unwrap_or_default()
-                .join("kai")
-        }
+        dir_from(cfg!(windows), |k| std::env::var_os(k))
     }
 
     /// Where traces live (local only).
@@ -267,7 +261,7 @@ impl Settings {
         match std::fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
                 log::error!(
-                    "settings at {} are unreadable ({e}); using defaults",
+                    "settings at {} are unreadable ({e}); using defaults until the file is repaired",
                     path.display()
                 );
                 Self::default()
@@ -275,15 +269,6 @@ impl Settings {
             Err(_) => Self::default(),
         }
         .with_env()
-    }
-
-    pub fn save(&self) -> anyhow::Result<()> {
-        std::fs::create_dir_all(Self::dir())?;
-        std::fs::write(
-            Self::dir().join("settings.json"),
-            serde_json::to_string_pretty(self)?,
-        )?;
-        Ok(())
     }
 
     /// Environment overrides, for CI and the deploy scripts' `endpoint.env`.
@@ -330,6 +315,9 @@ impl Settings {
         crate::Config {
             computer_tools_v1: self.computer_tools_v1 || self.oai_contract.is_some(),
             oai_contract: self.oai_contract,
+            local_safety_checks: self.local_safety_checks,
+            oai_batch: 1,
+            step_candidates: 1,
             max_steps,
             max_time,
             approval: self.approval,
@@ -347,85 +335,93 @@ impl Settings {
         }
     }
 
+    /// A client for `model` on the chosen backend (the fast and careful
+    /// slots, and a grounding model, are all built here).
+    pub fn client(&self, keys: &Keys, model: &str) -> anyhow::Result<Box<dyn ModelClient>> {
+        let vllm = || -> anyhow::Result<VllmClient> {
+            anyhow::ensure!(
+                !self.vllm_endpoint.is_empty(),
+                "no DigitalOcean endpoint set"
+            );
+            let key = keys
+                .vllm
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no DigitalOcean API key set"))?;
+            Ok(VllmClient::new(&self.vllm_endpoint, key).with_model(model))
+        };
+        let gemini = || -> anyhow::Result<GeminiClient> {
+            let key = keys
+                .gemini
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no Gemini API key set"))?;
+            Ok(GeminiClient::new(key).with_model(model))
+        };
+        let gateway = || -> anyhow::Result<OpenAiClient> {
+            let key = keys
+                .gateway
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no AI Gateway key set (AI_GATEWAY_API_KEY)"))?;
+            Ok(OpenAiClient::gateway(key).with_model(gateway_model_id(model)))
+        };
+        let openai = || -> anyhow::Result<OpenAiClient> {
+            let key = keys
+                .openai
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no OpenAI API key set (OPENAI_API_KEY)"))?;
+            anyhow::ensure!(
+                !model.contains('/') || model.starts_with("openai/"),
+                "model {model} is not an OpenAI model"
+            );
+            Ok(OpenAiClient::openai(key).with_model(model.trim_start_matches("openai/")))
+        };
+        Ok(match self.backend {
+            BackendChoice::Vllm => Box::new(vllm()?),
+            BackendChoice::Gemini => Box::new(gemini()?),
+            BackendChoice::Gateway => Box::new(gateway()?),
+            BackendChoice::OpenAi => Box::new(openai()?),
+            BackendChoice::Local => Box::new(crate::models::local_client(self)?),
+            BackendChoice::Codex => {
+                anyhow::ensure!(!model.is_empty(), "the Codex backend needs --model");
+                Box::new(crate::client::CodexClient::new(model))
+            }
+            BackendChoice::Mock => Box::new(MockClient::always(
+                r#"{"thought":"mock backend","action":"done","risk":"none"}"#,
+            )),
+            BackendChoice::Both => {
+                // Droplet first, then Gemini, then the AI Gateway: each
+                // one that is configured backs up the one before it.
+                let mut chain: Vec<Box<dyn ModelClient>> = Vec::new();
+                let first_err = match vllm() {
+                    Ok(v) => {
+                        chain.push(Box::new(v));
+                        None
+                    }
+                    Err(e) => Some(e),
+                };
+                if let Ok(g) = gemini() {
+                    chain.push(Box::new(g));
+                }
+                if let Ok(g) = gateway() {
+                    chain.push(Box::new(g));
+                }
+                let mut it = chain.into_iter().rev();
+                let Some(mut client) = it.next() else {
+                    let e = first_err.unwrap_or_else(|| anyhow::anyhow!("no backend"));
+                    return Err(e.context(
+                        "set up the DigitalOcean server or a Gemini key (or an AI Gateway key)",
+                    ));
+                };
+                for primary in it {
+                    client = Box::new(FailoverClient::new(primary, Some(client)));
+                }
+                client
+            }
+        })
+    }
+
     /// Build the fast and careful clients for the chosen backend.
     pub fn clients(&self, keys: &Keys) -> anyhow::Result<Clients> {
-        let make = |model: &str| -> anyhow::Result<Box<dyn ModelClient>> {
-            let vllm = || -> anyhow::Result<VllmClient> {
-                anyhow::ensure!(
-                    !self.vllm_endpoint.is_empty(),
-                    "no DigitalOcean endpoint set"
-                );
-                let key = keys
-                    .vllm
-                    .clone()
-                    .ok_or_else(|| anyhow::anyhow!("no DigitalOcean API key set"))?;
-                Ok(VllmClient::new(&self.vllm_endpoint, key).with_model(model))
-            };
-            let gemini = || -> anyhow::Result<GeminiClient> {
-                let key = keys
-                    .gemini
-                    .clone()
-                    .ok_or_else(|| anyhow::anyhow!("no Gemini API key set"))?;
-                Ok(GeminiClient::new(key).with_model(model))
-            };
-            let gateway = || -> anyhow::Result<OpenAiClient> {
-                let key = keys
-                    .gateway
-                    .clone()
-                    .ok_or_else(|| anyhow::anyhow!("no AI Gateway key set (AI_GATEWAY_API_KEY)"))?;
-                Ok(OpenAiClient::gateway(key).with_model(gateway_model_id(model)))
-            };
-            let openai = || -> anyhow::Result<OpenAiClient> {
-                let key = keys
-                    .openai
-                    .clone()
-                    .ok_or_else(|| anyhow::anyhow!("no OpenAI API key set (OPENAI_API_KEY)"))?;
-                anyhow::ensure!(
-                    !model.contains('/') || model.starts_with("openai/"),
-                    "model {model} is not an OpenAI model"
-                );
-                Ok(OpenAiClient::openai(key).with_model(model.trim_start_matches("openai/")))
-            };
-            Ok(match self.backend {
-                BackendChoice::Vllm => Box::new(vllm()?),
-                BackendChoice::Gemini => Box::new(gemini()?),
-                BackendChoice::Gateway => Box::new(gateway()?),
-                BackendChoice::OpenAi => Box::new(openai()?),
-                BackendChoice::Local => Box::new(crate::models::local_client(self)?),
-                BackendChoice::Mock => Box::new(MockClient::always(
-                    r#"{"thought":"mock backend","action":"done","risk":"none"}"#,
-                )),
-                BackendChoice::Both => {
-                    // Droplet first, then Gemini, then the AI Gateway: each
-                    // one that is configured backs up the one before it.
-                    let mut chain: Vec<Box<dyn ModelClient>> = Vec::new();
-                    let first_err = match vllm() {
-                        Ok(v) => {
-                            chain.push(Box::new(v));
-                            None
-                        }
-                        Err(e) => Some(e),
-                    };
-                    if let Ok(g) = gemini() {
-                        chain.push(Box::new(g));
-                    }
-                    if let Ok(g) = gateway() {
-                        chain.push(Box::new(g));
-                    }
-                    let mut it = chain.into_iter().rev();
-                    let Some(mut client) = it.next() else {
-                        let e = first_err.unwrap_or_else(|| anyhow::anyhow!("no backend"));
-                        return Err(e.context(
-                            "set up the DigitalOcean server or a Gemini key (or an AI Gateway key)",
-                        ));
-                    };
-                    for primary in it {
-                        client = Box::new(FailoverClient::new(primary, Some(client)));
-                    }
-                    client
-                }
-            })
-        };
+        let make = |model: &str| self.client(keys, model);
         let fast = make(&self.fast_model)?;
         let careful =
             if self.careful_model != self.fast_model && self.backend != BackendChoice::Local {
@@ -445,6 +441,34 @@ impl Settings {
                 None
             };
         Ok((fast, careful))
+    }
+}
+
+#[path = "settings_store.rs"]
+mod store;
+
+/// The settings folder from the environment. With no home variable at all
+/// (some services and containers) it is an absolute `kai` folder in the
+/// system temp dir, with a warning, never a path relative to wherever the
+/// process happens to start (review CORE-CLI-08).
+fn dir_from(windows: bool, var: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    let set = |k: &str| var(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let (base, name) = if windows {
+        (set("APPDATA"), "Kai")
+    } else {
+        let base = set("XDG_CONFIG_HOME").or_else(|| set("HOME").map(|h| h.join(".config")));
+        (base, "kai")
+    };
+    match base.filter(|b| b.is_absolute()) {
+        Some(b) => b.join(name),
+        None => {
+            let fallback = std::env::temp_dir().join(name);
+            log::warn!(
+                "no home folder in the environment; settings live in {}",
+                fallback.display()
+            );
+            fallback
+        }
     }
 }
 

@@ -34,6 +34,7 @@ pub mod recorder;
 pub mod reply;
 pub mod reply_salvage;
 pub mod risk;
+pub mod safety_checks;
 pub mod schema;
 pub mod settings;
 pub mod shell_ro;
@@ -48,8 +49,8 @@ pub use client::{
 };
 pub use element::{Element, Grounding, Rect, Role};
 pub use engine::{
-    Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Interrupt,
-    NativeFrame, Observation, ObserveTiming, Perceptor, Probe, RunOptions,
+    Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Grounder,
+    Interrupt, NativeFrame, Observation, ObserveTiming, Perceptor, Probe, RunOptions,
 };
 pub use failure::{Category, Failure};
 pub use human::{CheckKind, HumanCheck, HumanHelper, HumanReply, OneTimeCode};

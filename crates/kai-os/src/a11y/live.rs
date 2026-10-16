@@ -4,11 +4,13 @@
 //!
 //! The perceptor and the actuator are separate objects, so the map lives
 //! here: each grounded observation replaces it. A lookup only succeeds when
-//! the element the caller passes (mark number *and* bounds) is exactly the
-//! one recorded, so a stale or foreign grounding never reaches a live object.
+//! the caller acts on the very grounding that was recorded (the layout of
+//! every mark matches) and the element (mark number, role *and* bounds) is
+//! the one recorded, so a stale grounding, or one from another screen lane
+//! in this process, never reaches a live object: it falls back to the mouse.
 
 use super::{NodeRef, RawNode};
-use kai_core::{Action, Decision, Element, Grounding, Role};
+use kai_core::{Action, Decision, Element, Grounding, Rect, Role};
 use std::sync::Mutex;
 
 struct Entry {
@@ -16,7 +18,39 @@ struct Entry {
     node: NodeRef,
 }
 
-static LIVE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+/// The latest grounded observation: its layout key and its live handles.
+struct Live {
+    key: u64,
+    entries: Vec<Entry>,
+}
+
+static LIVE: Mutex<Live> = Mutex::new(Live {
+    key: 0,
+    entries: Vec::new(),
+});
+
+/// A fingerprint of a grounding's layout: each mark's number, role and box.
+/// Names and values are left out on purpose: the engine may blank sensitive
+/// text in the grounding it acts on, and that is still the same screen.
+fn layout_key(g: &Grounding) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |v: u64| {
+        for b in v.to_le_bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    if let Grounding::Marks(els) = g {
+        for e in els {
+            eat(e.mark as u64);
+            eat(e.role as u64);
+            for v in [e.bounds.x, e.bounds.y, e.bounds.w, e.bounds.h] {
+                eat(v.to_bits() as u64);
+            }
+        }
+    }
+    h
+}
 
 /// What to do through the accessibility interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,23 +83,43 @@ pub fn remember(grounding: &Grounding, nodes: &[RawNode], picked: &[usize]) {
         }
     }
     if let Ok(mut live) = LIVE.lock() {
-        *live = entries;
+        *live = Live {
+            key: layout_key(grounding),
+            entries,
+        };
     }
 }
 
-/// Forget every handle (e.g. when the screen is known to have changed).
-pub fn clear() {
-    if let Ok(mut live) = LIVE.lock() {
-        live.clear();
-    }
-}
-
-/// The live object for exactly this element of the latest observation.
-pub fn lookup(el: &Element) -> Option<NodeRef> {
+/// The live object for exactly this element of `g`, when `g` is the latest
+/// grounded observation.
+pub fn lookup(el: &Element, g: &Grounding) -> Option<NodeRef> {
     let live = LIVE.lock().ok()?;
-    live.iter()
+    if live.key != layout_key(g) {
+        return None;
+    }
+    live.entries
+        .iter()
         .find(|e| e.el.mark == el.mark && e.el.bounds == el.bounds && e.el.role == el.role)
         .map(|e| e.node.clone())
+}
+
+/// Pixels an element may have moved since the observation and still be the
+/// one the model saw.
+const MOVED_PX: f32 = 4.0;
+
+/// Whether the element is still where the observation showed it (`now` is
+/// its box read just before acting; `None` when it cannot be read). A
+/// control that moved, or scrolled away, is no longer "what the model saw":
+/// the action falls back to the mouse path, which the engine re-checks.
+pub(super) fn same_place(seen: Rect, now: Option<Rect>) -> bool {
+    let Some(now) = now else {
+        return false;
+    };
+    let near = |a: f32, b: f32| (a - b).abs() <= MOVED_PX;
+    near(seen.x, now.x)
+        && near(seen.y, now.y)
+        && near(seen.x + seen.w, now.x + now.w)
+        && near(seen.y + seen.h, now.y + now.h)
 }
 
 /// The target element and plan for a decision, or `None` when the decision
@@ -177,6 +231,16 @@ mod tests {
     }
 
     #[test]
+    fn an_element_that_moved_is_not_acted_on_blind() {
+        let seen = Rect::new(10.0, 10.0, 50.0, 20.0);
+        assert!(same_place(seen, Some(seen)));
+        assert!(same_place(seen, Some(Rect::new(12.0, 9.0, 49.0, 21.0))));
+        assert!(!same_place(seen, Some(Rect::new(10.0, 300.0, 50.0, 20.0))));
+        assert!(!same_place(seen, Some(Rect::new(10.0, 10.0, 200.0, 20.0))));
+        assert!(!same_place(seen, None));
+    }
+
+    #[test]
     fn resolve_needs_marks_and_a_known_target() {
         let g = Grounding::Marks(vec![el(Role::Button)]);
         assert!(resolve(&dec(CLICK), &g).is_some());
@@ -206,25 +270,47 @@ mod tests {
     }
 
     #[cfg(not(target_os = "windows"))]
-    #[test]
-    fn lookup_matches_mark_and_bounds_only() {
-        let nodes = [RawNode {
-            role: Role::Button,
-            name: "x".into(),
-            bounds: Rect::new(10.0, 10.0, 50.0, 20.0),
+    fn raw(e: &Element) -> RawNode {
+        RawNode {
+            role: e.role,
+            name: e.name.clone(),
+            bounds: e.bounds,
             enabled: true,
             visible: true,
             secure: false,
             focused: false,
             value: None,
             handle: Some(dummy()),
-        }];
-        remember(&Grounding::Marks(vec![el(Role::Button)]), &nodes, &[0]);
-        assert!(lookup(&el(Role::Button)).is_some());
-        let mut moved = el(Role::Button);
+        }
+    }
+
+    /// One test, because the map is process-global and tests run in
+    /// parallel threads.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn lookup_needs_the_recorded_grounding_and_element() {
+        let button = el(Role::Button);
+        let first = Grounding::Marks(vec![button.clone()]);
+        remember(&first, &[raw(&button)], &[0]);
+        assert!(lookup(&button, &first).is_some());
+        let mut moved = button.clone();
         moved.bounds.x += 5.0;
-        assert!(lookup(&moved).is_none());
-        clear();
-        assert!(lookup(&el(Role::Button)).is_none());
+        assert!(lookup(&moved, &first).is_none());
+
+        // Blanked text is still the same screen.
+        let mut blanked = button.clone();
+        blanked.name = "[sensitive data]".into();
+        assert!(lookup(&button, &Grounding::Marks(vec![blanked])).is_some());
+
+        // A newer observation (another lane, or the screen changed) holds
+        // the same button plus more: the older grounding no longer reaches
+        // a live object, even for an identical element.
+        let mut other = el(Role::Link);
+        other.mark = 4;
+        other.bounds.y += 40.0;
+        let newer = Grounding::Marks(vec![button.clone(), other.clone()]);
+        remember(&newer, &[raw(&button), raw(&other)], &[0, 1]);
+        assert!(lookup(&button, &first).is_none());
+        assert!(lookup(&button, &newer).is_some());
     }
 }

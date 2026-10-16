@@ -1,5 +1,5 @@
 //! Idle: Kai's mark, a greeting, the composer as the one raised glass layer,
-//! the keys that matter, and starters drawn from installed skills as cards.
+//! the keys that matter, and starters drawn from enabled skills as cards.
 
 use crate::anim;
 use crate::app::{Conn, KaiApp, Page};
@@ -17,9 +17,10 @@ use gpui::{
     AnyElement, App, BoxShadow, Context, FontWeight, InteractiveElement, IntoElement,
     ParentElement, StatefulInteractiveElement, Styled, Window, div, px,
 };
+use std::collections::BTreeSet;
 
-/// One starter per skill, worded as a task.
-const STARTERS: &[(&str, &str, IconName)] = &[
+/// Example tasks for the built-in skills, shown when the skill is installed.
+const EXAMPLES: &[(&str, &str, IconName)] = &[
     (
         "open-and-search-web",
         "Open bmsce.ac.in and find the IEEE CS page",
@@ -51,6 +52,58 @@ const STARTERS: &[(&str, &str, IconName)] = &[
         IconName::Music,
     ),
 ];
+
+/// At most this many starter cards.
+const MAX_STARTERS: usize = 6;
+
+/// A starter card. An example runs at once; one of your own skills puts its
+/// task into the composer to read and send.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Starter {
+    Example {
+        skill: &'static str,
+        task: &'static str,
+        icon: IconName,
+    },
+    Own {
+        skill: String,
+        task: String,
+    },
+}
+
+/// Your own enabled skills first, then examples for the enabled built-ins.
+pub fn starters(skills: &[kai_core::Skill], disabled: &BTreeSet<String>) -> Vec<Starter> {
+    let on = |s: &&kai_core::Skill| !disabled.contains(&s.front.name);
+    let own = skills
+        .iter()
+        .filter(|s| !s.builtin)
+        .filter(on)
+        .map(|s| Starter::Own {
+            skill: s.front.name.clone(),
+            task: task_of(&s.front.description),
+        });
+    let examples = EXAMPLES
+        .iter()
+        .filter(|(name, ..)| {
+            skills
+                .iter()
+                .filter(on)
+                .any(|s| s.builtin && s.front.name == *name)
+        })
+        .map(|&(skill, task, icon)| Starter::Example { skill, task, icon });
+    own.chain(examples).take(MAX_STARTERS).collect()
+}
+
+/// A skill's description as a task: the part before "Use when …" (how
+/// Save as skill writes it), else the description itself.
+fn task_of(description: &str) -> String {
+    description
+        .split(" Use when")
+        .next()
+        .unwrap_or(description)
+        .trim()
+        .to_string()
+}
 
 /// "just now", "12m ago", "3h ago", "2d ago".
 fn ago(at: jiff::Timestamp) -> String {
@@ -132,11 +185,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
     let hour = jiff::Zoned::now().hour() as u8;
     let g = Glass::of(cx);
 
-    let starters: Vec<(&str, &str, IconName)> = STARTERS
-        .iter()
-        .filter(|(skill, ..)| app.skills.iter().any(|s| s.front.name == *skill))
-        .copied()
-        .collect();
+    let starters = starters(&app.skills, &app.pages.disabled);
 
     let send = cx.entity();
     let model = crate::switcher::switcher("composer-model", app, cx);
@@ -203,60 +252,71 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         hints.push(hint(keys(&stop, cx), "stops Kai anywhere", &g));
     }
 
-    let cards = starters
-        .into_iter()
-        .enumerate()
-        .map(|(ix, (skill, task, icon))| {
-            let pick = cx.entity();
-            let (hover, strong) = (g.card_hover, g.line_strong);
-            let card = div()
-                .id(("starter", ix))
-                .p(px(14.))
-                .flex()
-                .items_center()
-                .gap_3()
-                .cursor_pointer()
-                .bg(g.card)
-                .border_1()
-                .border_color(g.line)
-                .rounded(px(ui::R_MD))
-                .shadow(vec![g.sheen_shadow()])
-                .hover(move |s| s.bg(hover).border_color(strong))
-                .on_click(move |_, window, cx| {
-                    pick.update(cx, |a, cx| a.start_run(Some(task.to_string()), window, cx))
+    let has_starters = !starters.is_empty();
+    let cards = starters.into_iter().enumerate().map(|(ix, starter)| {
+        let (skill, task, icon) = match &starter {
+            Starter::Example { skill, task, icon } => (skill.to_string(), task.to_string(), *icon),
+            Starter::Own { skill, task } => (skill.clone(), task.clone(), IconName::Puzzle),
+        };
+        let pick = cx.entity();
+        let (hover, strong) = (g.card_hover, g.line_strong);
+        let card = div()
+            .id(("starter", ix))
+            .p(px(14.))
+            .flex()
+            .items_center()
+            .gap_3()
+            .cursor_pointer()
+            .bg(g.card)
+            .border_1()
+            .border_color(g.line)
+            .rounded(px(ui::R_MD))
+            .shadow(vec![g.sheen_shadow()])
+            .hover(move |s| s.bg(hover).border_color(strong))
+            .on_click(move |_, window, cx| {
+                pick.update(cx, |a, cx| match &starter {
+                    Starter::Example { task, .. } => {
+                        a.start_run(Some(task.to_string()), window, cx)
+                    }
+                    Starter::Own { task, .. } => {
+                        let task = task.clone();
+                        a.draft.update(cx, |d, cx| d.set_text(task, cx));
+                        cx.notify();
+                    }
                 })
-                .child(
-                    div()
-                        .size(px(34.))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(R_SM))
-                        .bg(g.raised)
-                        .border_1()
-                        .border_color(g.line)
-                        .child(Icon::new(icon).size(IconSize::Sm).color(g.dim)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(3.))
-                        .child(
-                            div()
-                                .text_size(px(13.5))
-                                .text_color(g.text)
-                                .line_clamp(2)
-                                .child(task),
-                        )
-                        .child(ui::mono(skill, g.faint, cx).text_size(px(11.))),
-                )
-                .child(div().text_color(g.faint).child("→"));
-            anim::enter(card, ("starter-in", ix), 6 + ix)
-        });
+            })
+            .child(
+                div()
+                    .size(px(34.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(R_SM))
+                    .bg(g.raised)
+                    .border_1()
+                    .border_color(g.line)
+                    .child(Icon::new(icon).size(IconSize::Sm).color(g.dim)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(
+                        div()
+                            .text_size(px(13.5))
+                            .text_color(g.text)
+                            .line_clamp(2)
+                            .child(task),
+                    )
+                    .child(ui::mono(skill, g.faint, cx).text_size(px(11.))),
+            )
+            .child(div().text_color(g.faint).child("→"));
+        anim::enter(card, ("starter-in", ix), 6 + ix)
+    });
 
     // Raycast-style recents: the last few distinct tasks, one click back into
     // the composer to edit and run again.
@@ -377,7 +437,9 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
             4,
         ))
         .child(div().h(px(18.)))
-        .child(
+        // No heading over an empty grid: with no skills on, the section
+        // is left out.
+        .children(has_starters.then(|| {
             div()
                 .w_full()
                 .flex()
@@ -391,8 +453,8 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                         .grid_cols(2)
                         .gap(px(10.))
                         .children(cards),
-                ),
-        )
+                )
+        }))
         .children(recent);
 
     div()
@@ -418,3 +480,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
             ),
         )
 }
+
+#[cfg(test)]
+#[path = "home_tests.rs"]
+mod tests;

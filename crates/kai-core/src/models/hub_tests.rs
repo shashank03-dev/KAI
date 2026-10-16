@@ -40,6 +40,16 @@ fn pull(repo: &str, files: &[HubFile]) -> anyhow::Result<super::ModelEntry> {
 }
 
 #[test]
+fn pull_refuses_files_without_verified_size_and_hash() {
+    let mut files = files_from_tree(&holo4_tree());
+    files[0].sha256 = None;
+    assert!(pull("Hcompany/Holo4-35B-A3B-GGUF", &files).is_err());
+    let mut files = files_from_tree(&holo4_tree());
+    files[1].size = None;
+    assert!(pull("Hcompany/Holo4-35B-A3B-GGUF", &files).is_err());
+}
+
+#[test]
 fn parses_repo_references() {
     let r = parse_ref("hf:Hcompany/Holo4-35B-A3B-GGUF:q5_k_m").unwrap();
     assert_eq!(r.repo, "Hcompany/Holo4-35B-A3B-GGUF");

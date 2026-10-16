@@ -154,6 +154,9 @@ impl Engine<'_> {
             if r.step >= self.config.max_steps || r.decider.is_none() {
                 return None;
             }
+            if r.out_of_time() {
+                return Some(Outcome::TimeLimit);
+            }
             if self.drain_steering(r, r.step) {
                 stats(r).escalations += 1;
                 return None;
@@ -278,11 +281,9 @@ impl Engine<'_> {
             let (output, path) = match acted {
                 Ok(x) => x,
                 Err(e) => {
-                    let _ = e;
-                    let e = "action failed";
-                    log::error!("executor act failed at step {step}");
+                    log::error!("executor act failed at step {step}: {e:#}");
                     r.failure_streak += 1;
-                    (Some(format!("ERROR: {e}")), "error")
+                    (Some(super::act::act_error(r, &e)), "error")
                 }
             };
             rec.timings.act_ms = t_act.elapsed().as_millis() as u64;

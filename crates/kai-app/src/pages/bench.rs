@@ -9,7 +9,7 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     charts::{BarChart, Series},
     data_display::{Statistic, Tone},
-    feedback::{Callout, EmptyState, Toast},
+    feedback::{Callout, EmptyState, InlineMessage, Toast},
     forms::Choice,
     layout::ScrollArea,
     motion::ProgressBar,
@@ -156,11 +156,25 @@ pub fn load() -> Vec<Results> {
     all
 }
 
+/// The `kai` command-line tool next to the app, which runs benchmarks.
+pub fn cli() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let cli = exe.parent()?.join(cli_name(cfg!(windows)));
+    cli.is_file().then_some(cli)
+}
+
+fn cli_name(windows: bool) -> &'static str {
+    if windows { "kai.exe" } else { "kai" }
+}
+
 fn run_bench(app: &mut KaiApp, cx: &mut Context<KaiApp>) {
-    let Some(exe) = std::env::current_exe().ok().and_then(|p| {
-        p.parent()
-            .map(|d| d.join(if cfg!(windows) { "kai.exe" } else { "kai" }))
-    }) else {
+    let Some(exe) = app.pages.bench_cli.clone() else {
+        app.toast(
+            Toast::new("Benchmark tool not found")
+                .body(NO_CLI)
+                .severity(Severity::Warning),
+            cx,
+        );
         return;
     };
     app.pages.bench_running = true;
@@ -315,14 +329,25 @@ fn chart(results: &[Results]) -> Option<AnyElement> {
     Some(div().h_64().child(chart).into_any_element())
 }
 
+/// Why the run button is off, and how to measure a real backend instead.
+const NO_CLI: &str = "The `kai` tool isn't next to the app. Run `kai bench --backend <name>` in a terminal; results show here.";
+
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
     let theme = cx.theme();
     let runner = cx.entity();
-    let run = Button::new("bench-run", "Run benchmark (mock)")
+    // The app only runs the offline mock suite (no model, no cost); real
+    // backends are measured with `kai bench`, which needs their keys.
+    let run = Button::new("bench-run", "Run mock benchmark")
         .variant(ButtonVariant::Primary)
         .icon(IconName::Play)
         .loading(app.pages.bench_running)
+        .disabled(app.pages.bench_cli.is_none())
         .on_click(move |_, _, cx| runner.update(cx, run_bench));
+    let no_cli = app
+        .pages
+        .bench_cli
+        .is_none()
+        .then(|| InlineMessage::new(Severity::Info, NO_CLI));
     let results = &app.pages.bench;
     if results.is_empty() {
         let content = ui::page(
@@ -425,6 +450,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                             .bench_running
                             .then(|| ProgressBar::indeterminate("bench-progress")),
                     )
+                    .children(no_cli)
                     .child(overview(results))
                     .child(
                         div()
@@ -440,45 +466,5 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_the_current_format() {
-        let r = parse(
-            "2026-10-09-replay.json",
-            r#"{"date":"2026-10-09","backend":"replay","os":"linux","note":"n",
-               "tasks":[{"id":"a","title":"A","outcome":"success","pass":true,"judged_by":"check",
-                         "steps":2,"seconds":0.47,"step_p50_ms":64,"step_p95_ms":64}],
-               "success_rate":1.0,"step_p50_ms":64,"step_p95_ms":66,"total_seconds":3.5}"#,
-        )
-        .unwrap();
-        assert_eq!(r.backend, "replay");
-        assert_eq!(r.step_p95_ms, Some(66.0));
-        assert_eq!(r.tasks[0].pass, Some(true));
-    }
-
-    #[test]
-    fn missing_numbers_stay_missing() {
-        let r = parse(
-            "x.json",
-            r#"{"backend":"gateway","model":"google/gemma-4-26b-a4b-it",
-               "rows":[{"task":"t1","outcome":"failed"},{"id":"t2","seconds":null}]}"#,
-        )
-        .unwrap();
-        assert_eq!(r.name(), "gateway · google/gemma-4-26b-a4b-it");
-        assert_eq!(r.success_rate, None);
-        assert_eq!(r.tasks.len(), 2);
-        assert_eq!(r.tasks[0].pass, Some(false));
-        assert_eq!(r.tasks[1].seconds, None);
-        assert_eq!(r.tasks[1].pass, None);
-    }
-
-    #[test]
-    fn junk_is_skipped() {
-        assert!(parse("a.json", "[1,2]").is_none());
-        assert!(parse("a.json", "not json").is_none());
-        let r = parse("b.json", "{}").unwrap();
-        assert_eq!(r.backend, "b.json");
-    }
-}
+#[path = "bench_tests.rs"]
+mod tests;

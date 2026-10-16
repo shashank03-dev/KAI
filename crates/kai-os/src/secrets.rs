@@ -1,5 +1,6 @@
-//! API keys in the OS keychain (Windows Credential Manager, Secret Service on
-//! Linux). Environment variables win, for CI and the deploy scripts.
+//! API keys in the OS keychain (the macOS Keychain, Windows Credential
+//! Manager, Secret Service on Linux with the kernel keyring as its cache).
+//! Environment variables win, for CI and the deploy scripts.
 
 use kai_core::settings::Keys;
 
@@ -18,19 +19,48 @@ fn env_for(name: &str) -> &'static str {
     }
 }
 
+/// What the keychain holds for a key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stored {
+    Key(String),
+    /// Nothing stored (or an empty value).
+    Missing,
+    /// The keychain could not be read (locked, access denied after a
+    /// rebuild changed the app's signature, no keychain service): the key
+    /// may well be there. The text says why, for the person.
+    Unreadable(String),
+}
+
 pub fn get(name: &str) -> Option<String> {
+    match lookup(name) {
+        Stored::Key(v) => Some(v),
+        Stored::Missing => None,
+        Stored::Unreadable(why) => {
+            log::error!("keychain read for {name} failed: {why}");
+            None
+        }
+    }
+}
+
+/// Like [`get`], but tells "not stored" from "could not read the keychain",
+/// so the app can say which instead of asking for the key again.
+pub fn lookup(name: &str) -> Stored {
     if let Ok(v) = std::env::var(env_for(name))
         && !v.is_empty()
     {
-        return Some(v);
+        return Stored::Key(v);
     }
-    match keyring::Entry::new(SERVICE, name).and_then(|e| e.get_password()) {
-        Ok(v) if !v.is_empty() => Some(v),
-        Ok(_) | Err(keyring::Error::NoEntry) => None,
-        Err(e) => {
-            log::error!("keychain read for {name} failed: {e}");
-            None
-        }
+    stored(keyring::Entry::new(SERVICE, name).and_then(|e| e.get_password()))
+}
+
+fn stored(read: keyring::Result<String>) -> Stored {
+    match read {
+        Ok(v) if !v.is_empty() => Stored::Key(v),
+        Ok(_) | Err(keyring::Error::NoEntry) => Stored::Missing,
+        Err(e) => Stored::Unreadable(format!(
+            "Kai could not read your keychain ({e}); it may be locked or Kai may need \
+             permission again: unlock it, or store the key again"
+        )),
     }
 }
 
@@ -52,5 +82,19 @@ pub fn keys() -> Keys {
         gemini: get(GEMINI),
         gateway: get(GATEWAY),
         openai: get(OPENAI),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unreadable_keychain_is_not_reported_as_no_key() {
+        assert_eq!(stored(Ok("k".into())), Stored::Key("k".into()));
+        assert_eq!(stored(Ok(String::new())), Stored::Missing);
+        assert_eq!(stored(Err(keyring::Error::NoEntry)), Stored::Missing);
+        let locked = keyring::Error::NoStorageAccess("locked".into());
+        assert!(matches!(stored(Err(locked)), Stored::Unreadable(why) if why.contains("locked")));
     }
 }

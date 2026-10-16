@@ -268,6 +268,14 @@ fn scroll_keys_and_unsupported() {
         map_action(&json!({"type":"type","text":5}), (1, 1), s),
         Mapped::Ask(_)
     ));
+    // Fields that fail validation (no text to type) are refused too.
+    assert!(matches!(
+        map_action(&json!({"type":"type"}), (1, 1), s),
+        Mapped::Ask(_)
+    ));
+    // Back and forward buttons stay unsupported.
+    let back = json!({"type":"click","button":"back","x":5,"y":5});
+    assert!(matches!(map_action(&back, (100, 100), s), Mapped::Ask(_)));
 }
 
 #[test]

@@ -138,3 +138,17 @@ by a PID computed at run time (`kill $(cat pidfile)`).
 - Screenshots sent to the model, and the frames saved when recording is on,
   show the screen as it is: a field that displays a typed card number shows
   it there.
+
+## Settings durability (2026-10-16 design note)
+
+The review found that an interrupted in-place write could truncate
+`settings.json`, after which a default settings object could overwrite the
+damaged file. Save a complete temporary file in the same directory, sync it,
+then rename it over the old one. Refuse to save while an existing file is
+unreadable, so its contents remain available for repair. Keep storage code in
+`settings_store.rs` to preserve the repository's 500-line file limit. An
+in-place write was rejected because it destroys the only copy on failure;
+silently backing up and replacing a corrupt file was rejected because it
+hides the problem. The focused test writes valid settings, corrupts the file,
+then proves the next save refuses to replace it. The app already shows a
+settings-save error toast, so this failure reaches the user.

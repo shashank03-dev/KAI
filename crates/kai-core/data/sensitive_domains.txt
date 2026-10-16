@@ -1,0 +1,40 @@
+# Sites where Kai asks before acting, even when the task names them
+# (local `sensitive_domain` checks, docs/RESEARCH_2026_10_OPENAI_PARITY.md §5f).
+# One registrable domain per line. Override: <config dir>/sensitive_domains.txt.
+# Webmail
+mail.google.com
+outlook.live.com
+outlook.office.com
+mail.yahoo.com
+proton.me
+icloud.com
+# Payments and banking
+paypal.com
+stripe.com
+wise.com
+revolut.com
+chase.com
+bankofamerica.com
+wellsfargo.com
+hsbc.com
+icicibank.com
+hdfcbank.com
+sbi.co.in
+paytm.com
+# Password managers
+1password.com
+bitwarden.com
+lastpass.com
+# Cloud consoles and code hosting settings
+console.aws.amazon.com
+portal.azure.com
+console.cloud.google.com
+cloud.digitalocean.com
+# Government identity and tax
+irs.gov
+gov.uk
+login.gov
+uidai.gov.in
+incometax.gov.in
+# Health
+mychart.org

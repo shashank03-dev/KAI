@@ -132,6 +132,7 @@ fn engine<'a>(
     stop: &'a dyn Interrupt,
 ) -> Engine<'a> {
     Engine {
+        grounder: None,
         client,
         careful: None,
         perceptor: screen,

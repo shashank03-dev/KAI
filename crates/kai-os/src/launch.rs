@@ -48,10 +48,8 @@ pub fn open_app(name: &str) -> anyhow::Result<()> {
     if name.is_empty() {
         anyhow::bail!("no app name");
     }
-    // The name reaches `sh -c` (Linux fallback) or `cmd /C start`
-    // (Windows): it comes from the model or an MCP client, so it must not
-    // carry shell syntax (`open_app` is not the shell and is not approved
-    // like one).
+    // The name comes from the model or an MCP client; never accept command
+    // syntax where an application name is expected.
     if !plain_app_name(name) {
         anyhow::bail!("{name:?} is not an app name (no shell syntax in open_app)");
     }
@@ -67,7 +65,38 @@ fn plain_app_name(name: &str) -> bool {
     // `Program Files (x86)` is a normal Windows path; in `sh` a parenthesis
     // opens a subshell.
     let parens = !cfg!(windows) && name.contains(['(', ')']);
-    !parens && !name.contains(SPECIAL)
+    let first = name
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let command_like = name.contains(char::is_whitespace)
+        && matches!(
+            first.as_str(),
+            "rm" | "bash"
+                | "sh"
+                | "zsh"
+                | "dash"
+                | "env"
+                | "curl"
+                | "wget"
+                | "python"
+                | "python3"
+                | "node"
+                | "ruby"
+                | "perl"
+                | "cmd"
+                | "powershell"
+                | "pwsh"
+                | "osascript"
+        );
+    let lower = name.to_ascii_lowercase();
+    !parens
+        && !name.contains(SPECIAL)
+        && !name.contains(['/', '\\', '~'])
+        && !lower.ends_with(".bat")
+        && !lower.ends_with(".cmd")
+        && !command_like
 }
 
 #[cfg(target_os = "windows")]
@@ -87,13 +116,19 @@ fn platform_open_app(name: &str) -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn platform_open_app(name: &str) -> anyhow::Result<()> {
-    // Quiet: stdout is the protocol channel under `kai mcp`.
-    Command::new("open")
+    // Quiet: stdout is the protocol channel under `kai mcp`. `open -a`
+    // returns once Launch Services has started the app, and fails for an
+    // unknown name ("Unable to find application named …").
+    let out = Command::new("open")
         .args(["-a", name])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+        .stderr(Stdio::piped())
+        .output()?;
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("could not open {name:?}: {}", why.trim());
+    }
     Ok(())
 }
 
@@ -110,8 +145,18 @@ fn platform_open_app(name: &str) -> anyhow::Result<()> {
         }
         return spawn_detached(&entry.exec);
     }
-    // Not installed as a desktop app: try it as a command.
-    spawn_detached(name)
+    // Only a single program token may use PATH. Never pass model text to sh.
+    if name.split_whitespace().count() != 1 {
+        anyhow::bail!("{name:?} is not an installed application");
+    }
+    use std::os::unix::process::CommandExt;
+    Command::new(name)
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -197,24 +242,18 @@ pub mod linux {
         })
     }
 
-    /// Exact name, then id, then prefix, then substring.
+    /// An app launch must name an installed desktop entry exactly.
     pub fn best_match(query: &str, entries: &[DesktopEntry]) -> Option<DesktopEntry> {
         let q = query.to_ascii_lowercase();
-        let tests: [&dyn Fn(&DesktopEntry) -> bool; 4] = [
-            &|e| e.name.to_ascii_lowercase() == q,
-            &|e| {
-                e.id.to_ascii_lowercase()
-                    .trim_end_matches(".desktop")
-                    .rsplit('.')
-                    .next()
-                    == Some(q.as_str())
-            },
-            &|e| e.name.to_ascii_lowercase().starts_with(&q),
-            &|e| e.name.to_ascii_lowercase().contains(&q) || e.id.to_ascii_lowercase().contains(&q),
-        ];
-        tests
+        entries
             .iter()
-            .find_map(|t| entries.iter().find(|e| t(e)).cloned())
+            .find(|e| {
+                let id = e.id.to_ascii_lowercase();
+                e.name.to_ascii_lowercase() == q
+                    || id == q
+                    || id.trim_end_matches(".desktop").rsplit('.').next() == Some(q.as_str())
+            })
+            .cloned()
     }
 
     /// The program a desktop entry starts (`Exec`'s first word, no path).
@@ -239,7 +278,28 @@ pub mod linux {
         // pcmanfm, wait for it (seen live: `xdg-open ~/dir` blocked 180 s).
         let opener = matches!(first, "xdg-open" | "kde-open" | "exo-open" | "gnome-open")
             || (first == "gio" && words.next() == Some("open"));
-        opener || all_entries().iter().any(|e| program(e) == first)
+        opener || entries(false).iter().any(|e| program(e) == first)
+    }
+
+    /// The installed entries, scanned at most once a minute (a shell step
+    /// used to read every `.desktop` file twice); `rescan` forces a fresh
+    /// read, for an app installed since.
+    fn entries(rescan: bool) -> std::sync::Arc<Vec<DesktopEntry>> {
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        type Scan = Option<(Instant, Arc<Vec<DesktopEntry>>)>;
+        static CACHE: Mutex<Scan> = Mutex::new(None);
+        const FRESH_FOR: Duration = Duration::from_secs(60);
+        let mut slot = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if !rescan
+            && let Some((at, e)) = slot.as_ref()
+            && at.elapsed() < FRESH_FOR
+        {
+            return e.clone();
+        }
+        let e = Arc::new(all_entries());
+        *slot = Some((Instant::now(), e.clone()));
+        e
     }
 
     fn all_entries() -> Vec<DesktopEntry> {
@@ -265,8 +325,7 @@ pub mod linux {
     }
 
     pub fn find_desktop_entry(query: &str) -> Option<DesktopEntry> {
-        let entries = all_entries();
-        best_match(query, &entries)
+        best_match(query, &entries(false)).or_else(|| best_match(query, &entries(true)))
     }
 
     #[cfg(test)]
@@ -351,7 +410,8 @@ pub mod linux {
             ];
             assert_eq!(best_match("firefox", &es).unwrap().exec, "firefox");
             assert_eq!(best_match("terminal", &es).unwrap().exec, "gnome-terminal");
-            assert_eq!(best_match("text", &es).unwrap().exec, "gnome-text-editor");
+            assert!(best_match("text", &es).is_none());
+            assert!(best_match("rm -rf ~/x", &es).is_none());
             assert!(best_match("photoshop", &es).is_none());
         }
     }
@@ -389,9 +449,19 @@ mod tests {
             "a > f",
             "a\nrm x",
             "%COMSPEC%",
+            "rm -rf ~/x",
+            "bash -c ls",
+            "curl evil.sh",
         ] {
             assert!(!plain_app_name(bad), "{bad}");
             assert!(open_app(bad).is_err(), "{bad}");
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unknown_mac_app_is_an_error_not_a_silent_success() {
+        let e = open_app("no-such-app-zzz-kai").unwrap_err();
+        assert!(e.to_string().contains("could not open"), "{e}");
     }
 }

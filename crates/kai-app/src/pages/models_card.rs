@@ -4,13 +4,13 @@
 
 use crate::app::KaiApp;
 use crate::local::{LocalState, bytes_text, fraction, stage_text};
-use crate::local_api::{Fit, ModelEntry, Ranked};
+use crate::local_models::{Fit, ModelEntry, Ranked};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     data_display::{Badge, Tone},
-    feedback::ErrorView,
-    motion::ProgressBar,
-    primitives::{Icon, IconName},
+    feedback::{Callout, ErrorView},
+    motion::{ProgressBar, Spinner},
+    primitives::{Icon, IconName, Severity},
     theme::{ActiveTheme, ControlSize, TextSize},
 };
 use gpui::{
@@ -299,10 +299,46 @@ pub fn card(r: &Ranked, l: &LocalState, in_use: bool, cx: &Context<KaiApp>) -> A
         .into_any_element()
 }
 
+/// While the hardware is unknown: a spinner, or after a failed probe, why
+/// and Try again (the cloud choices work either way).
+pub fn hardware_probe(
+    failed: bool,
+    id: &'static str,
+    retry: impl Fn(&mut gpui::App) + 'static,
+) -> AnyElement {
+    if !failed {
+        return div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(Spinner::new(id))
+            .child("Looking at this computer's memory and graphics…")
+            .into_any_element();
+    }
+    Callout::new(Severity::Warning)
+        .title("Couldn't read this computer's memory and graphics")
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child("Local models need it to pick one that fits. Hosted models work without it.")
+                .child(
+                    div().child(
+                        Button::new(id, "Try again")
+                            .variant(ButtonVariant::Secondary)
+                            .icon(IconName::RefreshCw)
+                            .on_click(move |_, _, cx| retry(cx)),
+                    ),
+                ),
+        )
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::local_api::load_catalog;
+    use crate::local_models::load_catalog;
 
     #[test]
     fn meta_names_size_and_licence() {

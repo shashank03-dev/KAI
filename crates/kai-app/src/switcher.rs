@@ -31,6 +31,7 @@ pub fn backend_key(b: BackendChoice) -> &'static str {
         BackendChoice::Gateway => "gateway",
         BackendChoice::OpenAi => "openai",
         BackendChoice::Local => "local",
+        BackendChoice::Codex => "codex",
         BackendChoice::Mock => "mock",
     }
 }

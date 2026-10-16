@@ -61,13 +61,13 @@ Each case has a test against a live headless Chromium
 
 | Case | What goes wrong otherwise | What the lane does |
 | --- | --- | --- |
-| `alert` / `confirm` / `prompt` | The page freezes: screenshot, tree reads and script calls all hang until the dialog is answered (measured: the click's own release event never returns) | Every protocol call on a page with an open dialog returns at once (`DialogOpen`). The model sees the dialog as marks: `OK (page dialog: "<message>")`, `Cancel`, and an `Answer` field for `prompt()`. The message is in the button's name, so the risk words apply (answering "Delete all files?" is high risk whatever the model says). Enter and Esc answer it; anything else is refused with the reason. A click that opened a dialog counts as done. |
+| `alert` / `confirm` / `prompt` | The page freezes: screenshot, tree reads and script calls all hang until the dialog is answered (measured: the click's own release event never returns) | Every protocol call on a page with an open dialog returns at once (`DialogOpen`). The model sees the dialog as marks: `OK (page dialog: "<message>")`, `Cancel`, and an `Answer` field for `prompt()`. The full message is checked for risk, including text beyond the short mark label. Enter cannot accept a high-risk dialog; click its OK mark for approval. A click that opened a dialog counts as done. |
 | Leaving a page with unsaved changes (`beforeunload`) | Navigation silently waits | `Leave page and discard changes` (high risk: "discard") or `Stay on page`. |
 | Stale dialog marks | Clicking an old `OK` mark after the dialog closed would click the page underneath | Refused: "that page dialog is already closed". |
 | Links with `target=_blank`, `window.open` | Kai keeps looking at the old tab | The tab the page opened becomes the working tab; if the working tab closes, the newest remaining one takes over. |
 | Native `<select>` | Its popup is drawn by the browser, outside the page: invisible to the screenshot and the tree | `type` into the dropdown chooses an option by label (exact, prefix, then contains) and fires `input`/`change`. A miss lists the options; a disabled option is refused. The Enter the engine sends after typing into a dropdown is skipped. |
 | `<input type="file">` | A native file dialog blocks the browser | File pickers are intercepted; the click reports "that opened a file picker … ask the user". |
-| Downloads | A headless browser refuses them | Downloads go to the user's Downloads folder (`XDG_DOWNLOAD_DIR` or `~/Downloads`). |
+| Downloads | A page can start a download without the model or user choosing a destination | Browser downloads are denied; the attempted filename is reported when Chromium emits its download event. Save the file manually until an approved delivery flow exists. |
 | A crashed page | Every call fails | The page is reloaded once. |
 | The browser is closed or killed | Calls wait for their timeout | "Kai's browser was closed" at once. |
 | A second Kai browser on the same profile | Chromium hands over to the first and exits; the pipe just closes | "the browser exited at start … is another Kai browser already open with the profile …?" |
@@ -148,9 +148,9 @@ step, call and token reductions hold on every task. Each lane failure in
 earlier rounds became a fix: dropdowns open as option marks, typing
 replaces a field's value, and two skill problems that hit both paths.
 
-Run it yourself: `kai bench --backend gemini --model gemma-4-26b-a4b-it
---browser --headless --only fill-form --only web-form-submit --only
-local-price-lookup --only download-file --yes`.
+The historical benchmark included `download-file`; it now requires a
+manual save because browser downloads are blocked. Re-measure the suite
+before comparing results across this change.
 
 ## Not built yet
 

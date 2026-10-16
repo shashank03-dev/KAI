@@ -6,9 +6,9 @@
 
 use crate::AgentHandle;
 use crate::app::KaiApp;
-use crate::local_api::{
-    HardwareSummary, LocalManager, LocalServer, ModelEntry, Progress, Ranked, detect_hardware,
-    load_catalog, local_root, rank,
+use crate::local_models::{
+    HardwareSummary, LocalManager, LocalServer, ModelEntry, Progress, Ranked, catalog_label,
+    detect_hardware, load_catalog, local_root, rank, reload_catalog,
 };
 use futures::StreamExt;
 use futures::channel::{mpsc, oneshot};
@@ -60,6 +60,8 @@ pub struct Failure {
 pub struct LocalState {
     pub manager: Arc<LocalManager>,
     pub hardware: Option<HardwareSummary>,
+    /// The hardware probe ended without an answer; offer Try again.
+    pub probe_failed: bool,
     pub ranked: Vec<Ranked>,
     pub installed: Vec<String>,
     /// The running server and the model it serves.
@@ -87,6 +89,7 @@ impl LocalState {
         Self {
             manager,
             hardware: None,
+            probe_failed: false,
             ranked: Vec::new(),
             installed,
             server,
@@ -104,8 +107,9 @@ impl LocalState {
 
     /// Re-read the catalog (a model was pulled) and rank it again.
     pub fn refresh_catalog(&mut self) {
+        let catalog = reload_catalog();
         if let Some(hw) = &self.hardware {
-            self.ranked = rank(&load_catalog(), hw);
+            self.ranked = rank(&catalog, hw);
         }
     }
 
@@ -117,13 +121,7 @@ impl LocalState {
     pub fn label(&self, id: &str) -> String {
         self.entry(id)
             .map(|e| e.label.clone())
-            .or_else(|| {
-                load_catalog()
-                    .models
-                    .into_iter()
-                    .find(|e| e.id == id)
-                    .map(|e| e.label)
-            })
+            .or_else(|| catalog_label(id))
             .unwrap_or_else(|| id.to_string())
     }
 
@@ -206,13 +204,17 @@ impl KaiApp {
                 let _ = tx.send(detect_hardware());
             });
         let local = self.local.clone();
+        local.update(cx, |l, _| l.probe_failed = false);
         cx.spawn(async move |_, cx| {
-            if let Ok(hw) = rx.await {
-                local.update(cx, |l, cx| {
-                    l.set_hardware(hw);
-                    cx.notify();
-                });
-            }
+            let hw = rx.await;
+            local.update(cx, |l, cx| {
+                match hw {
+                    Ok(hw) => l.set_hardware(hw),
+                    // The probe panicked: say so instead of spinning forever.
+                    Err(_) => l.probe_failed = true,
+                }
+                cx.notify();
+            });
         })
         .detach();
     }

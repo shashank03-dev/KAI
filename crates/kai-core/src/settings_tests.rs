@@ -21,6 +21,32 @@ fn unknown_fields_and_missing_fields_load() {
 }
 
 #[test]
+fn settings_save_preserves_an_unreadable_existing_file() {
+    let name = format!(
+        "kai-settings-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(name);
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("settings.json");
+    let s = Settings {
+        max_steps: 17,
+        ..Default::default()
+    };
+    s.save_at(&path).unwrap();
+    let saved: Settings = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved.max_steps, 17);
+    std::fs::write(&path, "{truncated").unwrap();
+    assert!(s.save_at(&path).is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{truncated");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn both_with_only_gemini_uses_gemini() {
     let s = Settings::default();
     let (fast, careful) = s
@@ -186,4 +212,18 @@ fn typed_keys_win_and_stored_keys_fill_the_rest() {
     assert_eq!(k.gemini.as_deref(), Some("typed"));
     assert_eq!(k.openai.as_deref(), Some("stored-openai"));
     assert_eq!(k.vllm, None);
+}
+
+#[test]
+fn the_settings_folder_is_never_relative() {
+    let none = |_: &str| None;
+    assert!(dir_from(false, none).is_absolute());
+    assert!(dir_from(true, none).is_absolute());
+    // An empty or relative variable counts as unset.
+    let rel = |k: &str| (k == "HOME").then(|| std::ffi::OsString::from("relative"));
+    assert!(dir_from(false, rel).is_absolute());
+    let home = std::env::temp_dir().join("home-x");
+    let h = home.clone();
+    let set = move |k: &str| (k == "HOME").then(|| h.clone().into_os_string());
+    assert_eq!(dir_from(false, set), home.join(".config").join("kai"));
 }

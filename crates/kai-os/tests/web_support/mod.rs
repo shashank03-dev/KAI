@@ -72,6 +72,11 @@ pub async fn lane_with(
     downloads: Option<std::path::PathBuf>,
 ) -> Option<(BrowserLane, tempfile::TempDir)> {
     let Some(browser) = find_browser() else {
+        // CI sets KAI_REQUIRE_BROWSER so a missing browser fails, not passes.
+        assert!(
+            std::env::var_os("KAI_REQUIRE_BROWSER").is_none(),
+            "KAI_REQUIRE_BROWSER is set but no Chromium-family browser was found"
+        );
         eprintln!("no Chromium-family browser found (set KAI_BROWSER); skipping");
         return None;
     };

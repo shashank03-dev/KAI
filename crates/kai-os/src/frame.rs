@@ -15,6 +15,9 @@ pub const MODEL_LONG_SIDE: u32 = 1280;
 /// are resampled once (by us) instead of twice.
 pub const MODEL_MAX_PIXELS: u32 = 280 * 48 * 48;
 pub const JPEG_QUALITY: u8 = 75;
+/// Pixel budgets `KAI_FRAME_MAX_PIXELS` may set (0 also means none): from
+/// 256x256 up to an 8K display.
+const PIXEL_BUDGETS: std::ops::RangeInclusive<u32> = 65_536..=7680 * 4320;
 
 /// How frames for the model are sized and encoded. Set from the environment
 /// (`KAI_FRAME_MAX_SIDE`, `KAI_FRAME_MAX_PIXELS`, `KAI_JPEG_QUALITY`,
@@ -47,22 +50,27 @@ impl Default for FrameConfig {
 impl FrameConfig {
     /// Defaults overridden by any valid `KAI_FRAME_*` / `KAI_JPEG_QUALITY`.
     pub fn from_env() -> Self {
-        let num = |k: &str| {
-            std::env::var(k)
-                .ok()
-                .and_then(|v| v.trim().parse::<u32>().ok())
-        };
+        Self::from_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// Defaults overridden by each valid value `get` returns; a value out
+    /// of range (`KAI_FRAME_MAX_PIXELS=1` would send a 1x1 frame) keeps
+    /// the default.
+    fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
+        let num = |k: &str| get(k).and_then(|v| v.trim().parse::<u32>().ok());
         let d = Self::default();
         Self {
             max_side: num("KAI_FRAME_MAX_SIDE")
                 .filter(|v| (256..=7680).contains(v))
                 .unwrap_or(d.max_side),
-            max_pixels: num("KAI_FRAME_MAX_PIXELS").unwrap_or(d.max_pixels),
+            max_pixels: num("KAI_FRAME_MAX_PIXELS")
+                .filter(|v| *v == 0 || PIXEL_BUDGETS.contains(v))
+                .unwrap_or(d.max_pixels),
             quality: num("KAI_JPEG_QUALITY")
                 .filter(|v| (1..=100).contains(v))
                 .map(|v| v as u8)
                 .unwrap_or(d.quality),
-            window_scope: std::env::var("KAI_WINDOW_SCOPE").is_ok_and(|v| v.trim() == "1"),
+            window_scope: get("KAI_WINDOW_SCOPE").is_some_and(|v| v.trim() == "1"),
         }
     }
 
@@ -90,6 +98,7 @@ pub fn config() -> FrameConfig {
         return c;
     }
     let c = FrameConfig::from_env();
+    log::info!("frame settings: {c:?}");
     if let Ok(mut slot) = CONFIG.write() {
         *slot = Some(c);
     }
@@ -113,15 +122,23 @@ pub struct Frame {
 /// Paint over regions that must never reach the model (Kai's own windows where
 /// the OS cannot exclude them from capture).
 pub fn mask(img: &mut RgbaImage, rects: &[Rect]) {
+    const FILL: [u8; 4] = [24, 24, 24, 255];
     let (w, h) = img.dimensions();
+    let stride = w as usize * 4;
+    let buf: &mut [u8] = img.as_mut();
     for r in rects {
-        let x0 = r.x.max(0.0) as u32;
-        let y0 = r.y.max(0.0) as u32;
-        let x1 = ((r.x + r.w).max(0.0) as u32).min(w);
-        let y1 = ((r.y + r.h).max(0.0) as u32).min(h);
-        for y in y0..y1 {
-            for x in x0..x1 {
-                img.put_pixel(x, y, image::Rgba([24, 24, 24, 255]));
+        let x0 = (r.x.max(0.0) as u32).min(w) as usize;
+        let y0 = (r.y.max(0.0) as u32).min(h) as usize;
+        let x1 = ((r.x + r.w).max(0.0) as u32).min(w) as usize;
+        let y1 = ((r.y + r.h).max(0.0) as u32).min(h) as usize;
+        if x0 >= x1 {
+            continue;
+        }
+        // One slice fill per row: a maximised window on a 4K display is
+        // millions of pixels per frame.
+        for row in buf.chunks_exact_mut(stride).take(y1).skip(y0) {
+            for px in row[x0 * 4..x1 * 4].chunks_exact_mut(4) {
+                px.copy_from_slice(&FILL);
             }
         }
     }
@@ -206,17 +223,6 @@ pub fn encode_jpeg_q(img: &RgbImage, quality: u8) -> Vec<u8> {
     enc.encode_image(img)
         .expect("encoding to memory cannot fail");
     buf
-}
-
-/// Crop a region (in frame pixels) and upscale it 2x for a zoomed second look.
-pub fn crop(img: &RgbImage, r: Rect) -> RgbImage {
-    let (w, h) = img.dimensions();
-    let x = (r.x.max(0.0) as u32).min(w.saturating_sub(1));
-    let y = (r.y.max(0.0) as u32).min(h.saturating_sub(1));
-    let cw = (r.w.max(1.0) as u32).min(w - x);
-    let ch = (r.h.max(1.0) as u32).min(h - y);
-    let part = image::imageops::crop_imm(img, x, y, cw, ch).to_image();
-    image::imageops::resize(&part, cw * 2, ch * 2, image::imageops::FilterType::Triangle)
 }
 
 /// dHash: 9x8 grayscale, one bit per horizontal gradient. Two frames that
@@ -354,7 +360,46 @@ mod tests {
         let mut img = RgbaImage::from_pixel(100, 100, image::Rgba([255, 255, 255, 255]));
         mask(&mut img, &[Rect::new(10.0, 10.0, 20.0, 20.0)]);
         assert_eq!(img.get_pixel(15, 15).0, [24, 24, 24, 255]);
+        assert_eq!(img.get_pixel(29, 29).0, [24, 24, 24, 255]);
+        assert_eq!(img.get_pixel(30, 15).0, [255, 255, 255, 255]);
+        assert_eq!(img.get_pixel(15, 30).0, [255, 255, 255, 255]);
         assert_eq!(img.get_pixel(50, 50).0, [255, 255, 255, 255]);
+        // Off the image, half off, and inverted rects are clamped, not panics.
+        mask(
+            &mut img,
+            &[
+                Rect::new(500.0, 500.0, 20.0, 20.0),
+                Rect::new(90.0, -10.0, 50.0, 20.0),
+                Rect::new(60.0, 60.0, -5.0, -5.0),
+            ],
+        );
+        assert_eq!(img.get_pixel(95, 5).0, [24, 24, 24, 255]);
+        assert_eq!(img.get_pixel(95, 15).0, [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn out_of_range_frame_settings_keep_the_defaults() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(name, _)| *name == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        let d = FrameConfig::default();
+        let c = FrameConfig::from_lookup(env(&[
+            ("KAI_FRAME_MAX_PIXELS", "1"),
+            ("KAI_FRAME_MAX_SIDE", "5"),
+            ("KAI_JPEG_QUALITY", "0"),
+        ]));
+        assert_eq!(c, d);
+        let c = FrameConfig::from_lookup(env(&[("KAI_FRAME_MAX_PIXELS", "4000000000")]));
+        assert_eq!(c.max_pixels, d.max_pixels);
+        let c = FrameConfig::from_lookup(env(&[("KAI_FRAME_MAX_PIXELS", "1000000")]));
+        assert_eq!(c.max_pixels, 1_000_000);
+        let c = FrameConfig::from_lookup(env(&[("KAI_FRAME_MAX_PIXELS", "0")]));
+        assert_eq!(c.max_pixels, 0);
     }
 
     #[test]
@@ -362,12 +407,5 @@ mod tests {
         let f = downscale(&gradient(320, 200, false));
         let bytes = encode_jpeg(&f.image);
         assert_eq!(&bytes[..2], &[0xff, 0xd8]);
-    }
-
-    #[test]
-    fn crop_is_doubled_and_clamped() {
-        let img = RgbImage::new(100, 100);
-        let c = crop(&img, Rect::new(90.0, 90.0, 50.0, 50.0));
-        assert_eq!(c.dimensions(), (20, 20));
     }
 }

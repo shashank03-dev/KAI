@@ -1,7 +1,8 @@
-//! The real eyes: [`DesktopPerceptor`] captures the primary display (or,
-//! window scope on, the focused app's part of it), reads the accessibility
-//! tree and grounds it; it can also observe the tree alone
-//! (no pixels) and zoom into a region for a second look.
+//! The real eyes: [`DesktopPerceptor`] captures the display the focused app
+//! is on (the primary one when that is unknown; window scope on, only the
+//! focused app's part of it), reads the accessibility tree and grounds it;
+//! it can also observe the tree alone (no pixels) and zoom into a region for
+//! a second look.
 
 use crate::{a11y, frame, marks, zoom};
 use async_trait::async_trait;
@@ -10,21 +11,27 @@ use kai_core::{Grounding, Images, Observation, ObserveTiming, Perceptor, Rect};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// The primary display and its place in global coordinates.
-fn primary() -> anyhow::Result<xcap::Monitor> {
+/// The display to look at: the one holding the centre of the focused app's
+/// window (someone working on a second screen), else the primary one. The
+/// focused window is only looked up with more than one display.
+fn display() -> anyhow::Result<xcap::Monitor> {
     let all = xcap::Monitor::all()?;
     let primary = all
         .iter()
         .position(|m| m.is_primary().unwrap_or(false))
         .unwrap_or(0);
+    let pick = if all.len() > 1 {
+        let rects: Vec<Option<Rect>> = all.iter().map(|m| monitor_rect(m).ok()).collect();
+        pick_display(&rects, primary, crate::window::focused_rect())
+    } else {
+        primary
+    };
     all.into_iter()
-        .nth(primary)
+        .nth(pick)
         .ok_or_else(|| anyhow::anyhow!("no display found"))
 }
 
-/// The primary display's rect without capturing it.
-fn primary_rect() -> anyhow::Result<Rect> {
-    let m = primary()?;
+fn monitor_rect(m: &xcap::Monitor) -> anyhow::Result<Rect> {
     Ok(Rect::new(
         m.x()? as f32,
         m.y()? as f32,
@@ -33,10 +40,31 @@ fn primary_rect() -> anyhow::Result<Rect> {
     ))
 }
 
-/// The primary display, in the coordinates input and the accessibility tree
-/// use (points on a Retina Mac, see [`frame::to_display`]).
+/// Index of the display whose rect holds the centre of `focus`, else
+/// `primary`.
+pub(crate) fn pick_display(
+    displays: &[Option<Rect>],
+    primary: usize,
+    focus: Option<Rect>,
+) -> usize {
+    let Some((cx, cy)) = focus.map(|f| f.center()) else {
+        return primary;
+    };
+    displays
+        .iter()
+        .position(|d| d.is_some_and(|d| cx >= d.x && cx < d.x + d.w && cy >= d.y && cy < d.y + d.h))
+        .unwrap_or(primary)
+}
+
+/// The display's rect without capturing it.
+fn display_rect() -> anyhow::Result<Rect> {
+    monitor_rect(&display()?)
+}
+
+/// The display, in the coordinates input and the accessibility tree use
+/// (points on a Retina Mac, see [`frame::to_display`]).
 fn grab() -> anyhow::Result<(RgbaImage, Rect)> {
-    let m = primary()?;
+    let m = display()?;
     let img = frame::to_display(m.capture_image()?, m.width()?, m.height()?);
     let at = Rect::new(
         m.x()? as f32,
@@ -47,7 +75,7 @@ fn grab() -> anyhow::Result<(RgbaImage, Rect)> {
     Ok((img, at))
 }
 
-/// What the model is shown: the whole primary display, or (window scope on)
+/// What the model is shown: the whole display, or (window scope on)
 /// the focused app's region of it, cut from the same capture.
 fn grab_view() -> anyhow::Result<(RgbaImage, Rect)> {
     let (img, at) = grab()?;
@@ -75,14 +103,14 @@ fn grab_view() -> anyhow::Result<(RgbaImage, Rect)> {
 
 /// The region [`grab_view`] would show, without capturing.
 fn view_rect() -> anyhow::Result<Rect> {
-    let d = primary_rect()?;
+    let d = display_rect()?;
     if !frame::config().window_scope {
         return Ok(d);
     }
     Ok(crate::window::focused_region(d).unwrap_or(d))
 }
 
-/// Captures the primary display, reads the accessibility tree and grounds it.
+/// Captures the display, reads the accessibility tree and grounds it.
 #[derive(Default)]
 pub struct DesktopPerceptor {
     /// Kai's own windows, painted over where the OS cannot exclude them.
@@ -305,16 +333,35 @@ impl Perceptor for DesktopPerceptor {
 
     /// Wait until two captures in a row match, or `max` passes.
     async fn settle(&self, max: Duration) {
-        let deadline = Instant::now() + max;
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        let mut last = self.hash_now().await;
-        while Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            let now = self.hash_now().await;
-            match (last, now) {
-                (Some(a), Some(b)) if frame::same_screen(a, b) => return,
-                (_, None) => return,
-                _ => last = now,
+        settle_with(max, || self.hash_now()).await;
+    }
+}
+
+/// Wait until two hashes in a row match, or `max` passes. A failed capture
+/// (`None`, e.g. mid display change) is not "settled": the wait goes on,
+/// and only a second failure in a row gives up.
+async fn settle_with<F, Fut>(max: Duration, mut hash: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<u64>>,
+{
+    let deadline = Instant::now() + max;
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    let mut last = hash().await;
+    let mut failed = last.is_none();
+    while Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let now = hash().await;
+        match (last, now) {
+            (Some(a), Some(b)) if frame::same_screen(a, b) => return,
+            (_, None) if failed => {
+                log::debug!("screen capture failed twice while settling");
+                return;
+            }
+            (_, None) => failed = true,
+            _ => {
+                failed = false;
+                last = now;
             }
         }
     }
@@ -339,6 +386,26 @@ mod tests {
     }
 
     #[test]
+    fn the_display_holding_the_focused_window_is_picked() {
+        let left = Some(Rect::new(-1920.0, 0.0, 1920.0, 1080.0));
+        let main = Some(Rect::new(0.0, 0.0, 2560.0, 1440.0));
+        let displays = [main, left];
+        let on_left = Some(Rect::new(-1500.0, 100.0, 800.0, 600.0));
+        assert_eq!(pick_display(&displays, 0, on_left), 1);
+        assert_eq!(
+            pick_display(&displays, 0, Some(Rect::new(10.0, 10.0, 50.0, 50.0))),
+            0
+        );
+        // Unknown focus, or a window off every display: the primary.
+        assert_eq!(pick_display(&displays, 0, None), 0);
+        assert_eq!(
+            pick_display(&displays, 0, Some(Rect::new(9000.0, 0.0, 10.0, 10.0))),
+            0
+        );
+        assert_eq!(pick_display(&[None, left], 0, on_left), 1);
+    }
+
+    #[test]
     fn grounding_shifts_into_image_space() {
         let Grounding::Marks(m) =
             shifted(&one(2020.0, "x"), Rect::new(1920.0, 0.0, 1920.0, 1080.0))
@@ -346,6 +413,37 @@ mod tests {
             panic!()
         };
         assert_eq!(m[0].bounds.x, 100.0);
+    }
+
+    /// A hash source that replays `seq` (then repeats its last value) and
+    /// counts its calls.
+    fn replay(
+        seq: &'static [Option<u64>],
+    ) -> (
+        impl FnMut() -> std::future::Ready<Option<u64>>,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = calls.clone();
+        let f = move || {
+            let i = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::future::ready(seq[i.min(seq.len() - 1)])
+        };
+        (f, calls)
+    }
+
+    #[tokio::test]
+    async fn one_failed_capture_does_not_end_the_settle() {
+        let (f, calls) = replay(&[Some(1), None, Some(1), Some(1)]);
+        settle_with(Duration::from_secs(3), f).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn two_failed_captures_in_a_row_give_up() {
+        let (f, calls) = replay(&[Some(1), None, None, Some(9)]);
+        settle_with(Duration::from_secs(3), f).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[test]

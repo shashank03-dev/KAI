@@ -1,4 +1,4 @@
-//! Kai's eyes and hands on Linux and Windows: screen capture, accessibility
+//! Kai's eyes and hands on Linux, Windows and macOS: screen capture, accessibility
 //! trees, Set-of-Marks drawing, mouse and keyboard, app and URL launching, the
 //! terminal, and the kill switch. Implements `kai_core`'s Perceptor and
 //! Actuator for the real desktop.
@@ -8,6 +8,7 @@ mod computer;
 pub mod desktop;
 pub mod exclude;
 pub mod frame;
+pub mod gui_launch;
 pub mod input;
 pub mod kill;
 pub mod launch;

@@ -376,6 +376,15 @@ pub struct Config {
     /// coordinate frame (`crate::oai_contract`). Implies the computer tools.
     /// `None` (default): Kai's own reply format.
     pub oai_contract: Option<crate::oai_contract::CoordFrame>,
+    /// Kai raises OpenAI-shaped safety checks of its own (off-task and
+    /// sensitive sites) before computer actions (`crate::safety_checks`).
+    pub local_safety_checks: bool,
+    /// Most actions per turn on OpenAI's contract (`--oai-batch`); later ones
+    /// run only while the layout holds. 1 by default.
+    pub oai_batch: u8,
+    /// Replies sampled per step on OpenAI's contract (`--step-candidates`);
+    /// the largest group of agreeing replies wins. 1 by default.
+    pub step_candidates: u8,
     pub max_steps: u32,
     pub max_time: Duration,
     pub approval: ApprovalLevel,
@@ -441,6 +450,9 @@ impl Default for Config {
         Self {
             computer_tools_v1: false,
             oai_contract: None,
+            local_safety_checks: false,
+            oai_batch: 1,
+            step_candidates: 1,
             max_steps: 40,
             max_time: Duration::from_secs(600),
             approval: ApprovalLevel::HighRiskOnly,

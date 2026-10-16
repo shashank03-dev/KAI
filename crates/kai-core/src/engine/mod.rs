@@ -68,6 +68,9 @@ pub struct Engine<'a> {
     /// The careful model (31B). Used for the step after a failure, then Kai
     /// drops back to `client`.
     pub careful: Option<&'a dyn ModelClient>,
+    /// A grounding model for screens without marks on OpenAI's contract
+    /// (`--grounder`): the planner describes the target, this finds it.
+    pub grounder: Option<Grounder<'a>>,
     pub perceptor: &'a dyn Perceptor,
     pub actuator: &'a dyn Actuator,
     pub approver: &'a dyn Approver,
@@ -83,6 +86,14 @@ pub struct Engine<'a> {
     pub human: Option<&'a dyn crate::human::HumanHelper>,
     pub skills: &'a [Skill],
     pub config: Config,
+}
+
+/// A model that turns a description into a point on the screenshot, and
+/// the coordinate frame it answers in.
+#[derive(Clone, Copy)]
+pub struct Grounder<'a> {
+    pub client: &'a dyn ModelClient,
+    pub frame: crate::oai_contract::CoordFrame,
 }
 
 /// Per-run extras that are not collaborators. `Default` is a plain run.
@@ -175,6 +186,7 @@ impl Engine<'_> {
             system.push_str("\nShared computer tools v1: use action=computer and put exactly one tool in computer. Use the current observation_id for every target. Point coordinates refer to the supplied image. Only advertised actions, buttons and scroll units are available. Never guess a missing target. Execution is not evidence of success.\n");
         }
         let deadline = Instant::now() + self.config.max_time;
+        r.deadline = deadline;
         r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
 
         // A skill's deterministic steps, a stored procedure, or a cached

@@ -49,6 +49,13 @@ pub struct BenchArgs {
     /// Approve everything except passwords and payments.
     #[arg(long)]
     pub yes: bool,
+    /// Exit 1 if any measured task fails. An empty measurement always exits 1.
+    #[arg(long)]
+    pub fail_on_any_failure: bool,
+    /// Exit 1 if fewer than N measured tasks pass: a known baseline for
+    /// suites with tolerated failures (the recorded-desktop replays).
+    #[arg(long, value_name = "N")]
+    pub min_pass: Option<usize>,
     /// Input price in US$ per million tokens, for the cost column.
     #[arg(long)]
     pub usd_per_mtok_in: Option<f64>,
@@ -136,6 +143,21 @@ fn note(b: BackendArg) -> String {
         BackendArg::Replay => "Replay: each task's recorded replies executed for real on this desktop (real capture, accessibility tree, input and shell), judged by the task's check command. Proves Kai's hands and the tasks' setup/check, not a model. Tasks marked `replay: terminal` reach the end state from the terminal; `replay: skip` tasks are skipped.".into(),
         BackendArg::Mock => "Mock backend: recorded replies on a scripted screen with a dry-run actuator. Measures harness overhead only. No model was called and nothing on the machine was touched.".into(),
         _ => "Live run on the real desktop. Pass is decided by each task's check command where it has one, otherwise by the run's own outcome.".into(),
+    }
+}
+
+fn exit_status(
+    summary: &stats::Summary,
+    fail_on_any_failure: bool,
+    min_pass: Option<usize>,
+) -> ExitCode {
+    if summary.total == 0
+        || (fail_on_any_failure && summary.passed < summary.total)
+        || min_pass.is_some_and(|n| summary.passed < n)
+    {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -252,6 +274,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
             let live = runner::Live {
                 client: None,
                 careful: None,
+                grounder: None,
                 skills,
                 config,
                 auto_yes: args.yes,
@@ -270,6 +293,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
             let live = runner::Live {
                 client: None,
                 careful: None,
+                grounder: None,
                 skills,
                 config,
                 auto_yes: args.yes,
@@ -286,9 +310,14 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         _ => {
             backend::require_key(b, &keys)?;
             let (fast, careful) = s.clients(&keys)?;
+            let grounder = backend::grounder(&s, &keys, &args.backend)?;
             let live = runner::Live {
                 client: Some(fast.as_ref()),
                 careful: careful.as_deref(),
+                grounder: grounder.as_ref().map(|(c, frame)| kai_core::Grounder {
+                    client: c.as_ref(),
+                    frame: *frame,
+                }),
                 skills,
                 config,
                 auto_yes: args.yes,
@@ -354,5 +383,9 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
         std::fs::write(&p, t)?;
         eprintln!("wrote {}", p.display());
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(exit_status(
+        &summary,
+        args.fail_on_any_failure,
+        args.min_pass,
+    ))
 }

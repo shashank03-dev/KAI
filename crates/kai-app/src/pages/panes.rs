@@ -166,7 +166,7 @@ fn sub_node(s: &SubView) -> TreeNode {
         SubState::Finished => ("finished".to_string(), Tone::Neutral),
         SubState::Ended(Outcome::Success) => ("done".to_string(), Tone::Success),
         SubState::Ended(Outcome::Stopped) => ("stopped".to_string(), Tone::Warning),
-        SubState::Ended(o) => (crate::state::outcome_text(o).to_lowercase(), Tone::Danger),
+        SubState::Ended(o) => (crate::words::outcome_text(o).to_lowercase(), Tone::Danger),
     };
     let note = match s.steps {
         Some(n) => format!("{note} · {n} steps"),
@@ -265,6 +265,30 @@ pub fn latency(r: &RunState, cx: &App) -> Option<AnyElement> {
     )
 }
 
+/// What the Usage panel can say for sure while a run is live: model times
+/// are measured (the latency pane above); the server's cost is its hourly
+/// rate times the time so far, on the DigitalOcean backends only. Tokens
+/// are not reported live; the finished run shows the model's own counts.
+pub fn usage_note(
+    backend: kai_core::settings::BackendChoice,
+    hourly_usd: f64,
+    elapsed: std::time::Duration,
+) -> String {
+    let tokens = "Token counts show when the run ends, if the model reports them.";
+    let on_droplet = matches!(
+        backend,
+        kai_core::settings::BackendChoice::Vllm | kai_core::settings::BackendChoice::Both
+    );
+    if !on_droplet || hourly_usd <= 0.0 {
+        return tokens.into();
+    }
+    let minutes = elapsed.as_secs_f64() / 60.0;
+    format!(
+        "Server time so far: {minutes:.1} min, about ${:.2} at ${hourly_usd:.2}/h. {tokens}",
+        hourly_usd * minutes / 60.0
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,5 +299,23 @@ mod tests {
         assert_eq!(exit_code("oops\n[exit 3]\n"), Some(3));
         assert_eq!(exit_code("[stopped by the kill switch]"), None);
         assert_eq!(exit_code("x\n[exit signal]"), None);
+    }
+
+    #[test]
+    fn usage_says_only_what_is_measured() {
+        use kai_core::settings::BackendChoice;
+        let half_hour = std::time::Duration::from_secs(30 * 60);
+        let droplet = usage_note(BackendChoice::Vllm, 4.0, half_hour);
+        assert!(
+            droplet.starts_with("Server time so far: 30.0 min, about $2.00"),
+            "{droplet}"
+        );
+        // No server bill off the droplet or without a rate.
+        for note in [
+            usage_note(BackendChoice::Gemini, 4.0, half_hour),
+            usage_note(BackendChoice::Vllm, 0.0, half_hour),
+        ] {
+            assert!(!note.contains('$'), "{note}");
+        }
     }
 }

@@ -67,6 +67,7 @@ async fn run(
     };
     config.executor = jevos.is_some();
     let engine = Engine {
+        grounder: None,
         client: &client,
         careful: None,
         perceptor: &form,

@@ -5,8 +5,9 @@
 //! message goes into the button names, so Kai's risk words ("delete", "pay",
 //! …) apply to answering it exactly as to clicking a page button.
 
-use kai_core::{Element, Rect, Role};
-use serde_json::Value;
+use super::lane::{BrowserLane, MarkTarget};
+use kai_core::{Action, Decision, Element, Grounding, Rect, Risk, Role, risk};
+use serde_json::{Value, json};
 
 /// What a dialog mark does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,11 +44,43 @@ pub fn describe(params: &Value) -> String {
     )
 }
 
+/// Classify the complete page message, including text beyond the short label.
+pub fn accept_risk(params: &Value) -> Risk {
+    let text = if params["type"] == "beforeunload" {
+        "discard changes".to_string()
+    } else {
+        params["message"].as_str().unwrap_or("").to_string()
+    };
+    risk_for_text(&text)
+}
+
+fn risk_for_text(text: &str) -> Risk {
+    risk::classify(
+        &Decision {
+            thought: String::new(),
+            action: Action::Click,
+            target: None,
+            text: Some(text.to_string()),
+            keys: vec![],
+            direction: None,
+            amount: None,
+            risk: Risk::None,
+            expect: String::new(),
+        },
+        &Grounding::Marks(vec![]),
+    )
+}
+
 /// The dialog as marks, centred in `view`, with what each one does.
 /// `typed` is the answer the model already typed into a `prompt()`.
 pub fn marks(params: &Value, typed: Option<&str>, view: Rect) -> Vec<(Element, DialogTarget)> {
     let msg = message(params);
-    let said = |label: &str| format!("{label} (page dialog: \"{msg}\")");
+    let cue = if accept_risk(params) == Risk::High && risk_for_text(&msg) != Risk::High {
+        " confirm"
+    } else {
+        ""
+    };
+    let said = |label: &str| format!("{label} (page dialog: \"{msg}\"{cue})");
     let kind = params["type"].as_str().unwrap_or("alert");
     let mut out: Vec<(Role, String, Option<String>, DialogTarget)> = match kind {
         "confirm" => vec![
@@ -114,6 +147,60 @@ pub fn marks(params: &Value, typed: Option<&str>, view: Rect) -> Vec<(Element, D
             (el, target)
         })
         .collect()
+}
+
+impl BrowserLane {
+    /// Answer the open page dialog.
+    async fn answer(&self, accept: bool) -> anyhow::Result<()> {
+        let session = self.current().session;
+        let mut params = json!({ "accept": accept });
+        if accept && let Some(text) = self.answer.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            params["promptText"] = json!(text);
+        }
+        self.cdp
+            .call("Page.handleJavaScriptDialog", params, Some(&session))
+            .await?;
+        self.cdp.clear_dialog(&session);
+        // A `beforeunload` answer lets the navigation go on.
+        self.wait_loaded(super::act::LOAD_LIMIT).await;
+        Ok(())
+    }
+
+    /// While a dialog is open only its own marks, Enter and Esc work.
+    pub(super) async fn act_on_dialog(
+        &self,
+        d: &Decision,
+        g: &Grounding,
+        open: &Value,
+    ) -> anyhow::Result<()> {
+        let target = d.target.and_then(|m| self.target_for(m, g));
+        match (d.action, target) {
+            (
+                Action::Click | Action::DoubleClick,
+                Some(MarkTarget::Dialog(DialogTarget::Accept)),
+            ) => self.answer(true).await,
+            (
+                Action::Click | Action::DoubleClick,
+                Some(MarkTarget::Dialog(DialogTarget::Dismiss)),
+            ) => self.answer(false).await,
+            (Action::Type, Some(MarkTarget::Dialog(DialogTarget::Field))) => {
+                *self.answer.lock().unwrap_or_else(|e| e.into_inner()) = d.text.clone();
+                Ok(())
+            }
+            (Action::Click, Some(MarkTarget::Dialog(DialogTarget::Field))) => Ok(()),
+            (Action::Key, _) if d.keys == ["enter"] => {
+                if accept_risk(open) == kai_core::Risk::High {
+                    anyhow::bail!(
+                        "that dialog is high risk: click its OK mark so the user can approve it"
+                    );
+                }
+                self.answer(true).await
+            }
+            (Action::Key, _) if d.keys == ["esc"] => self.answer(false).await,
+            (Action::Wait | Action::AskUser | Action::Done, _) => Ok(()),
+            _ => anyhow::bail!("{}: answer it first (click OK or Cancel)", describe(open)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -213,5 +300,18 @@ mod tests {
         assert!(name.chars().count() < 120, "{name}");
         assert!(!name.contains("\"#5\""), "inner quotes are neutralised");
         assert!(describe(&json!({"type": "confirm", "message": "Sure?"})).contains("confirm"));
+    }
+
+    #[test]
+    fn risk_words_after_display_limit_still_reach_the_gate() {
+        use kai_core::{Decision, Grounding, Risk, risk};
+        let p =
+            json!({"type": "confirm", "message": format!("{} Delete account", "x".repeat(100))});
+        let m = marks(&p, None, VIEW);
+        let g = Grounding::Marks(m.iter().map(|(e, _)| e.clone()).collect());
+        let d =
+            Decision::parse_checked(r#"{"thought":"","action":"click","target":1,"risk":"none"}"#)
+                .unwrap();
+        assert_eq!(risk::classify(&d, &g), Risk::High);
     }
 }

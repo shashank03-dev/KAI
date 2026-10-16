@@ -245,6 +245,7 @@ pub async fn run_mock_with(
         let hands = DryRun(&screen);
         let approver = TerminalApprover { auto_yes: true };
         let engine = Engine {
+            grounder: None,
             client: &client,
             careful: None,
             perceptor: &screen,
@@ -291,6 +292,8 @@ pub struct Live<'a> {
     /// `None` replays each task's recorded replies on the real desktop.
     pub client: Option<&'a dyn ModelClient>,
     pub careful: Option<&'a dyn ModelClient>,
+    /// `--grounder`: finds described targets on screens without marks.
+    pub grounder: Option<kai_core::Grounder<'a>>,
     pub skills: &'a [Skill],
     pub config: Config,
     pub auto_yes: bool,
@@ -378,6 +381,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         let fast = Metered::new(live.client.unwrap_or(&recorded), log.clone());
         let careful = live.careful.map(|c| Metered::new(c, log.clone()));
         let engine = Engine {
+            grounder: live.grounder,
             client: &fast,
             careful: careful.as_ref().map(|c| c as &dyn ModelClient),
             perceptor: lane

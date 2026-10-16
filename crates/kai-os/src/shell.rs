@@ -69,6 +69,8 @@ impl Shell {
         }
         let (stdout, out_more) = out_buf.take();
         let (stderr, err_more) = err_buf.take();
+        #[cfg(target_os = "windows")]
+        let stderr = from_clixml(&stderr);
         let mut text = stdout;
         if detached {
             text.push_str("\n(a program it started is still running in the background)");
@@ -127,19 +129,82 @@ async fn kill_tree(child: &mut tokio::process::Child) {
     let _ = child.kill().await;
 }
 
+/// Put first in every PowerShell command: redirected output is otherwise
+/// written in the console's OEM code page, so any non-ASCII path came back
+/// as `?`.
+#[cfg(target_os = "windows")]
+const UTF8_OUTPUT: &str = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+                           $OutputEncoding = [System.Text.Encoding]::UTF8; ";
+
 #[cfg(target_os = "windows")]
 fn command(cmd: &str) -> Command {
     let mut c = Command::new("powershell");
     c.args([
+        "-NoLogo",
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        cmd,
+        &format!("{UTF8_OUTPUT}{cmd}"),
     ]);
     c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     c
+}
+
+/// Windows PowerShell writes error records to a redirected stderr as CLIXML
+/// (`#< CLIXML<Objs …><S S="Error">…</S>`): turn that back into the plain
+/// lines the model can read. Anything else is returned as it is.
+#[cfg(any(target_os = "windows", test))]
+fn from_clixml(text: &str) -> String {
+    let Some(mut rest) = text.trim_start().strip_prefix("#< CLIXML") else {
+        return text.to_string();
+    };
+    let mut out = String::new();
+    // Stream records are `<S S="Error">`; progress records use other tags.
+    while let Some(at) = rest.find("<S S=\"") {
+        rest = &rest[at..];
+        let (Some(open), Some(close)) = (rest.find('>'), rest.find("</S>")) else {
+            break;
+        };
+        if open < close {
+            out.push_str(&xml_text(&rest[open + 1..close]));
+        }
+        rest = &rest[close + 4..];
+    }
+    out.replace("\r\n", "\n")
+}
+
+/// CLIXML text: `_xHHHH_` escapes (line breaks are `_x000D__x000A_`), then
+/// the XML entities.
+#[cfg(any(target_os = "windows", test))]
+fn xml_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find("_x") {
+        out.push_str(&rest[..at]);
+        let code = rest
+            .get(at + 2..at + 7)
+            .filter(|t| t.ends_with('_'))
+            .and_then(|t| u32::from_str_radix(&t[..4], 16).ok())
+            .and_then(char::from_u32);
+        match code {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[at + 7..];
+            }
+            None => {
+                out.push_str("_x");
+                rest = &rest[at + 2..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -206,6 +271,25 @@ async fn read_capped<R: tokio::io::AsyncRead + Unpin>(mut r: R, into: Captured) 
         let room = MAX_OUTPUT.saturating_sub(g.0.len());
         g.0.extend_from_slice(&buf[..n.min(room)]);
         g.1 |= n > room;
+    }
+}
+
+#[cfg(test)]
+mod clixml_tests {
+    use super::from_clixml;
+
+    #[test]
+    fn powershell_error_records_become_plain_lines() {
+        let raw = "#< CLIXML\r\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\">\
+            <Obj S=\"progress\" RefId=\"0\"><TN RefId=\"0\"><T>System.Management.Automation.PSCustomObject</T></TN><MS><I64 N=\"SourceId\">1</I64></MS></Obj>\
+            <S S=\"Error\">Get-Item : Cannot find path &apos;C:\\nonexistent&apos; because it does not exist._x000D__x000A_</S>\
+            <S S=\"Error\">At line:1 char:1 &lt;here&gt; _x00E9_t&amp;_x_ok_x000D__x000A_</S></Objs>";
+        assert_eq!(
+            from_clixml(raw),
+            "Get-Item : Cannot find path 'C:\\nonexistent' because it does not exist.\n\
+             At line:1 char:1 <here> ét&_x_ok\n"
+        );
+        assert_eq!(from_clixml("plain error\n"), "plain error\n");
     }
 }
 

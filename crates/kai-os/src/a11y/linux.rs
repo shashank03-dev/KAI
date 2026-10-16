@@ -47,7 +47,17 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
 
     let mut roots: Vec<ObjectRefOwned> = Vec::new();
     let mut active: (Option<String>, Option<String>) = (None, None);
+    let mut active_focused: Option<bool> = None;
+    let own = std::process::id();
+    let dbus = zbus::fdo::DBusProxy::new(bus).await.ok();
     for app in root.get_children().await? {
+        // Kai's own windows are painted out of the frame: never marks.
+        if let (Some(dbus), Some(name)) = (&dbus, app.name_as_str())
+            && let Ok(name) = zbus::names::BusName::try_from(name)
+            && dbus.get_connection_unix_process_id(name).await.ok() == Some(own)
+        {
+            continue;
+        }
         let Ok(app_proxy) = app.as_accessible_proxy(bus).await else {
             continue;
         };
@@ -62,11 +72,13 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
                 continue;
             };
             let state = wp.get_state().await.unwrap_or_default();
-            if state.contains(State::Active) && !panel && active.0.is_none() {
+            let focused = state.contains(State::Focused);
+            if state.contains(State::Active) && !panel && better_active(active_focused, focused) {
                 active = (
                     Some(wp.name().await.unwrap_or_default()),
                     win.name_as_str().map(str::to_string),
                 );
+                active_focused = Some(focused);
             }
             if state.contains(State::Active) || panel {
                 roots.push(win);
@@ -82,6 +94,10 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
     while let Some((obj, depth)) = stack.pop() {
         visits += 1;
         if visits > MAX_VISITS {
+            log::warn!(
+                "accessibility read stopped after {MAX_VISITS} nodes; {} marks kept, the rest of the window is unread",
+                out.len()
+            );
             break;
         }
         let Ok(p) = obj.as_accessible_proxy(bus).await else {
@@ -133,7 +149,18 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
     Ok(out)
 }
 
-async fn extents(p: &AccessibleProxy<'_>) -> Option<Rect> {
+/// Several windows can report `Active` (seen with dialogs and some
+/// toolkits): the first one wins unless a later one also has focus, so the
+/// title does not depend on bus order alone. `have` is whether the window
+/// picked so far had focus (`None`: nothing picked yet).
+fn better_active(have: Option<bool>, focused: bool) -> bool {
+    match have {
+        None => true,
+        Some(had) => focused && !had,
+    }
+}
+
+pub(super) async fn extents(p: &AccessibleProxy<'_>) -> Option<Rect> {
     let comp = p.proxies().await.ok()?.component().await.ok()?;
     let (x, y, w, h) = comp.get_extents(CoordType::Screen).await.ok()?;
     (w > 0 && h > 0).then(|| Rect::new(x as f32, y as f32, w as f32, h as f32))
@@ -194,6 +221,15 @@ pub(super) fn map_role(r: A) -> Role {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_focused_active_window_beats_an_earlier_unfocused_one() {
+        use super::better_active;
+        assert!(better_active(None, false));
+        assert!(better_active(Some(false), true));
+        assert!(!better_active(Some(false), false), "first one wins");
+        assert!(!better_active(Some(true), true));
+    }
+
     #[test]
     fn a_cells_text_drops_child_marks_and_extra_space() {
         assert_eq!(

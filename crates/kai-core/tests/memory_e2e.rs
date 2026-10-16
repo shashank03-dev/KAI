@@ -215,6 +215,7 @@ async fn run(
     };
     tweak(&mut config);
     let engine = Engine {
+        grounder: None,
         client: policy,
         careful: None,
         perceptor: &desk,

@@ -1,20 +1,17 @@
 //! Mouse and keyboard through `enigo`, on one dedicated thread so the OS input
-//! handle is created once and never crosses threads. Long text is pasted
-//! through the clipboard, and the user's clipboard is put back afterwards.
+//! handle is created once and never crosses threads. Text goes through the
+//! input backend; Kai never replaces the user's clipboard to type it.
 
 use enigo::{Axis, Button, Coordinate, Direction as Press, Enigo, Key, Keyboard, Mouse, Settings};
 use kai_core::Direction;
 use kai_core::computer::ExecutionContext;
-mod clipboard;
 mod execute;
-use clipboard::{clipboard_get, clipboard_set};
 use execute::run;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-
-/// Text longer than this is pasted instead of typed key by key.
-pub const PASTE_OVER: usize = 32;
 
 enum Cmd {
     Move {
@@ -54,6 +51,17 @@ enum Cmd {
     },
 }
 
+impl Cmd {
+    /// Whether running this puts the pointer somewhere.
+    fn moves_pointer(&self) -> bool {
+        match self {
+            Cmd::Type(_) | Cmd::Keys(_) | Cmd::Cursor => false,
+            Cmd::Held { inner, .. } => inner.moves_pointer(),
+            _ => true,
+        }
+    }
+}
+
 type Reply = mpsc::Sender<anyhow::Result<(i32, i32)>>;
 
 /// Handle to the input thread. Cheap to clone.
@@ -63,6 +71,16 @@ pub struct Input {
     context: Option<ExecutionContext>,
     /// Modifiers held around every command sent through this handle.
     held: Vec<Key>,
+    /// Kai's own pointer commands, so the corner stop can tell them from
+    /// the person's moves.
+    moves: Arc<Moves>,
+}
+
+/// Pointer commands finished, and in flight, across every clone.
+#[derive(Default)]
+struct Moves {
+    done: AtomicU64,
+    busy: AtomicU64,
 }
 
 impl Input {
@@ -154,6 +172,7 @@ impl Input {
             tx,
             context: None,
             held: Vec::new(),
+            moves: Arc::default(),
         })
     }
 
@@ -162,6 +181,7 @@ impl Input {
             tx: self.tx.clone(),
             context: Some(context.clone()),
             held: self.held.clone(),
+            moves: self.moves.clone(),
         }
     }
 
@@ -175,6 +195,7 @@ impl Input {
                 .iter()
                 .map(|m| parse_key(m))
                 .collect::<anyhow::Result<_>>()?,
+            moves: self.moves.clone(),
         })
     }
 
@@ -182,7 +203,28 @@ impl Input {
         self.context.clone()
     }
 
+    /// How many pointer commands Kai has finished; changes after each one.
+    pub fn pointer_moves(&self) -> u64 {
+        self.moves.done.load(Ordering::SeqCst)
+    }
+
+    /// Whether a pointer command is running now (a drag takes seconds).
+    pub fn pointer_busy(&self) -> bool {
+        self.moves.busy.load(Ordering::SeqCst) > 0
+    }
+
     async fn call(&self, cmd: Cmd) -> anyhow::Result<(i32, i32)> {
+        if !cmd.moves_pointer() {
+            return self.send(cmd).await;
+        }
+        self.moves.busy.fetch_add(1, Ordering::SeqCst);
+        let result = self.send(cmd).await;
+        self.moves.busy.fetch_sub(1, Ordering::SeqCst);
+        self.moves.done.fetch_add(1, Ordering::SeqCst);
+        result
+    }
+
+    async fn send(&self, cmd: Cmd) -> anyhow::Result<(i32, i32)> {
         let cmd = match self.held.is_empty() {
             true => cmd,
             false => Cmd::Held {
@@ -214,9 +256,6 @@ impl Input {
     }
 
     pub async fn type_text(&self, text: &str) -> anyhow::Result<()> {
-        if self.context.is_none() && text.chars().count() > PASTE_OVER {
-            return self.paste(text).await;
-        }
         self.call(Cmd::Type(text.to_string())).await.map(drop)
     }
 
@@ -242,23 +281,6 @@ impl Input {
     /// Where the pointer is, for the top-left-corner kill gesture.
     pub async fn cursor(&self) -> anyhow::Result<(i32, i32)> {
         self.call(Cmd::Cursor).await
-    }
-
-    async fn paste(&self, text: &str) -> anyhow::Result<()> {
-        let saved = clipboard_get();
-        clipboard_set(text)?;
-        let modifier = if cfg!(target_os = "macos") {
-            "cmd"
-        } else {
-            "ctrl"
-        };
-        let r = self.keys(&[modifier.to_string(), "v".to_string()]).await;
-        // Give the target app time to read the clipboard before restoring it.
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        if let Some(old) = saved {
-            let _ = clipboard_set(&old);
-        }
-        r
     }
 }
 

@@ -43,6 +43,15 @@ pub struct LocalServer {
 }
 
 impl LocalServer {
+    fn remove_owned_state(&self) {
+        let owned = std::fs::read_to_string(&self.state)
+            .ok()
+            .and_then(|text| serde_json::from_str::<ServerInfo>(&text).ok())
+            .is_some_and(|info| info.pid == self.pid && info.id == self.id);
+        if owned {
+            let _ = std::fs::remove_file(&self.state);
+        }
+    }
     pub fn info(&self, served_name: &str) -> ServerInfo {
         ServerInfo {
             id: self.id.clone(),
@@ -58,7 +67,7 @@ impl LocalServer {
         if let Some(mut c) = self.child.take() {
             let _ = c.kill().await;
         }
-        let _ = std::fs::remove_file(&self.state);
+        self.remove_owned_state();
         Ok(())
     }
 
@@ -80,7 +89,7 @@ impl Drop for LocalServer {
     fn drop(&mut self) {
         if let Some(c) = self.child.as_mut() {
             let _ = c.start_kill();
-            let _ = std::fs::remove_file(&self.state);
+            self.remove_owned_state();
         }
     }
 }
@@ -191,8 +200,8 @@ impl LocalManager {
         self.root().join("logs").join("llama-server.log")
     }
 
-    /// Start `entry` on `port` and wait until it has loaded the model. Any
-    /// server Kai started earlier is stopped first.
+    /// Start `entry` on `port` and wait until it has loaded the model.
+    /// Existing servers must be stopped explicitly by their owner.
     pub async fn start(&self, entry: &ModelEntry, port: u16) -> anyhow::Result<LocalServer> {
         anyhow::ensure!(
             self.is_installed(&entry.id),
@@ -203,7 +212,13 @@ impl LocalManager {
         let server = self
             .server_path()
             .ok_or_else(|| anyhow::anyhow!("the llama.cpp runtime is not installed"))?;
-        let _ = self.stop();
+        if let Some(info) = self.running() {
+            anyhow::bail!(
+                "a server for {} is already running on port {}; stop it first",
+                info.id,
+                info.port
+            );
+        }
         wait_for_port(port, PORT_WAIT).await?;
         let dir = self.model_dir(&entry.id);
         let model = dir.join(
@@ -253,7 +268,7 @@ impl LocalManager {
                 && let Some(st) = c.try_wait()?
             {
                 handle.child = None;
-                let _ = std::fs::remove_file(&handle.state);
+                handle.remove_owned_state();
                 anyhow::bail!(
                     "llama-server stopped while loading ({st}). Last lines of {}:\n{}",
                     log.display(),

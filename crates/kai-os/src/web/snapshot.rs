@@ -37,77 +37,228 @@ pub struct DomRef {
     pub select: bool,
 }
 
-/// The main document's layout per backend node id, and the page facts.
-fn layout(snapshot: &Value) -> (HashMap<i64, Layout>, PageInfo) {
-    let strings: Vec<&str> = snapshot["strings"]
+/// Where a document's (0,0) lands in the viewport, and the box it is clipped
+/// to (its iframe's; `None` for the page itself).
+#[derive(Debug, Clone, Copy)]
+struct Place {
+    dx: f32,
+    dy: f32,
+    clip: Option<Rect>,
+}
+
+/// Most frames read per observation (each one costs a protocol call).
+const MAX_FRAMES: usize = 8;
+
+/// The snapshot's string table lookup.
+fn strings(snapshot: &Value) -> Vec<&str> {
+    snapshot["strings"]
         .as_array()
         .map(|a| a.iter().map(|s| s.as_str().unwrap_or("")).collect())
-        .unwrap_or_default();
-    let s = |v: &Value| -> &str {
-        v.as_i64()
-            .and_then(|i| usize::try_from(i).ok())
-            .and_then(|i| strings.get(i).copied())
-            .unwrap_or("")
-    };
-    let doc = &snapshot["documents"][0];
-    let f = |v: &Value| v.as_f64().unwrap_or(0.0) as f32;
+        .unwrap_or_default()
+}
+
+fn string<'a>(strings: &[&'a str], v: &Value) -> &'a str {
+    v.as_i64()
+        .and_then(|i| usize::try_from(i).ok())
+        .and_then(|i| strings.get(i).copied())
+        .unwrap_or("")
+}
+
+fn num(v: &Value) -> f32 {
+    v.as_f64().unwrap_or(0.0) as f32
+}
+
+/// The documents, their layout boxes and their places.
+type Docs<'a> = (
+    &'a [Value],
+    Vec<HashMap<usize, (usize, Rect)>>,
+    Vec<Option<Place>>,
+);
+
+fn docs(snapshot: &Value) -> Docs<'_> {
+    let docs: &[Value] = snapshot["documents"].as_array().map_or(&[], Vec::as_slice);
+    let boxes: Vec<_> = docs.iter().map(doc_boxes).collect();
+    let places = places(docs, &boxes);
+    (docs, boxes, places)
+}
+
+/// The layout of every document the snapshot holds (the page and its
+/// same-process iframes; cross-site frames run in other processes and are
+/// not in it), in viewport CSS pixels, per backend node id; and the page
+/// facts.
+fn layout(snapshot: &Value) -> (HashMap<i64, Layout>, PageInfo) {
+    let strings = strings(snapshot);
+    let s = |v: &Value| string(&strings, v);
+    let (docs, boxes, places) = docs(snapshot);
+    let main = docs.first().unwrap_or(&Value::Null);
     let info = PageInfo {
-        url: s(&doc["documentURL"]).to_string(),
-        title: s(&doc["title"]).to_string(),
-        scroll: (f(&doc["scrollOffsetX"]), f(&doc["scrollOffsetY"])),
+        url: s(&main["documentURL"]).to_string(),
+        title: s(&main["title"]).to_string(),
+        scroll: (num(&main["scrollOffsetX"]), num(&main["scrollOffsetY"])),
     };
-    let nodes = &doc["nodes"];
-    let backend = nodes["backendNodeId"].as_array();
-    let names = nodes["nodeName"].as_array();
-    let attrs = nodes["attributes"].as_array();
-    let lay = &doc["layout"];
-    let (Some(backend), Some(index), Some(bounds)) = (
-        backend,
-        lay["nodeIndex"].as_array(),
-        lay["bounds"].as_array(),
-    ) else {
-        return (HashMap::new(), info);
-    };
-    let styles = lay["styles"].as_array();
     let mut out = HashMap::new();
-    for (i, ni) in index.iter().enumerate() {
-        let Some(ni) = ni.as_u64().map(|n| n as usize) else {
+    for (d, doc) in docs.iter().enumerate() {
+        let Some(place) = places[d] else {
             continue;
         };
-        let Some(id) = backend.get(ni).and_then(Value::as_i64) else {
+        let nodes = &doc["nodes"];
+        let (Some(backend), names, attrs, styles) = (
+            nodes["backendNodeId"].as_array(),
+            nodes["nodeName"].as_array(),
+            nodes["attributes"].as_array(),
+            doc["layout"]["styles"].as_array(),
+        ) else {
             continue;
         };
-        let b = &bounds[i];
-        let rect = Rect::new(f(&b[0]), f(&b[1]), f(&b[2]), f(&b[3]));
-        let visible = styles
-            .and_then(|st| st.get(i))
-            .and_then(|st| st.get(0))
-            .map(|v| !matches!(s(v), "hidden" | "collapse"))
-            .unwrap_or(true);
-        let tag = names.and_then(|n| n.get(ni)).map(s).unwrap_or("");
-        let is_input = tag.eq_ignore_ascii_case("input");
-        let password = is_input
-            && attrs
-                .and_then(|a| a.get(ni))
-                .and_then(Value::as_array)
-                .is_some_and(|kv| {
-                    kv.chunks(2).any(|p| {
-                        p.len() == 2
-                            && s(&p[0]).eq_ignore_ascii_case("type")
-                            && s(&p[1]).eq_ignore_ascii_case("password")
-                    })
-                });
-        out.insert(
-            id,
-            Layout {
-                bounds: rect,
-                visible,
-                password,
-                select: tag.eq_ignore_ascii_case("select"),
-            },
-        );
+        for (&ni, &(i, b)) in &boxes[d] {
+            let Some(id) = backend.get(ni).and_then(Value::as_i64) else {
+                continue;
+            };
+            let rect = Rect::new(b.x + place.dx, b.y + place.dy, b.w, b.h);
+            let visible = styles
+                .and_then(|st| st.get(i))
+                .and_then(|st| st.get(0))
+                .map(|v| !matches!(s(v), "hidden" | "collapse"))
+                .unwrap_or(true)
+                && place.clip.is_none_or(|c| intersects(rect, c));
+            let tag = names.and_then(|n| n.get(ni)).map(s).unwrap_or("");
+            let is_input = tag.eq_ignore_ascii_case("input");
+            let password = is_input
+                && attrs
+                    .and_then(|a| a.get(ni))
+                    .and_then(Value::as_array)
+                    .is_some_and(|kv| {
+                        kv.chunks(2).any(|p| {
+                            p.len() == 2
+                                && s(&p[0]).eq_ignore_ascii_case("type")
+                                && s(&p[1]).eq_ignore_ascii_case("password")
+                        })
+                    });
+            out.insert(
+                id,
+                Layout {
+                    bounds: rect,
+                    visible,
+                    password,
+                    select: tag.eq_ignore_ascii_case("select"),
+                },
+            );
+        }
     }
     (out, info)
+}
+
+/// One document's layout boxes in its own coordinates: node index →
+/// (layout index, box). A ragged or malformed snapshot drops entries, it
+/// never panics.
+fn doc_boxes(doc: &Value) -> HashMap<usize, (usize, Rect)> {
+    let lay = &doc["layout"];
+    let (Some(index), Some(bounds)) = (lay["nodeIndex"].as_array(), lay["bounds"].as_array())
+    else {
+        return HashMap::new();
+    };
+    index
+        .iter()
+        .enumerate()
+        .filter_map(|(i, ni)| {
+            let ni = usize::try_from(ni.as_u64()?).ok()?;
+            let b = bounds.get(i)?.as_array().filter(|b| b.len() >= 4)?;
+            Some((
+                ni,
+                (i, Rect::new(num(&b[0]), num(&b[1]), num(&b[2]), num(&b[3]))),
+            ))
+        })
+        .collect()
+}
+
+/// Each document's place: the page moves by its scroll; an iframe's
+/// document starts at its iframe element's box (as placed in its parent,
+/// within the parent's clip) less its own scroll. Unplaced: no iframe box
+/// (not rendered), or not reachable from the page.
+fn places(docs: &[Value], boxes: &[HashMap<usize, (usize, Rect)>]) -> Vec<Option<Place>> {
+    let mut places: Vec<Option<Place>> = vec![None; docs.len()];
+    let Some(main) = docs.first() else {
+        return places;
+    };
+    places[0] = Some(Place {
+        dx: -num(&main["scrollOffsetX"]),
+        dy: -num(&main["scrollOffsetY"]),
+        clip: None,
+    });
+    // An iframe element → the document it holds (`contentDocumentIndex`).
+    let hosts: Vec<(usize, usize, usize)> = docs
+        .iter()
+        .enumerate()
+        .flat_map(|(p, d)| {
+            let rare = &d["nodes"]["contentDocumentIndex"];
+            let nodes = rare["index"].as_array().map_or(&[][..], Vec::as_slice);
+            let child = rare["value"].as_array().map_or(&[][..], Vec::as_slice);
+            nodes
+                .iter()
+                .zip(child)
+                .filter_map(move |(n, c)| Some((p, n.as_u64()? as usize, c.as_u64()? as usize)))
+        })
+        .collect();
+    // Parents before children, however the documents are ordered.
+    for _ in 0..docs.len() {
+        for &(p, node, c) in &hosts {
+            let (Some(parent), Some(&(_, frame))) = (places[p], boxes[p].get(&node)) else {
+                continue;
+            };
+            if c == 0 || c >= docs.len() || places[c].is_some() {
+                continue;
+            }
+            let at = Rect::new(frame.x + parent.dx, frame.y + parent.dy, frame.w, frame.h);
+            places[c] = Some(Place {
+                dx: at.x - num(&docs[c]["scrollOffsetX"]),
+                dy: at.y - num(&docs[c]["scrollOffsetY"]),
+                clip: Some(parent.clip.map_or(at, |clip| overlap(at, clip))),
+            });
+        }
+    }
+    places
+}
+
+/// The part of `a` inside `b` (empty when they do not meet).
+fn overlap(a: Rect, b: Rect) -> Rect {
+    let (x0, y0) = (a.x.max(b.x), a.y.max(b.y));
+    let (x1, y1) = ((a.x + a.w).min(b.x + b.w), (a.y + a.h).min(b.y + b.h));
+    Rect::new(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
+}
+
+/// The ids of the page's same-process iframes the snapshot placed, so their
+/// accessibility trees can be read too (`Accessibility.getFullAXTree` reads
+/// one frame at a time).
+pub fn frames(snapshot: &Value) -> Vec<String> {
+    let strings = strings(snapshot);
+    let (docs, _, places) = docs(snapshot);
+    docs.iter()
+        .zip(places)
+        .skip(1)
+        .filter(|(_, p)| p.is_some_and(|p| p.clip.is_some_and(|c| c.w > 0.0 && c.h > 0.0)))
+        .map(|(d, _)| string(&strings, &d["frameId"]).to_string())
+        .filter(|id| !id.is_empty())
+        .take(MAX_FRAMES)
+        .collect()
+}
+
+/// Several frames' accessibility trees as one (a node already seen, by its
+/// backend id, is not repeated).
+pub fn merged(trees: Vec<Value>) -> Value {
+    let mut seen = std::collections::HashSet::new();
+    let nodes: Vec<Value> = trees
+        .into_iter()
+        .flat_map(|mut t| match t["nodes"].take() {
+            Value::Array(a) => a,
+            _ => Vec::new(),
+        })
+        .filter(|n| {
+            n["backendDOMNodeId"]
+                .as_i64()
+                .is_none_or(|id| seen.insert(id))
+        })
+        .collect();
+    serde_json::json!({ "nodes": nodes })
 }
 
 /// Chrome's accessibility roles mapped to Kai's. `None`: not an element the
@@ -138,7 +289,8 @@ fn prop<'a>(node: &'a Value, name: &str) -> Option<&'a Value> {
         .map(|p| &p["value"]["value"])
 }
 
-/// The interactive page elements, as raw nodes in viewport CSS pixels, each
+/// The interactive page elements (`ax_tree`: the page's and its frames',
+/// see [`merged`]), as raw nodes in viewport CSS pixels, each
 /// with its backend DOM node id, plus the page facts. `viewport` is the
 /// visible area (`x`, `y` = 0). Grounding (`a11y::ground_indexed`) then does
 /// reading order, de-duplication, the mark cap and the grid fallback, exactly
@@ -149,7 +301,6 @@ pub fn nodes(
     viewport: Rect,
 ) -> (Vec<(RawNode, DomRef)>, PageInfo) {
     let (layout, info) = layout(snapshot);
-    let (sx, sy) = info.scroll;
     let mut out = Vec::new();
     for n in ax_tree["nodes"].as_array().into_iter().flatten() {
         if n["ignored"].as_bool() == Some(true) {
@@ -165,7 +316,7 @@ pub fn nodes(
         let Some(l) = layout.get(&id) else {
             continue; // no box: not rendered (closed <select> options, display:none)
         };
-        let bounds = Rect::new(l.bounds.x - sx, l.bounds.y - sy, l.bounds.w, l.bounds.h);
+        let bounds = l.bounds;
         if l.password {
             r = Role::PasswordField;
         }
@@ -209,132 +360,4 @@ fn intersects(a: Rect, b: Rect) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    /// Shapes copied from Chromium 141's real replies (trimmed).
-    fn ax() -> Value {
-        let p = |name: &str, v: Value| json!({"name": name, "value": {"type": "x", "value": v}});
-        json!({"nodes": [
-            {"nodeId":"1","ignored":false,"role":{"value":"RootWebArea"},"name":{"value":"Contact us"},"backendDOMNodeId":3,"properties":[p("focusable", json!(true))]},
-            {"nodeId":"2","ignored":false,"role":{"value":"textbox"},"name":{"value":"Name "},"value":{"value":"Ann"},"backendDOMNodeId":12,"properties":[p("focusable", json!(true))]},
-            {"nodeId":"3","ignored":false,"role":{"value":"textbox"},"name":{"value":"Password "},"backendDOMNodeId":15,"properties":[]},
-            {"nodeId":"4","ignored":false,"role":{"value":"button"},"name":{"value":"Send"},"backendDOMNodeId":32,"properties":[]},
-            {"nodeId":"5","ignored":false,"role":{"value":"button"},"name":{"value":"Off"},"backendDOMNodeId":33,"properties":[p("disabled", json!(true))]},
-            {"nodeId":"6","ignored":false,"role":{"value":"option"},"name":{"value":"Two"},"backendDOMNodeId":29,"properties":[]},
-            {"nodeId":"7","ignored":false,"role":{"value":"button"},"name":{"value":"Far below"},"backendDOMNodeId":37,"properties":[]},
-            {"nodeId":"8","ignored":true,"role":{"value":"button"},"name":{"value":"Ghost"},"backendDOMNodeId":40,"properties":[]},
-            {"nodeId":"9","ignored":false,"role":{"value":"StaticText"},"name":{"value":"Contact"},"backendDOMNodeId":38,"properties":[]},
-            {"nodeId":"10","ignored":false,"role":{"value":"button"},"name":{"value":"Hidden"},"backendDOMNodeId":41,"properties":[]},
-            {"nodeId":"11","ignored":false,"role":{"value":"combobox"},"name":{"value":"Size"},"value":{"value":"Two"},"backendDOMNodeId":19,"properties":[]}
-        ]})
-    }
-
-    fn snap(scroll_y: f64) -> Value {
-        json!({
-            "strings": ["https://t.test/contact","Contact us","INPUT","type","password","BUTTON","visible","hidden","OPTION","SELECT"],
-            "documents": [{
-                "documentURL": 0, "title": 1, "scrollOffsetX": 0, "scrollOffsetY": scroll_y,
-                "nodes": {
-                    "backendNodeId": [12, 15, 32, 33, 37, 41, 3, 29, 19],
-                    "nodeName": [2, 2, 5, 5, 5, 5, -1, 8, 9],
-                    "attributes": [[], [3, 4], [], [], [], [], [], [], []]
-                },
-                "layout": {
-                    "nodeIndex": [0, 1, 2, 3, 4, 5, 6, 8],
-                    "bounds": [[42,80,185,21],[296,80,185,21],[628,80,47,21],[679,80,33,21],[0,2140,74,21],[0,120,50,20],[0,0,1280,2162],[576,81,48,19]],
-                    "styles": [[6],[6],[6],[6],[6],[7],[6],[6]]
-                }
-            }]
-        })
-    }
-
-    const VIEW: Rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 1280.0,
-        h: 800.0,
-    };
-
-    fn by_name<'a>(v: &'a [(RawNode, DomRef)], name: &str) -> &'a (RawNode, DomRef) {
-        v.iter().find(|(n, _)| n.name == name).unwrap()
-    }
-
-    #[test]
-    fn joins_tree_and_layout_on_backend_id() {
-        let (v, info) = nodes(&ax(), &snap(0.0), VIEW);
-        assert_eq!(info.url, "https://t.test/contact");
-        assert_eq!(info.title, "Contact us");
-        let (name, r) = by_name(&v, "Name");
-        assert_eq!(
-            *r,
-            DomRef {
-                id: 12,
-                select: false
-            }
-        );
-        assert_eq!(name.role, Role::TextField);
-        assert_eq!(name.value.as_deref(), Some("Ann"));
-        assert_eq!(name.bounds, Rect::new(42.0, 80.0, 185.0, 21.0));
-        assert!(!by_name(&v, "Off").0.enabled);
-        // No layout box (a closed <select>'s option), ignored, or plain text:
-        // not an element.
-        for gone in ["Two", "Ghost", "Contact", "Contact us"] {
-            assert!(
-                v.iter().all(|(n, _)| n.name != gone),
-                "{gone} should be dropped"
-            );
-        }
-    }
-
-    #[test]
-    fn native_selects_are_flagged_and_show_their_value() {
-        let (v, _) = nodes(&ax(), &snap(0.0), VIEW);
-        let (size, r) = by_name(&v, "Size");
-        assert_eq!(size.role, Role::ComboBox);
-        assert_eq!(size.value.as_deref(), Some("Two"));
-        assert_eq!(
-            *r,
-            DomRef {
-                id: 19,
-                select: true
-            }
-        );
-        assert!(!by_name(&v, "Send").1.select);
-    }
-
-    #[test]
-    fn password_inputs_are_secure_and_never_show_a_value() {
-        let (v, _) = nodes(&ax(), &snap(0.0), VIEW);
-        let (pw, _) = by_name(&v, "Password");
-        assert_eq!(pw.role, Role::PasswordField);
-        assert!(pw.secure);
-        assert_eq!(pw.value, None);
-    }
-
-    #[test]
-    fn hidden_and_offscreen_elements_are_not_visible() {
-        let (v, _) = nodes(&ax(), &snap(0.0), VIEW);
-        assert!(!by_name(&v, "Hidden").0.visible, "visibility:hidden");
-        assert!(!by_name(&v, "Far below").0.visible, "below the fold");
-        assert!(by_name(&v, "Send").0.visible);
-    }
-
-    #[test]
-    fn boxes_move_with_the_scroll() {
-        let (v, info) = nodes(&ax(), &snap(2000.0), VIEW);
-        assert_eq!(info.scroll, (0.0, 2000.0));
-        let (far, _) = by_name(&v, "Far below");
-        assert_eq!(far.bounds.y, 140.0);
-        assert!(far.visible);
-        assert!(!by_name(&v, "Send").0.visible, "scrolled off the top");
-    }
-
-    #[test]
-    fn garbage_yields_nothing_rather_than_panicking() {
-        let (v, info) = nodes(&json!({}), &json!({"documents": "x"}), VIEW);
-        assert!(v.is_empty());
-        assert_eq!(info, PageInfo::default());
-    }
-}
+mod tests;

@@ -4,7 +4,7 @@
 use crate::app::KaiApp;
 use crate::ui;
 use ely_gpui_component::{
-    agent::BrowserPreview,
+    agent::{BrowserPreview, ComputerUseViewer},
     buttons::{Button, ButtonVariant},
     chat::{Conversation, ConversationList},
     debug::{Span, TimelineProfiler},
@@ -48,6 +48,49 @@ pub fn load() -> Vec<Entry> {
         .collect();
     v.sort_by_key(|e| std::cmp::Reverse(e.at));
     v
+}
+
+/// How many runs are kept as training data (`Settings::runs_dir`).
+pub fn training_runs() -> usize {
+    std::fs::read_dir(Settings::runs_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .count()
+}
+
+/// The run History shows, read once when it is picked, not on every frame.
+pub struct TraceView {
+    pub dir: PathBuf,
+    pub trace: Trace,
+    pub frames: Vec<String>,
+    /// The frame shown large; the strip picks it.
+    pub shown: usize,
+}
+
+impl TraceView {
+    pub fn load(dir: PathBuf) -> Option<Self> {
+        let trace: Trace =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("trace.json")).ok()?).ok()?;
+        let frames = frames(&dir);
+        Some(Self {
+            shown: frames.len().saturating_sub(1),
+            dir,
+            trace,
+            frames,
+        })
+    }
+}
+
+/// The trace to open for a finished run: its own folder when known. Without
+/// one, the newest (a run from before the folder was kept); a known folder
+/// that has no saved trace opens nothing rather than another run's.
+pub fn pick(history: &[Entry], dir: Option<&Path>) -> Option<PathBuf> {
+    match dir {
+        Some(d) => history.iter().find(|e| e.dir == d).map(|e| e.dir.clone()),
+        None => history.first().map(|e| e.dir.clone()),
+    }
 }
 
 fn frames(dir: &Path) -> Vec<String> {
@@ -158,85 +201,101 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             .query(q)
             .active(active, move |key, _, cx| {
                 picker.update(cx, |a, cx| {
-                    a.pages.open_trace = Some(PathBuf::from(key.as_ref()));
-                    a.pages.trace_range = None;
+                    a.pages.open_trace(Some(PathBuf::from(key.as_ref())));
                     cx.notify();
                 })
             });
 
-    let detail = app.pages.open_trace.clone().and_then(|dir| {
-        let trace: Trace =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("trace.json")).ok()?).ok()?;
-        let (spans, end) = spans(&trace);
+    let detail = app.pages.trace_view.as_ref().map(|view| {
+        let trace = &view.trace;
+        let (spans, end) = spans(trace);
         let range = app.pages.trace_range.unwrap_or((0.0, end));
-        let (pan, exporter) = (cx.entity(), cx.entity());
-        let shots = frames(&dir);
+        let (pan, exporter, pick) = (cx.entity(), cx.entity(), cx.entity());
+        let shots = &view.frames;
         let (p50, p95) = trace.step_percentiles();
-        let d2 = dir.clone();
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(
-                    div()
-                        .text_size(theme.text_size(TextSize::Md))
-                        .child(trace.task.clone()),
-                )
-                .child(
-                    div()
-                        .text_size(theme.text_size(TextSize::Sm))
-                        .text_color(theme.colors.fg_muted)
-                        .child(format!(
-                            "{} · {} steps · step p50 {p50} ms · p95 {p95} ms",
-                            trace
-                                .outcome
-                                .map(crate::state::outcome_text)
-                                .unwrap_or("Ended without a result"),
-                            trace.steps.len()
-                        )),
-                )
-                .child(
-                    div().h_56().child(
-                        TimelineProfiler::new(
-                            "trace",
-                            ["capture", "tree", "encode", "model", "act"],
-                            spans,
-                            range,
-                        )
-                        .on_range(move |r, _, cx| {
-                            pan.update(cx, |a, cx| {
-                                a.pages.trace_range = Some(r);
-                                cx.notify();
-                            })
-                        }),
-                    ),
-                )
-                .children((!shots.is_empty()).then(|| {
-                    BrowserPreview::new("trace-frames", "Frames", shots.clone(), shots.len() - 1)
-                }))
-                .child(
-                    Button::new("export", "Export as zip")
-                        .variant(ButtonVariant::Secondary)
-                        .icon(IconName::Download)
-                        .on_click(move |_, _, cx| {
-                            exporter.update(cx, |a, cx| match export(&d2) {
-                                Ok(p) => a.toast(
-                                    Toast::new("Trace exported")
-                                        .body(p.display().to_string())
-                                        .severity(Severity::Success),
-                                    cx,
-                                ),
-                                Err(e) => a.toast(
-                                    Toast::new("Export failed")
-                                        .body(e.to_string())
-                                        .severity(Severity::Danger),
-                                    cx,
-                                ),
-                            })
-                        }),
+        let d2 = view.dir.clone();
+        // The picked frame large, the strip to move between frames.
+        let shown = shots.get(view.shown).map(|f| {
+            ComputerUseViewer::new("trace-frame", f.clone()).action(format!(
+                "Frame {} of {}",
+                view.shown + 1,
+                shots.len()
+            ))
+        });
+        let strip = (shots.len() > 1).then(|| {
+            BrowserPreview::new("trace-frames", "Frames", shots.clone(), view.shown).on_show(
+                move |ix, _, cx| {
+                    pick.update(cx, |a, cx| {
+                        if let Some(v) = a.pages.trace_view.as_mut() {
+                            v.shown = ix;
+                        }
+                        cx.notify();
+                    })
+                },
+            )
+        });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_size(theme.text_size(TextSize::Md))
+                    .child(trace.task.clone()),
+            )
+            .child(
+                div()
+                    .text_size(theme.text_size(TextSize::Sm))
+                    .text_color(theme.colors.fg_muted)
+                    .child(format!(
+                        "{} · {} steps · step p50 {p50} ms · p95 {p95} ms",
+                        trace
+                            .outcome
+                            .map(crate::words::outcome_text)
+                            .unwrap_or("Ended without a result"),
+                        trace.steps.len()
+                    )),
+            )
+            .child(
+                div().h_56().child(
+                    TimelineProfiler::new(
+                        "trace",
+                        ["capture", "tree", "encode", "model", "act"],
+                        spans,
+                        range,
+                    )
+                    .on_range(move |r, _, cx| {
+                        pan.update(cx, |a, cx| {
+                            a.pages.trace_range = Some(r);
+                            cx.notify();
+                        })
+                    }),
                 ),
-        )
+            )
+            .children(shown)
+            .children(strip)
+            .child(
+                Button::new("export", "Export as zip")
+                    .variant(ButtonVariant::Secondary)
+                    .icon(IconName::Download)
+                    .on_click(move |_, _, cx| {
+                        exporter.update(cx, |a, cx| match export(&d2) {
+                            Ok(p) => a.toast(
+                                Toast::new("Trace exported")
+                                    .body(p.display().to_string())
+                                    .severity(Severity::Success),
+                                cx,
+                            ),
+                            Err(e) => a.toast(
+                                Toast::new("Export failed")
+                                    .body(e.to_string())
+                                    .severity(Severity::Danger),
+                                cx,
+                            ),
+                        })
+                    }),
+            )
     });
 
     let body = if app.pages.history.is_empty() {
@@ -307,6 +366,23 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn view_trace_opens_this_runs_trace_not_the_newest() {
+        let entry = |ms: i64| Entry {
+            dir: PathBuf::from(ms.to_string()),
+            task: format!("task {ms}"),
+            at: jiff::Timestamp::from_millisecond(ms).unwrap(),
+        };
+        // Newest first, as `load` sorts them.
+        let history = [entry(2_000), entry(1_000)];
+        let older = PathBuf::from("1000");
+        assert_eq!(pick(&history, Some(&older)), Some(older));
+        // A run whose trace was never saved opens nothing, not another run.
+        assert_eq!(pick(&history, Some(Path::new("3000"))), None);
+        // No folder known: the newest.
+        assert_eq!(pick(&history, None), Some(PathBuf::from("2000")));
+    }
 
     #[test]
     fn spans_lay_steps_end_to_end() {

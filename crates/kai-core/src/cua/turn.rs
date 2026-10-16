@@ -98,24 +98,20 @@ pub fn safety_prompt(checks: &[SafetyCheck], actions: usize) -> String {
     )
 }
 
-/// Which actions of a stopped batch ran.
-pub fn stopped_note(ran: usize, total: usize, why: &str) -> String {
-    match ran {
-        0 => format!("none of the {total} actions ran: {why}."),
-        _ => format!("actions 1 to {ran} of {total} ran; the rest did not: {why}."),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn notes_say_what_ran() {
+    fn the_person_reads_each_flag_in_words() {
+        let checks = [SafetyCheck {
+            id: "sc".into(),
+            code: Some("malicious_instructions".into()),
+            message: Some("Suspicious page text.".into()),
+        }];
         assert_eq!(
-            stopped_note(2, 5, "the layout changed"),
-            "actions 1 to 2 of 5 ran; the rest did not: the layout changed."
+            safety_prompt(&checks, 2),
+            "OpenAI flagged the next 2 action(s): malicious_instructions: Suspicious page text."
         );
-        assert!(stopped_note(0, 3, "declined").starts_with("none of the 3"));
     }
 }

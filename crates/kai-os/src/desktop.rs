@@ -35,6 +35,41 @@ impl DesktopActuator {
         let (x, y) = r.center();
         Ok((x.round() as i32, y.round() as i32))
     }
+
+    /// Start an app or open a link, then wait for a window to show. `false`
+    /// when the window list could be read and nothing changed.
+    async fn launch(
+        &self,
+        target: &str,
+        start: fn(&str) -> anyhow::Result<()>,
+    ) -> anyhow::Result<bool> {
+        let target = target.to_string();
+        let context = self.input.context();
+        tokio::task::spawn_blocking(move || {
+            let before = crate::window::shot();
+            if let Some(ctx) = &context {
+                ctx.check()?;
+            }
+            start(&target)?;
+            Ok(crate::window::wait_for_change(&before, LAUNCH_WAIT))
+        })
+        .await?
+    }
+
+    /// Where to click before typing: nowhere for an untargeted `type` (it
+    /// types at the focus), the target's centre otherwise. A target that is
+    /// no longer on screen is an error, never a silent type at the focus.
+    fn type_point(
+        decision: &Decision,
+        grounding: &Grounding,
+    ) -> anyhow::Result<Option<(i32, i32)>> {
+        match decision.target {
+            None => Ok(None),
+            Some(t) => Self::point(decision, grounding).map(Some).map_err(|_| {
+                anyhow::anyhow!("target #{t} is not on the screen any more; observe again")
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -60,14 +95,15 @@ impl Actuator for DesktopActuator {
         };
         ctx.check()?;
         match d.action {
-            Action::OpenApp => scoped
-                .open_app(d.text.as_deref().unwrap_or(""))
-                .await
-                .map(|_| None),
-            Action::OpenUrl => scoped
-                .open_url(d.text.as_deref().unwrap_or(""))
-                .await
-                .map(|_| None),
+            Action::OpenApp | Action::OpenUrl => {
+                let target = d.text.as_deref().unwrap_or("");
+                let start = match d.action {
+                    Action::OpenApp => launch::open_app,
+                    _ => launch::open_url,
+                };
+                let appeared = scoped.launch(target, start).await?;
+                Ok(launch_note(target, appeared))
+            }
             Action::Shell => scoped
                 .shell(d.text.as_deref().unwrap_or(""))
                 .await
@@ -104,7 +140,7 @@ impl Actuator for DesktopActuator {
                 self.input.click(x, y, true, 1).await
             }
             Action::Type => {
-                if let Ok((x, y)) = Self::point(d, g) {
+                if let Some((x, y)) = Self::type_point(d, g)? {
                     self.input.click(x, y, false, 1).await?;
                     tokio::time::sleep(Duration::from_millis(60)).await;
                 }
@@ -136,33 +172,11 @@ impl Actuator for DesktopActuator {
     }
 
     async fn open_app(&self, app: &str) -> anyhow::Result<()> {
-        let app = app.to_string();
-        let context = self.input.context();
-        tokio::task::spawn_blocking(move || {
-            let before = crate::window::shot();
-            if let Some(ctx) = &context {
-                ctx.check()?;
-            }
-            launch::open_app(&app)?;
-            crate::window::wait_for_change(&before, LAUNCH_WAIT);
-            Ok(())
-        })
-        .await?
+        self.launch(app, launch::open_app).await.map(drop)
     }
 
     async fn open_url(&self, url: &str) -> anyhow::Result<()> {
-        let url = url.to_string();
-        let context = self.input.context();
-        tokio::task::spawn_blocking(move || {
-            let before = crate::window::shot();
-            if let Some(ctx) = &context {
-                ctx.check()?;
-            }
-            launch::open_url(&url)?;
-            crate::window::wait_for_change(&before, LAUNCH_WAIT);
-            Ok(())
-        })
-        .await?
+        self.launch(url, launch::open_url).await.map(drop)
     }
 
     async fn shell(&self, cmd: &str) -> anyhow::Result<String> {
@@ -173,22 +187,16 @@ impl Actuator for DesktopActuator {
                     .to_string(),
             );
         }
-        // `mousepad file.txt` as a shell step would block until the timeout
-        // (a GUI app never exits by itself): start it detached instead.
-        #[cfg(target_os = "linux")]
-        if crate::launch::linux::is_gui_command(cmd) {
+        // `mousepad file.txt` or `notepad x.txt` as a shell step would block
+        // until the timeout (a GUI app never exits by itself): start it
+        // detached instead, on every OS.
+        if crate::gui_launch::is_gui_command(cmd) {
             let _owner = kai_core::computer::mutation_owner().await;
             let before = tokio::task::spawn_blocking(crate::window::shot).await?;
             if let Some(ctx) = self.input.context() {
                 ctx.check()?;
             }
-            std::process::Command::new("setsid")
-                .args(["-f", "sh", "-c", cmd])
-                .current_dir(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
+            crate::gui_launch::spawn_detached(cmd)?;
             tokio::task::spawn_blocking(move || {
                 crate::window::wait_for_change(&before, LAUNCH_WAIT)
             })
@@ -199,6 +207,19 @@ impl Actuator for DesktopActuator {
         }
         self.shell.run(cmd).await
     }
+}
+
+/// What the model hears after a launch that showed no new window, so it
+/// does not click a screen that will never change (typo'd app names were
+/// reported as opened).
+fn launch_note(target: &str, appeared: bool) -> Option<String> {
+    (!appeared).then(|| {
+        format!(
+            "no window opened or changed within {}s after opening {target:?}: \
+             check the name, or it was already open and in front",
+            LAUNCH_WAIT.as_secs()
+        )
+    })
 }
 
 /// Kai's own process and its parent (the app, or the terminal running
@@ -378,5 +399,29 @@ mod tests {
             Decision::parse_checked(r#"{"thought":"","action":"click","target":9,"risk":"none"}"#)
                 .unwrap();
         assert!(DesktopActuator::point(&missing, &g).is_err());
+    }
+
+    #[test]
+    fn a_launch_with_no_new_window_says_so() {
+        assert_eq!(launch_note("Safari", true), None);
+        let note = launch_note("Safariii", false).unwrap();
+        assert!(
+            note.contains("\"Safariii\"") && note.contains("check the name"),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn typing_at_a_vanished_target_is_refused_not_typed_at_the_focus() {
+        let g = Grounding::Marks(Vec::new());
+        let gone = Decision::parse_checked(
+            r#"{"thought":"","action":"type","target":9,"text":"hi","risk":"none"}"#,
+        )
+        .unwrap();
+        let err = DesktopActuator::type_point(&gone, &g).unwrap_err();
+        assert!(err.to_string().contains("#9"), "{err}");
+        let mut untargeted = gone.clone();
+        untargeted.target = None;
+        assert_eq!(DesktopActuator::type_point(&untargeted, &g).unwrap(), None);
     }
 }

@@ -105,11 +105,9 @@ impl Engine<'_> {
             let (output, path, ok) = match result {
                 Ok((o, p)) => (o, p, true),
                 Err(e) => {
-                    let _ = e;
-                    let e = "action failed";
-                    log::error!("batched act failed at step {step}");
+                    log::error!("batched act failed at step {step}: {e:#}");
                     r.failure_streak += 1;
-                    (Some(format!("ERROR: {e}")), "error", false)
+                    (Some(super::act::act_error(r, &e)), "error", false)
                 }
             };
             let output = output.map(|text| r.privacy.text(&text));

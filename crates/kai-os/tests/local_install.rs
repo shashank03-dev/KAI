@@ -292,6 +292,10 @@ async fn starts_waits_for_health_and_stops_the_fake_server() {
     assert_eq!(st.info.id, "test-model");
     assert_eq!(st.info.port, port);
 
+    let second = m.start(&e, port).await.unwrap_err().to_string();
+    assert!(second.contains("already running"), "{second}");
+    assert!(m.status().await.unwrap().healthy);
+
     // Drop kills it.
     drop(server);
     tokio::time::sleep(Duration::from_millis(500)).await;

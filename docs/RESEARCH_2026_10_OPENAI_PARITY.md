@@ -15,16 +15,22 @@ computer-use models without training them during a run? And can an open model
 `computer` tool contract (a `computer_call` with `actions[]`, screenshot
 outputs, safety checks) to open models and runs it through the same harness?
 
-**Implementation status (2026-10-16).** Phase 1 (protocol parity) and Phase 2
-(the contract for open models, one action per turn) are built and
-fixture-tested; see [COMPUTER_TOOLS.md](COMPUTER_TOOLS.md) and `DECISIONS.md`.
-Differences from the plan below: a model's `mark` stays an element target
-(the accessibility path still applies) instead of becoming a pixel centre;
-the browser lane gained click, type and keys, but not drag or held
-modifiers; batches of more than one action for open models (`--oai-batch`),
-the per-model catalog field, the calibration fixture and Phases 3 to 6 are
-not built. Nothing here has a live measurement yet: Phase 1 needs an
-`OPENAI_API_KEY`, Phase 2 needs the two-runs-per-side bench.
+**Implementation status (2026-10-16).** Phases 1 and 2 are built and tested
+with fixtures. Phase 3 has a planner/grounder split on grid screens:
+`--grounder` and `--grounder-frame` use a second model call to locate a
+described target. Grounded clicks and drags always ask for approval because
+grid observations cannot establish the target's accessibility identity.
+Phase 4 has `--step-candidates` with parallel samples and a deterministic
+cluster vote; it does not yet have a model judge, an `n=K` vLLM request, or
+bench-only trajectory rollouts. Phase 5 has opt-in off-task and sensitive-site
+checks; it does not have the proposed screenshot injection monitor. The
+`--oai-batch` path handles multiple actions with a fresh observation between
+them. A model's `mark` stays an accessibility element target. The browser
+lane lacks drag and held modifiers. The per-model catalog calibration fixture
+and Phase 6 remain unbuilt. Unit and engine tests cover these implemented
+paths; no two-runs-per-side accuracy or latency measurement exists yet.
+OpenAI native API wire parity still needs an `OPENAI_API_KEY`, while the Codex
+CLI backend uses the user's ChatGPT sign-in for limited comparison runs.
 
 Labels follow the earlier research docs: **[Vendor]** (the vendor's own docs or
 claims), **[Paper]**, **[Indep.]**, **[SDK]** (code generated from the vendor's

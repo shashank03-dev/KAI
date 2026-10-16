@@ -1,4 +1,58 @@
 use super::*;
+use std::time::Duration;
+
+#[tokio::test]
+async fn long_text_uses_direct_input_without_touching_clipboard() {
+    let (tx, rx) = mpsc::channel();
+    let input = Input {
+        tx,
+        context: None,
+        held: Vec::new(),
+        moves: Arc::default(),
+    };
+    let text = "a".repeat(100);
+    let expected = text.clone();
+    let worker = std::thread::spawn(move || {
+        let (cmd, reply, _) = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(cmd, Cmd::Type(t) if t == expected));
+        reply.send(Ok((0, 0))).unwrap();
+    });
+    input.type_text(&text).await.unwrap();
+    worker.join().unwrap();
+}
+
+#[tokio::test]
+async fn pointer_commands_bump_the_move_count_and_typing_does_not() {
+    let (tx, rx) = mpsc::channel::<(Cmd, Reply, Option<ExecutionContext>)>();
+    let input = Input {
+        tx,
+        context: None,
+        held: Vec::new(),
+        moves: Arc::default(),
+    };
+    let moves = input.moves.clone();
+    let worker = std::thread::spawn(move || {
+        for (cmd, reply, _) in rx {
+            let busy = moves.busy.load(Ordering::SeqCst) > 0;
+            assert_eq!(busy, cmd.moves_pointer());
+            reply.send(Ok((0, 0))).unwrap();
+        }
+    });
+    input.type_text("hi").await.unwrap();
+    input.cursor().await.unwrap();
+    assert_eq!(input.pointer_moves(), 0);
+    input.click(5, 5, false, 1).await.unwrap();
+    let after_click = input.pointer_moves();
+    assert!(after_click > 0);
+    let shifted = input.holding(&["shift".into()]).unwrap();
+    shifted.move_to(1, 1).await.unwrap();
+    assert!(
+        input.pointer_moves() > after_click,
+        "clones share the count"
+    );
+    drop((input, shifted));
+    worker.join().unwrap();
+}
 
 #[test]
 fn parses_named_and_single_keys() {

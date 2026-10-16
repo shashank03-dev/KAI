@@ -109,7 +109,74 @@ pub fn classify_shell(cmd: &str) -> Risk {
         .split(|ch: char| ch.is_whitespace() || ";|&()`'\"".contains(ch))
         .map(|w| w.rsplit(['/', '\\']).next().unwrap_or(w))
         .any(|w| DELETE_COMMANDS.contains(&w));
-    if deletes || DESTRUCTIVE_SHELL.iter().any(|p| c.contains(p)) {
+    let credential = [
+        ".ssh/",
+        ".aws/credentials",
+        ".netrc",
+        "/etc/shadow",
+        "keychain",
+        "find-generic-password",
+        "find-internet-password",
+        "credential manager",
+    ]
+    .iter()
+    .any(|p| c.contains(p));
+    let outbound_data = [
+        "--data",
+        "-d @",
+        "-t ",
+        "--upload-file",
+        "--post-file",
+        "--post-data",
+    ]
+    .iter()
+    .any(|p| c.contains(p))
+        && ["curl", "wget", "scp", "rsync", "nc ", "netcat"]
+            .iter()
+            .any(|p| c.contains(p));
+    let interpreter = |word: &str| {
+        let name = word
+            .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '/' && ch != '-')
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("");
+        matches!(
+            name,
+            "sh" | "bash"
+                | "zsh"
+                | "dash"
+                | "ksh"
+                | "fish"
+                | "perl"
+                | "ruby"
+                | "node"
+                | "osascript"
+                | "iex"
+                | "invoke-expression"
+        ) || name.starts_with("python")
+    };
+    let piped_to_interpreter = c.split('|').skip(1).any(|segment| {
+        let mut words = segment.split_whitespace();
+        let first = words.next().unwrap_or("");
+        interpreter(first) || (first == "env" && words.next().is_some_and(interpreter))
+    });
+    let nested_interpreter = c
+        .split(|ch: char| ch.is_whitespace() || ";&|`'\"()".contains(ch))
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|w| interpreter(w[0]) && w[1] == "-c");
+    let expression = c.contains("iex(") || c.contains("invoke-expression(");
+    if deletes
+        || credential
+        || outbound_data
+        || piped_to_interpreter
+        || (nested_interpreter
+            && ["curl", "wget", "irm ", "invoke-restmethod"]
+                .iter()
+                .any(|p| c.contains(p)))
+        || expression
+        || DESTRUCTIVE_SHELL.iter().any(|p| c.contains(p))
+    {
         Risk::High
     } else {
         Risk::Low
@@ -198,6 +265,15 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
         "buy",
         "buy now",
         "purchase",
+        "place order",
+        "order now",
+        "paypal",
+        "subscribe",
+        "donate",
+        "give now",
+        "tip",
+        "top up",
+        "recharge",
         "card number",
         "cvv",
     ]
@@ -238,9 +314,27 @@ pub fn explain(d: &Decision, g: &Grounding) -> Option<String> {
 /// "unsubscribe" still send, order, pay and unsubscribe.
 const EFFECT_PREFIXES: &[&str] = &["re", "pre", "un", "auto"];
 
-/// A word in `hay` starts with `prefix` (suffixes allowed: "deleting"), or
-/// with one of [`EFFECT_PREFIXES`] and then `prefix` ("resend").
+/// Endings a stem may take and still be the same effect ("deleting",
+/// "confirmation", "submitted"). Anything else is another word: "postcode"
+/// is not "post", "payable" is not "pay" (review CORE-SAFE-10).
+const SUFFIXES: &[&str] = &[
+    "", "s", "es", "e", "ed", "d", "ing", "er", "ers", "ion", "ions", "ation", "ations", "al",
+    "ure", "ment", "ments", "ted", "ting", "red", "ring",
+];
+
+/// Effect words that are also everyday nouns: they take only verb endings,
+/// and never count as a label ("Order number", "Post office").
+const NOUNS: &[&str] = &["order", "post", "format"];
+const NOUN_SUFFIXES: &[&str] = &["", "s", "ed", "ing", "ted", "ting"];
+const LABEL_WORDS: &[&str] = &[
+    "number", "no", "id", "status", "history", "date", "details", "summary", "code", "tracking",
+    "total", "office", "title", "box",
+];
+
+/// A word in `hay` is `prefix` plus an allowed ending ([`SUFFIXES`]), alone
+/// or after one of [`EFFECT_PREFIXES`] ("resend").
 fn starts_word(hay: &str, prefix: &str) -> bool {
+    let noun = NOUNS.contains(&prefix);
     hay.match_indices(prefix).any(|(i, _)| {
         let before = &hay[..i];
         let word = before
@@ -249,7 +343,24 @@ fn starts_word(hay: &str, prefix: &str) -> bool {
             .take_while(|(_, c)| c.is_alphanumeric())
             .last()
             .map_or("", |(j, _)| &before[j..]);
-        word.is_empty() || EFFECT_PREFIXES.contains(&word)
+        if !(word.is_empty() || EFFECT_PREFIXES.contains(&word)) {
+            return false;
+        }
+        let after = &hay[i + prefix.len()..];
+        let end = after
+            .find(|c: char| !c.is_alphanumeric())
+            .unwrap_or(after.len());
+        let (rest, tail) = after.split_at(end);
+        if noun {
+            let next = tail
+                .trim_start()
+                .split(|c: char| !c.is_alphanumeric())
+                .next()
+                .unwrap_or("");
+            NOUN_SUFFIXES.contains(&rest) && !LABEL_WORDS.contains(&next)
+        } else {
+            SUFFIXES.contains(&rest)
+        }
     })
 }
 

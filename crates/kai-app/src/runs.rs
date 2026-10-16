@@ -14,7 +14,6 @@ use ely_gpui_component::{feedback::Toast, primitives::Severity};
 use futures::StreamExt;
 use gpui::{AppContext, Context, Entity, Window};
 use kai_core::ApprovalChoice;
-use kai_core::engine::EngineEvent;
 use kai_core::human::HumanReply;
 use std::sync::Arc;
 
@@ -49,12 +48,7 @@ pub fn local_label(id: &str) -> String {
     if id.is_empty() {
         return "No local model".into();
     }
-    crate::local_api::load_catalog()
-        .models
-        .into_iter()
-        .find(|m| m.id == id)
-        .map(|m| m.label)
-        .unwrap_or_else(|| id.to_string())
+    crate::local_models::catalog_label(id).unwrap_or_else(|| id.to_string())
 }
 
 pub fn backend_label(b: kai_core::settings::BackendChoice) -> &'static str {
@@ -66,6 +60,7 @@ pub fn backend_label(b: kai_core::settings::BackendChoice) -> &'static str {
         Gateway => "AI Gateway",
         OpenAi => "OpenAI",
         Local => "This computer",
+        Codex => "Codex (ChatGPT)",
         Mock => "Mock",
     }
 }
@@ -140,7 +135,6 @@ impl KaiApp {
     fn launch(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.entry(id) else { return };
         let (state, control) = (entry.state.clone(), entry.control.clone());
-        let mini_control = control.clone();
         let (task, team) = {
             let r = state.read(cx);
             (r.task.clone(), r.team)
@@ -151,16 +145,17 @@ impl KaiApp {
         });
         self.active = Some(id);
         let agent = cx.global::<AgentHandle>().0.clone();
-        let rx = agent.run(
+        let (rx, trace_dir) = agent.run(
             task,
             team,
             self.settings.clone(),
             self.enabled_skills(),
             control,
         );
+        state.update(cx, |r, _| r.trace_dir = Some(trace_dir));
 
         // Get out of Kai's way: the mini window takes over, the main window steps aside.
-        mini::open(state.clone(), mini_control, cx);
+        mini::open(cx.entity().downgrade(), state.clone(), cx);
         if self.capture.is_none() {
             window.minimize_window();
         }
@@ -169,29 +164,34 @@ impl KaiApp {
         let main = window.window_handle().downcast::<KaiApp>();
         cx.spawn(async move |_, cx| {
             let mut rx = rx;
-            // Raised for a code or a question (they are typed in the main
-            // window); stepped aside again once the user answered, so it
-            // never covers what Kai clicks.
+            // Approvals show in the mini window; with it closed, the main
+            // window comes up for them (and steps aside as it is answered,
+            // in `approval::dialog`). Codes and answers are typed here.
             let mut raised = false;
             while let Some(msg) = rx.next().await {
                 let wants_typing = matches!(
                     &msg,
                     Ui::Human(h) if h.check.accepts_code() || h.check.accepts_answer()
                 );
-                let answered = matches!(&msg, Ui::Event(EngineEvent::HumanDone { .. }));
-                state.update(cx, |r, cx| {
+                let wants_approval = matches!(&msg, Ui::Approval(_)) && !mini::is_open(cx);
+                let phase = state.update(cx, |r, cx| {
                     r.apply(msg);
                     cx.notify();
+                    r.phase
                 });
                 if let Some(main) = main.as_ref() {
-                    if wants_typing {
+                    if wants_typing || wants_approval {
                         raised = true;
                         let _ = main.update(cx, |_, window, _| window.activate_window());
-                    } else if answered && raised {
+                    } else if raised && phase != Phase::Waiting {
                         raised = false;
                         let _ = main.update(cx, |_, window, _| window.minimize_window());
                     }
                 }
+                // Kai's windows move (the mini window is dragged, the main
+                // one raised and put away): mask where they are now, before
+                // the next screenshot (review APP-SH-10).
+                cx.update(|cx| mini::exclude_windows(&agent, cx));
             }
             // A run that ends without a result (the agent stopped) still ends.
             state.update(cx, |r, cx| {
@@ -237,7 +237,7 @@ impl KaiApp {
             }
             (None, Some(o)) => Toast::new(format!(
                 "Run ended: {}",
-                crate::state::outcome_text(o).to_lowercase()
+                crate::words::outcome_text(o).to_lowercase()
             ))
             .severity(Severity::Warning),
             (None, None) => Toast::new("Run ended").severity(Severity::Info),
@@ -259,22 +259,37 @@ impl KaiApp {
     }
 
     /// Stop everything: the kill switch, any pending approval, and the queue.
+    /// The main window, the mini window and quitting all stop this way.
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         cx.global::<AgentHandle>().0.stop();
         if self.queued_count(cx) > 0 {
             self.queue_held = true;
         }
         if let Some(state) = self.active_state() {
-            let (approvals, humans) = state.update(cx, |r, _| r.take_all());
-            for p in approvals {
-                let _ = p.reply.send(ApprovalChoice::Stop);
-            }
-            for h in humans {
-                let _ = h.reply.send(HumanReply::Stop);
-            }
+            answer_all_stop(&state, cx);
         }
         self.human_draft.update(cx, |d, cx| d.set_text("", cx));
         cx.notify();
+    }
+
+    /// Kai is quitting: stop live runs the way Stop does (the kill switch
+    /// interrupts a click or typing in progress), answer Stop to everything
+    /// they wait on, cancel the queue and any model download, so quitting
+    /// never leaves Kai half-way through an action.
+    pub fn quit_runs(&mut self, cx: &mut Context<Self>) {
+        cx.global::<AgentHandle>().0.stop();
+        self.queue_held = true;
+        for e in &self.runs {
+            match e.state.read(cx).phase {
+                Phase::Queued => e.state.update(cx, |r, _| r.cancel()),
+                Phase::Running | Phase::Waiting => {
+                    e.control.stop();
+                    answer_all_stop(&e.state, cx);
+                }
+                _ => {}
+            }
+        }
+        self.local_cancel(cx);
     }
 
     /// Stop one run: cancel it if queued, stop it within one step if running.
@@ -295,13 +310,7 @@ impl KaiApp {
                 cx.global::<AgentHandle>().0.stop();
                 // Every sub-agent's approval and check, queued ones too:
                 // one left waiting would keep the run from ending.
-                let (approvals, humans) = state.update(cx, |r, _| r.take_all());
-                for p in approvals {
-                    let _ = p.reply.send(ApprovalChoice::Stop);
-                }
-                for h in humans {
-                    let _ = h.reply.send(HumanReply::Stop);
-                }
+                answer_all_stop(&state, cx);
             }
             _ => {}
         }
@@ -387,11 +396,8 @@ impl KaiApp {
             return;
         };
         if let Some(h) = state.update(cx, |r, cx| {
-            if r.phase == Phase::Waiting {
-                r.phase = Phase::Running;
-            }
             cx.notify();
-            r.take_human()
+            r.answer_human()
         }) {
             let _ = h.reply.send(reply);
         }
@@ -434,5 +440,19 @@ impl KaiApp {
         }) {
             let _ = p.reply.send(choice);
         }
+    }
+}
+
+/// Answer Stop to every approval and check of a run, shown or queued.
+fn answer_all_stop(state: &Entity<RunState>, cx: &mut gpui::App) {
+    let (approvals, humans) = state.update(cx, |r, cx| {
+        cx.notify();
+        r.take_all()
+    });
+    for p in approvals {
+        let _ = p.reply.send(ApprovalChoice::Stop);
+    }
+    for h in humans {
+        let _ = h.reply.send(HumanReply::Stop);
     }
 }

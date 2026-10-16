@@ -3,10 +3,10 @@
 //! empty, settable, non-secure field, then read back to confirm. Runs on a
 //! blocking thread.
 
-use super::live::Plan;
-use super::macos::{AxRef, attr, boolean, string};
+use super::live::{Plan, same_place};
+use super::macos::{AxRef, attr, boolean, rect, string};
 use super::macos_roles::map_role;
-use kai_core::Role;
+use kai_core::{Element, Role};
 use objc2_application_services::{AXError, AXUIElement};
 use objc2_core_foundation::{CFBoolean, CFString};
 use std::ptr::NonNull;
@@ -14,10 +14,10 @@ use std::ptr::NonNull;
 pub fn act(
     node: &AxRef,
     plan: &Plan,
-    role: Role,
+    seen: &Element,
     ctx: &kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
-    let el = &*node.0;
+    let (el, role) = (&*node.0, seen.role);
     // Live checks: the element may be gone (no role) or disabled since the
     // observation, and a secure field is never filled or pressed this way.
     // Text views report no `AXEnabled` at all (TextEdit's, seen on macOS
@@ -32,6 +32,13 @@ pub fn act(
         .and_then(|v| string(&v))
         .unwrap_or_default();
     if !enabled || map_role(&role_now, &subrole) != role || role == Role::PasswordField {
+        return Ok(false);
+    }
+    if !same_place(
+        seen.bounds,
+        rect(attr(el, "AXPosition"), attr(el, "AXSize")),
+    ) {
+        log::debug!("a11y: the element moved since the observation; using the mouse");
         return Ok(false);
     }
     match plan {

@@ -197,6 +197,16 @@ pub fn entry_from_hub(
             r.repo
         )
     })?;
+    for selected in [model, mmproj] {
+        anyhow::ensure!(
+            selected.size.is_some_and(|size| size > 0)
+                && selected.sha256.as_ref().is_some_and(|hash| {
+                    hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+                }),
+            "{} has no verified size and SHA-256 in the Hub listing; refusing an unverified pull",
+            selected.path
+        );
+    }
     let name = model_name(&r.repo);
     let total: u64 = [model, mmproj].iter().filter_map(|f| f.size).sum();
     let model_gb = model.size.unwrap_or(0) as f32 / 1e9;
@@ -230,6 +240,7 @@ pub fn entry_from_hub(
         license: info.license.clone().unwrap_or_else(|| "unknown".into()),
         params_b,
         active_params_b: active,
+        coord_frame: None,
         quant: quant.clone(),
         vision: true,
         context: PULL_CONTEXT,

@@ -1,7 +1,7 @@
 //! `kai run` helpers: the browser lane switch (`--browser`, docs/BROWSER.md)
 //! and the training-data recorder (`--record`).
 
-use crate::backend::BackendArg;
+use crate::backend::{self, BackendArg};
 use crate::bench;
 use kai_core::settings::Settings;
 use std::path::Path;
@@ -67,11 +67,17 @@ pub fn run_recorder(
     let stamp = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string();
     let slug: String = bench::report::slug(task).chars().take(40).collect();
     let run_id = format!("{stamp}-{}", slug.trim_end_matches('-'));
-    let backend = match b {
-        BackendArg::Auto => format!("{:?}", s.backend).to_lowercase(),
-        _ => b.name().to_string(),
+    let (backend, model) = match (b, s.backend) {
+        (BackendArg::Auto, kai_core::settings::BackendChoice::Both) => {
+            ("auto-chain".to_string(), "auto-chain".to_string())
+        }
+        (BackendArg::Auto, choice) => (
+            format!("{choice:?}").to_lowercase(),
+            backend::model_label(b, s),
+        ),
+        _ => (b.name().to_string(), backend::model_label(b, s)),
     };
-    let mut meta = kai_core::RunMeta::new(&run_id, task, "run", backend, &s.fast_model);
+    let mut meta = kai_core::RunMeta::new(&run_id, task, "run", backend, model);
     meta.kai_version = bench::record::kai_version();
     let mut rec = kai_core::TraceRecorder::new(root.join(&run_id), meta)?;
     if s.careful_model != s.fast_model && !s.careful_model.is_empty() {
@@ -91,5 +97,35 @@ pub async fn local_server(
         crate::models::ensure_local(s).await
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kai_core::settings::BackendChoice;
+
+    #[test]
+    fn recorder_names_the_model_that_will_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Settings::default();
+        s.backend = BackendChoice::Local;
+        s.local_model = "holo-3.1-4b-q4".into();
+        let local = run_recorder(dir.path(), "local task", BackendArg::Local, &s)
+            .unwrap()
+            .meta();
+        assert_eq!(local.model, "holo-3.1-4b-q4");
+        assert_eq!(local.backend, "local");
+        let auto = run_recorder(dir.path(), "auto task", BackendArg::Auto, &s)
+            .unwrap()
+            .meta();
+        assert_eq!(auto.model, "holo-3.1-4b-q4");
+        assert_eq!(auto.backend, "local");
+        s.backend = BackendChoice::Both;
+        let chain = run_recorder(dir.path(), "chain task", BackendArg::Auto, &s)
+            .unwrap()
+            .meta();
+        assert_eq!(chain.backend, "auto-chain");
+        assert_eq!(chain.model, "auto-chain");
     }
 }

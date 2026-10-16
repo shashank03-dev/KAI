@@ -31,9 +31,10 @@ model read and write OpenAI's computer-tool contract instead of Kai's Decision
 JSON; it implies the computer tools. Design, sources and per-family evidence:
 [RESEARCH_2026_10_OPENAI_PARITY.md](RESEARCH_2026_10_OPENAI_PARITY.md) §5.
 
-- **Reply:** `{"thought", "actions": [one OpenAI action], "message", "phase"}`,
-  schema-constrained (`oai_contract::schema`). `actions` holds at most one
-  action; the model sees the screen again after it. No actions plus a
+- **Reply:** `{"thought", "actions": [OpenAI actions], "message", "phase"}`,
+  schema-constrained (`oai_contract::schema`). `--oai-batch` permits more
+  than one action; Kai observes again between them and stops the batch if
+  the layout changes or an action fails. No actions plus a
   message: `final_answer` is Kai's `done` (checked like any `done`),
   `commentary` asks the user.
 - **Same parser:** the action is wrapped as a `computer_call` and decoded by
@@ -51,6 +52,15 @@ JSON; it implies the computer tools. Design, sources and per-family evidence:
 - **Prompt:** OpenAI's published loop shape (what changed, did it work, next
   step), untrusted-content and confirmation rules; byte-stable per frame and
   screen size.
+- **Grid screens:** `--grounder <model-id>` lets the planner describe a mouse
+  target and asks a grounding model for its point. Grounded clicks and drags
+  need a person's approval because grid mode has no element identity.
+- **Step sampling:** `--step-candidates K` asks for K replies and executes the
+  action with the most matching candidates. Ties choose the earliest reply.
+  This is an optional comparison mode, not a measured accuracy improvement.
+- **Local safety checks:** `--local-safety-checks` adds approvals for a site
+  outside those named in the task and for listed sensitive sites. The
+  screenshot injection monitor proposed in the research is not implemented.
 
 Not measured yet: whether this beats Kai's own format for any model. Run the
 §7 Phase 2 A/B (two runs per side) before turning it on anywhere.

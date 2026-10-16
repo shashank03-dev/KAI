@@ -25,8 +25,8 @@ pub struct LaneOptions {
     pub headless: bool,
     /// Window (or headless viewport) size in CSS pixels.
     pub size: (u32, u32),
-    /// Where downloads go (the user's Downloads folder); `None` keeps the
-    /// browser's default (a headless browser then refuses downloads).
+    /// Legacy download destination. Downloads are denied until Kai has an
+    /// approval path for writing files outside its own profile.
     pub downloads: Option<PathBuf>,
 }
 
@@ -49,17 +49,43 @@ const MAC_APPS: &[&str] = &[
     "Brave Browser.app/Contents/MacOS/Brave Browser",
 ];
 
+/// Chromium-family installs on Windows, under `%ProgramFiles%`,
+/// `%ProgramFiles(x86)%` or `%LOCALAPPDATA%` (they are not on `PATH`).
+const WINDOWS_APPS: &[&str] = &[
+    "Google/Chrome/Application/chrome.exe",
+    "Microsoft/Edge/Application/msedge.exe",
+    "Chromium/Application/chrome.exe",
+    "BraveSoftware/Brave-Browser/Application/brave.exe",
+];
+
 /// The browser to drive: `KAI_BROWSER` if set, else the first Chromium-family
-/// executable on `PATH`, else (macOS) the first installed app bundle.
+/// executable on `PATH`, else the first standard install (macOS app bundles,
+/// Windows program folders).
 pub fn find_browser() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("KAI_BROWSER").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
+    let exe = if cfg!(windows) { ".exe" } else { "" };
     let on_path = std::env::var_os("PATH").and_then(|path| {
         std::env::split_paths(&path)
-            .flat_map(|dir| BROWSER_NAMES.iter().map(move |n| dir.join(n)))
+            .flat_map(|dir| {
+                BROWSER_NAMES
+                    .iter()
+                    .map(move |n| dir.join(format!("{n}{exe}")))
+            })
             .find(|p| p.is_file())
     });
+    if cfg!(windows) && on_path.is_none() {
+        return ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .flat_map(|dir| {
+                WINDOWS_APPS
+                    .iter()
+                    .map(move |a| PathBuf::from(&dir).join(a))
+            })
+            .find(|p| p.is_file());
+    }
     on_path.or_else(|| {
         if !cfg!(target_os = "macos") {
             return None;
@@ -129,6 +155,11 @@ impl BrowserLane {
         fallback: Option<Box<dyn Actuator>>,
     ) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&opts.profile)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&opts.profile, std::fs::Permissions::from_mode(0o700))?;
+        }
         let cdp = Cdp::launch(&opts.browser, &args(opts))?;
         let targets = match cdp.call("Target.getTargets", json!({}), None).await {
             Ok(t) => t,
@@ -142,15 +173,12 @@ impl BrowserLane {
         };
         cdp.call("Target.setDiscoverTargets", json!({"discover": true}), None)
             .await?;
-        if let Some(dir) = &opts.downloads {
-            std::fs::create_dir_all(dir)?;
-            cdp.call(
-                "Browser.setDownloadBehavior",
-                json!({"behavior": "allow", "downloadPath": dir}),
-                None,
-            )
-            .await?;
-        }
+        cdp.call(
+            "Browser.setDownloadBehavior",
+            json!({"behavior": "deny", "eventsEnabled": true}),
+            None,
+        )
+        .await?;
         let page = targets["targetInfos"]
             .as_array()
             .and_then(|t| t.iter().find(|t| t["type"] == "page"))
@@ -183,6 +211,12 @@ impl BrowserLane {
     /// Whether the browser is still running (the user may close it).
     pub fn is_open(&self) -> bool {
         self.cdp.alive()
+    }
+
+    /// A cancelled input left its release unacknowledged. Recreate the lane
+    /// before another run attempts to observe or act through it.
+    pub fn is_poisoned(&self) -> bool {
+        self.input_poisoned.load(Ordering::SeqCst)
     }
 
     pub(super) fn current(&self) -> PageRef {
@@ -228,6 +262,12 @@ impl BrowserLane {
                 "Target.targetDestroyed" if p["targetId"] == now.target.as_str() => closed = true,
                 "Inspector.targetCrashed" if mine => crashed = true,
                 "Page.fileChooserOpened" if mine => self.file_chooser.store(true, Ordering::SeqCst),
+                "Browser.downloadWillBegin" => {
+                    let name = p["suggestedFilename"].as_str().unwrap_or("a file");
+                    anyhow::bail!(
+                        "the page tried to download {name:?}; Kai blocked the download. Ask the user to save it manually"
+                    );
+                }
                 _ => {}
             }
         }
@@ -402,6 +442,30 @@ pub fn default_profile(config_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn profile_is_private_even_when_it_already_exists() {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let tmp = tempfile::tempdir().unwrap();
+        let profile = tmp.path().join("browser");
+        std::fs::DirBuilder::new()
+            .mode(0o755)
+            .create(&profile)
+            .unwrap();
+        let opts = LaneOptions {
+            browser: tmp.path().join("missing-chromium"),
+            profile: profile.clone(),
+            headless: true,
+            size: (800, 600),
+            downloads: None,
+        };
+        assert!(BrowserLane::launch(&opts, None).await.is_err());
+        assert_eq!(
+            std::fs::metadata(profile).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
 
     #[test]
     fn root_or_not_the_browser_gets_kais_own_profile_and_no_debug_port() {

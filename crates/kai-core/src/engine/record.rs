@@ -21,6 +21,8 @@ pub(super) struct Decided {
     pub raw: String,
     pub prompt_tokens: Option<u32>,
     pub completion_tokens: Option<u32>,
+    /// Later actions of the same turn (`--oai-batch`).
+    pub queued: Vec<crate::computer::ComputerAction>,
 }
 
 impl Decided {
@@ -32,6 +34,7 @@ impl Decided {
             raw: m.raw.clone(),
             prompt_tokens: m.prompt_tokens,
             completion_tokens: m.completion_tokens,
+            queued: Vec::new(),
         }
     }
 
@@ -156,7 +159,9 @@ impl Engine<'_> {
         };
         match parse(&reply.raw) {
             Ok(d) => Ok(Decided::new(d, &reply)),
-            Err(_) if let Some(d) = salvaged(&reply.raw, focused) => Ok(Decided::new(d, &reply)),
+            Err(_) if let Some(d) = salvaged(&reply.raw, |fixed| parse(fixed).ok()) => {
+                Ok(Decided::new(d, &reply))
+            }
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
                 // no-op improvement on vLLM structured outputs).
@@ -212,9 +217,11 @@ impl Engine<'_> {
 
 /// A reply cut off inside `then`: its main decision and complete follow-ups
 /// ([`crate::reply_salvage`]), with no repair call.
-fn salvaged(raw: &str, focused: Option<u32>) -> Option<StepReply> {
+/// `parse` is the run's own reply parser (computer tools or not, review
+/// CORE-ENG-06).
+fn salvaged(raw: &str, parse: impl Fn(&str) -> Option<StepReply>) -> Option<StepReply> {
     let fixed = crate::reply_salvage::salvage_cut_then(raw)?;
-    let r = StepReply::parse_with_focus(&fixed, focused).ok()?;
+    let r = parse(&fixed)?;
     log::info!(
         "reply was cut off in `then`: kept the action and {} follow-up(s)",
         r.then.len()

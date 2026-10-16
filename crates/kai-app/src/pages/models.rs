@@ -4,14 +4,13 @@
 
 use crate::app::{KaiApp, Page as AppPage};
 use crate::local::LocalState;
-use crate::local_api::{Fit, HardwareSummary};
+use crate::local_models::{Fit, HardwareSummary};
 use crate::pages::{models_card, models_store};
 use crate::ui;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::Callout,
     layout::{Card, CardHeader, ScrollArea},
-    motion::Spinner,
     overlays::ConfirmDialog,
     primitives::{Icon, IconName, Severity},
     theme::{ActiveTheme, ControlSize, TextSize},
@@ -77,13 +76,12 @@ fn hardware(l: &LocalState, cx: &Context<KaiApp>) -> AnyElement {
         header = header.action(s);
     }
     let body = match &l.hardware {
-        None => div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(Spinner::new("hw-spin"))
-            .child("Looking at this computer's memory and graphics…")
-            .into_any_element(),
+        None => {
+            let retry = cx.entity();
+            super::models_card::hardware_probe(l.probe_failed, "hw-spin", move |cx| {
+                retry.update(cx, |a, cx| a.detect_local(cx))
+            })
+        }
         Some(hw) => div()
             .grid()
             .grid_cols(4)

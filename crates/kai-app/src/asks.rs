@@ -39,7 +39,8 @@ impl Approver for UiApprover {
 }
 
 /// Asks the user through the app: a desktop notification, then the mini
-/// window and the main window's dialog (see `human.rs`).
+/// window and the main window's dialog (`crate::human_dialog`; the main
+/// window is raised for codes and answers in `runs.rs`).
 pub struct UiHuman {
     pub tx: mpsc::UnboundedSender<Ui>,
 }

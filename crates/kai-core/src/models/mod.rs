@@ -90,6 +90,11 @@ pub struct ModelEntry {
     /// measurement (that is `computer_use`).
     #[serde(default)]
     pub agent_trained: bool,
+    /// Where its coordinates live on OpenAI's computer contract
+    /// (`--oai-contract auto`), from its maker's documentation. `None`:
+    /// unknown, calibrate first (`docs/RESEARCH_2026_10_OPENAI_PARITY.md` §5b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coord_frame: Option<crate::oai_contract::CoordFrame>,
 }
 
 impl ModelEntry {
@@ -214,6 +219,16 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// The documented coordinate frame of `model`: a catalog id, a served
+    /// name, or a provider-prefixed name (`google/gemma-4-26b-a4b-it`).
+    pub fn coord_frame(&self, model: &str) -> Option<crate::oai_contract::CoordFrame> {
+        let bare = model.rsplit('/').next().unwrap_or(model);
+        self.models
+            .iter()
+            .find(|m| m.id == model || m.served_name == bare)
+            .and_then(|m| m.coord_frame)
+    }
+
     /// The built-in catalog only.
     pub fn builtin() -> Self {
         Self::from_json(BUILTIN_CATALOG).expect("built-in catalog.json is valid")
@@ -376,6 +391,28 @@ mod tests {
         let e = none.clients(&Keys::default()).err().unwrap().to_string();
         assert!(e.contains("kai models"), "{e}");
         assert_eq!(local_base_url(8098), "http://127.0.0.1:8098/v1");
+    }
+
+    #[test]
+    fn coordinate_frames_are_catalog_data() {
+        use crate::oai_contract::CoordFrame;
+        let c = Catalog::builtin();
+        assert_eq!(c.coord_frame("gemma-4-26b-a4b-it"), Some(CoordFrame::Marks));
+        assert_eq!(
+            c.coord_frame("google/gemma-4-26b-a4b-it"),
+            Some(CoordFrame::Marks)
+        );
+        assert_eq!(
+            c.coord_frame("ui-tars-1.5-7b-q4"),
+            Some(CoordFrame::SmartResize)
+        );
+        assert_eq!(
+            c.coord_frame("qwen3-vl-8b-instruct"),
+            Some(CoordFrame::Norm1000)
+        );
+        // Undocumented: no guess, the user calibrates or names a frame.
+        assert_eq!(c.coord_frame("holo-3.1-4b-q4"), None);
+        assert_eq!(c.coord_frame("gpt-6-luna"), None);
     }
 
     #[test]

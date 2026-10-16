@@ -5,12 +5,12 @@
 //! back to confirm.
 
 use super::NodeRef;
-use super::linux::conn;
-use super::live::Plan;
+use super::linux::{conn, extents};
+use super::live::{Plan, same_place};
 use atspi::proxy::accessible::ObjectRefExt;
 use atspi::proxy::proxy_ext::ProxyExt;
 use atspi::{Role as A, State};
-use kai_core::Role;
+use kai_core::{Element, Rect, Role};
 use std::time::Duration;
 
 /// Budget for the checks before acting; past it the mouse takes over.
@@ -50,24 +50,25 @@ pub(super) fn pick_action(offered: &[String], wanted: &[&str]) -> Option<usize> 
 pub async fn act(
     node: &NodeRef,
     plan: &Plan,
-    role: Role,
+    seen: &Element,
     ctx: &kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
     match plan {
-        Plan::Press => press(node, role, ctx).await,
-        Plan::Fill(text) => fill(node, text, ctx).await,
+        Plan::Press => press(node, seen, ctx).await,
+        Plan::Fill(text) => fill(node, text, seen.bounds, ctx).await,
     }
 }
 
 async fn press(
     node: &NodeRef,
-    role: Role,
+    seen: &Element,
     ctx: &kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
+    let role = seen.role;
     let bus = conn().await?.connection();
     let prep = async {
         let p = node.as_accessible_proxy(bus).await.ok()?;
-        if !usable(&p).await? {
+        if !usable(&p, seen.bounds).await? {
             return None;
         }
         let action = p.proxies().await.ok()?.action().await.ok()?;
@@ -101,12 +102,13 @@ async fn press(
 async fn fill(
     node: &NodeRef,
     text: &str,
+    seen: Rect,
     ctx: &kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
     let bus = conn().await?.connection();
     let prep = async {
         let p = node.as_accessible_proxy(bus).await.ok()?;
-        if !usable(&p).await? {
+        if !usable(&p, seen).await? {
             return None;
         }
         let state = p.get_state().await.ok()?;
@@ -226,12 +228,17 @@ async fn toolkit(
     app.toolkit_name().await.ok()
 }
 
-/// Alive, shown and enabled right now (states can change after observing).
-async fn usable(p: &atspi::proxy::accessible::AccessibleProxy<'_>) -> Option<bool> {
+/// Alive, shown, enabled and where the observation showed it, right now
+/// (states and places can change after observing).
+async fn usable(p: &atspi::proxy::accessible::AccessibleProxy<'_>, seen: Rect) -> Option<bool> {
     let s = p.get_state().await.ok()?;
     let ok = !s.contains(State::Defunct)
         && s.contains(State::Showing)
         && (s.contains(State::Enabled) || s.contains(State::Sensitive));
+    if ok && !same_place(seen, extents(p).await) {
+        log::debug!("a11y: the element moved since the observation; using the mouse");
+        return Some(false);
+    }
     Some(ok)
 }
 

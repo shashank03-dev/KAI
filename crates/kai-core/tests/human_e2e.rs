@@ -209,6 +209,7 @@ fn engine<'a>(
     sink: &'a Seen,
 ) -> Engine<'a> {
     Engine {
+        grounder: None,
         client,
         careful: None,
         perceptor: page,

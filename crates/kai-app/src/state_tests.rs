@@ -1,4 +1,5 @@
 use super::*;
+use kai_core::Decision;
 use kai_core::engine::ApprovalChoice;
 use kai_core::human::HumanReply;
 use std::sync::Arc;
@@ -235,4 +236,64 @@ fn an_approve_right_after_an_approval_appears_is_ignored() {
     let second = s.answer_approval(ApprovalChoice::Skip).unwrap();
     assert_eq!(second.decision.text.as_deref(), Some("rm b"));
     assert_eq!(s.phase, Phase::Running);
+}
+
+#[test]
+fn an_answer_with_nothing_to_answer_leaves_the_run_waiting() {
+    // The mini window's "I did it" while only an approval waits: nothing is
+    // taken, so the run keeps waiting on that approval (review APP-SH-09).
+    let mut s = RunState::default();
+    s.start("t".into(), false, 40);
+    let (a, _ra) = pending("rm a");
+    s.apply(Ui::Approval(a));
+    assert!(s.answer_human().is_none());
+    assert_eq!(s.phase, Phase::Waiting);
+    assert!(s.approval.is_some());
+}
+
+#[test]
+fn answering_one_decision_keeps_waiting_on_the_other() {
+    let mut s = RunState::default();
+    s.start("t".into(), true, 40);
+    let (a, _ra) = pending("rm a");
+    let (h, _rh) = human("h");
+    s.apply(Ui::Approval(a));
+    s.apply(Ui::Human(h));
+    assert_eq!(s.decisions_waiting(), 2);
+    s.approval_since = Some(Instant::now() - APPROVE_GRACE);
+    assert!(s.answer_approval(ApprovalChoice::Approve).is_some());
+    assert_eq!(s.phase, Phase::Waiting, "the check still waits");
+    assert!(s.answer_human().is_some());
+    assert_eq!(s.phase, Phase::Running);
+    assert_eq!(s.decisions_waiting(), 0);
+}
+
+#[test]
+fn a_failed_run_answers_every_decision_still_waiting() {
+    // A dead approval card must not outlive the run (review APP-SH-11).
+    let mut s = RunState::default();
+    s.start("t".into(), true, 40);
+    let (a, mut ra) = pending("rm a");
+    let (b, mut rb) = pending("rm b");
+    let (h, mut rh) = human("h");
+    s.apply(Ui::Approval(a));
+    s.apply(Ui::Approval(b));
+    s.apply(Ui::Human(h));
+    s.apply(Ui::Failed("gone".into()));
+    assert_eq!(s.phase, Phase::Done);
+    assert_eq!(s.decisions_waiting(), 0);
+    // Dropped replies read as Stop on the engine's side (`asks.rs`).
+    assert!(ra.try_recv().is_err() && rb.try_recv().is_err() && rh.try_recv().is_err());
+}
+
+#[test]
+fn approve_is_ready_only_after_the_grace() {
+    let mut s = RunState::default();
+    s.start("t".into(), false, 40);
+    assert!(s.approve_ready(), "nothing shown");
+    let (a, _ra) = pending("rm a");
+    s.apply(Ui::Approval(a));
+    assert!(!s.approve_ready());
+    s.approval_since = Some(Instant::now() - APPROVE_GRACE);
+    assert!(s.approve_ready());
 }

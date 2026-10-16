@@ -1,8 +1,11 @@
-//! The local-models API as the app uses it: the real `kai_core::models`
+//! Local open models as the app uses them: the real `kai_core::models`
 //! catalog/ranking and `kai_os::local` runtime manager, behind the small
-//! surface the Models page and onboarding were written against.
+//! surface the Models page and onboarding were written against. In-process
+//! only: nothing here serves or listens (the model server binds loopback,
+//! in `kai_os::local`).
 
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 pub use kai_core::models::{Catalog, Fit, HardwareSummary, ModelEntry, Ranked, rank};
 
@@ -23,9 +26,31 @@ pub struct LocalServer {
     pub pid: u32,
 }
 
-/// The built-in catalog plus the user's `models.json` override.
-pub fn load_catalog() -> Catalog {
-    Catalog::load()
+static CATALOG: RwLock<Option<Arc<Catalog>>> = RwLock::new(None);
+
+/// The built-in catalog plus the user's `models.json` override, read from
+/// disk once: labels are looked up while the status bar renders.
+pub fn load_catalog() -> Arc<Catalog> {
+    if let Some(c) = CATALOG.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        return c.clone();
+    }
+    reload_catalog()
+}
+
+/// Read the catalog again (a model was pulled from the Hub).
+pub fn reload_catalog() -> Arc<Catalog> {
+    let fresh = Arc::new(Catalog::load());
+    *CATALOG.write().unwrap_or_else(|e| e.into_inner()) = Some(fresh.clone());
+    fresh
+}
+
+/// A catalog id's label ("Gemma 4 E4B"), if the catalog lists it.
+pub fn catalog_label(id: &str) -> Option<String> {
+    load_catalog()
+        .models
+        .iter()
+        .find(|m| m.id == id)
+        .map(|m| m.label.clone())
 }
 
 pub fn detect_hardware() -> HardwareSummary {
@@ -101,5 +126,21 @@ impl LocalManager {
             base_url: i.base_url,
             pid: i.pid,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_catalog_is_read_once_until_reloaded() {
+        let first = load_catalog();
+        assert!(Arc::ptr_eq(&first, &load_catalog()));
+        let fresh = reload_catalog();
+        assert!(Arc::ptr_eq(&fresh, &load_catalog()));
+        let id = &fresh.models[0].id;
+        assert_eq!(catalog_label(id).as_ref(), Some(&fresh.models[0].label));
+        assert_eq!(catalog_label("no-such-model"), None);
     }
 }

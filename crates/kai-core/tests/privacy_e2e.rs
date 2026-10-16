@@ -148,6 +148,7 @@ async fn check(fail_typing: bool) {
     )
     .unwrap();
     let trace = Engine {
+        grounder: None,
         client: &model,
         careful: None,
         perceptor: &page,

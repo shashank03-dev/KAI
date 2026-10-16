@@ -90,7 +90,7 @@ async fn a_silent_shell_step_is_not_reported_as_a_stalled_screen() {
     let trace = engine(&client, &screen, &hands, &ap, &stop).run("x").await;
     assert_eq!(trace.outcome, Some(Outcome::Success));
     for seen in client.seen() {
-        assert!(!seen.text.contains("has not changed"), "{}", seen.text);
+        assert!(!seen.text.contains("did not change after"), "{}", seen.text);
     }
 }
 
@@ -106,7 +106,7 @@ async fn the_same_shell_command_twice_is_called_out_as_a_loop() {
     engine(&client, &screen, &hands, &ap, &stop).run("x").await;
     let third = &client.seen()[2].text;
     assert!(third.contains("same command twice"), "{third}");
-    assert!(third.contains("has not changed"), "{third}");
+    assert!(third.contains("did not change after"), "{third}");
 }
 
 #[tokio::test]

@@ -16,11 +16,11 @@ pub async fn desktop(title: &str, body: &str) -> bool {
         match tokio::time::timeout(LIMIT, linux::notify(title, body)).await {
             Ok(Ok(())) => true,
             Ok(Err(e)) => {
-                log::info!("no desktop notification: {e}");
+                log::warn!("no desktop notification: {e}");
                 false
             }
             Err(_) => {
-                log::info!("no desktop notification: no answer within {LIMIT:?}");
+                log::warn!("no desktop notification: no answer within {LIMIT:?}");
                 false
             }
         }
@@ -28,7 +28,13 @@ pub async fn desktop(title: &str, body: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
         let shown = tokio::time::timeout(LIMIT, mac::notify(title, body)).await;
-        matches!(shown, Ok(Ok(s)) if s.success())
+        let ok = matches!(shown, Ok(Ok(s)) if s.success());
+        if !ok {
+            log::warn!(
+                "no desktop notification: osascript failed or gave no answer within {LIMIT:?}"
+            );
+        }
+        ok
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {

@@ -81,7 +81,10 @@ pub fn summary(trace: &Trace, check: Option<bool>) -> String {
         let result = if learn::failed(st) {
             let out = st.output.as_deref().unwrap_or("").trim();
             let last = out.lines().last().unwrap_or("");
-            format!("FAILED {}", last.chars().take(80).collect::<String>())
+            format!(
+                "FAILED {}",
+                scrub(last).chars().take(80).collect::<String>()
+            )
         } else if !st.verified {
             "no change".to_string()
         } else {

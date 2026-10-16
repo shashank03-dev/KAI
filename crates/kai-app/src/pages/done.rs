@@ -9,10 +9,10 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     chat::FollowUpSuggestions,
     documents::MarkdownRenderer,
-    feedback::ErrorView,
+    feedback::{ErrorView, Toast},
     layout::ScrollArea,
     motion::Confetti,
-    primitives::{Icon, IconName},
+    primitives::{Icon, IconName, Severity},
     theme::{ActiveTheme, IconSize},
 };
 use gpui::{Context, FontWeight, IntoElement, ParentElement, Styled, Window, div, px};
@@ -21,15 +21,37 @@ use kai_core::{Action, Outcome};
 fn reason(outcome: Option<Outcome>) -> &'static str {
     match outcome {
         Some(Outcome::Success) => "Kai finished the task.",
-        Some(Outcome::Stopped) => "You stopped Kai.",
+        Some(Outcome::Stopped) => "You stopped Kai. Run it again to start over.",
         Some(Outcome::StepLimit) => {
             "Kai hit the step limit before finishing. Raise it in Settings › Safety, or break the task into smaller parts."
         }
         Some(Outcome::TimeLimit) => {
-            "Kai hit the time limit before finishing. Raise it in Settings › Safety."
+            "Kai hit the time limit before finishing. Raise it in Settings › Safety, or break the task into smaller parts."
         }
         Some(Outcome::AskedUser) => "Kai needs your input to go on.",
         Some(Outcome::Failed) | None => "Kai couldn't make progress on this screen.",
+    }
+}
+
+/// Tokens the model reported for the whole run (prompt and reply), or None
+/// when it reported none: never an estimate.
+fn reported_tokens(trace: &kai_core::Trace) -> Option<u64> {
+    let counts: Vec<u64> = trace
+        .steps
+        .iter()
+        .flat_map(|s| [s.call.prompt_tokens, s.call.completion_tokens])
+        .flatten()
+        .map(u64::from)
+        .collect();
+    (!counts.is_empty()).then(|| counts.iter().sum())
+}
+
+/// A stop the user asked for is not a failure.
+fn headline(ok: bool, stopped: bool) -> &'static str {
+    match (ok, stopped) {
+        (true, _) => "done.success",
+        (false, true) => "done.stopped",
+        (false, false) => "done.failure",
     }
 }
 
@@ -45,6 +67,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     let secs = r.elapsed.as_secs_f64();
     let per_step = if steps > 0 { secs / steps as f64 } else { 0.0 };
     let task = r.task.clone();
+    let tokens = r.trace.as_ref().and_then(reported_tokens);
 
     let g = Glass::of(cx);
     let run_key = app.selected.unwrap_or_default();
@@ -92,7 +115,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         "Finished".to_string()
                     } else {
                         outcome
-                            .map(crate::state::outcome_text)
+                            .map(crate::words::outcome_text)
                             .unwrap_or("Ended")
                             .to_string()
                     },
@@ -103,11 +126,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                         .text_size(px(26.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(g.text)
-                        .child(if ok {
-                            t(cx, "done.success", &[])
-                        } else {
-                            t(cx, "done.failure", &[])
-                        }),
+                        .child(t(cx, headline(ok, stopped), &[])),
                 )
                 .child(
                     div()
@@ -166,6 +185,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .clone()
         .map(|md| MarkdownRenderer::new("report", md));
     let (again, save, trace, fresh) = (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+    let trace_dir = r.trace_dir.clone();
     let again_task = task.clone();
     let follow_task = task.clone();
     let follow = cx.entity();
@@ -193,7 +213,8 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         .gap(px(10.))
         .child(tile("Steps", steps.to_string()))
         .child(tile("Total time", format!("{secs:.1}s")))
-        .child(tile("Per step", format!("{per_step:.2}s")));
+        .child(tile("Per step", format!("{per_step:.2}s")))
+        .children(tokens.map(|n| tile("Tokens", n.to_string())));
 
     let actions = div()
         .flex()
@@ -224,7 +245,17 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                 .on_click(move |_, _, cx| {
                     trace.update(cx, |a, cx| {
                         a.pages.reload_history();
-                        a.pages.open_trace = a.pages.history.first().map(|e| e.dir.clone());
+                        let dir =
+                            crate::pages::history::pick(&a.pages.history, trace_dir.as_deref());
+                        if dir.is_none() {
+                            a.toast(
+                                Toast::new("No trace for this run")
+                                    .body("Kai saves a trace when a run ends; this one has none.")
+                                    .severity(Severity::Warning),
+                                cx,
+                            );
+                        }
+                        a.pages.open_trace(dir);
                         a.go(crate::app::Page::History, cx)
                     })
                 }),
@@ -327,4 +358,46 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             }))
             .children(ok.then(|| Confetti::new("confetti", 1))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_is_not_headlined_as_a_failure() {
+        assert_eq!(headline(false, true), "done.stopped");
+        assert_eq!(headline(false, false), "done.failure");
+        assert_eq!(headline(true, false), "done.success");
+    }
+
+    #[test]
+    fn tokens_are_the_models_own_counts_or_nothing() {
+        let d =
+            kai_core::Decision::parse_checked(r#"{"thought":"","action":"wait","risk":"none"}"#)
+                .unwrap();
+        let mut t = kai_core::Trace::new("x");
+        t.push(kai_core::trace::StepRecord::new(
+            0,
+            &d,
+            Default::default(),
+            "x",
+        ));
+        assert_eq!(reported_tokens(&t), None);
+        let mut s = kai_core::trace::StepRecord::new(1, &d, Default::default(), "x");
+        s.call.prompt_tokens = Some(1200);
+        s.call.completion_tokens = Some(30);
+        t.push(s);
+        assert_eq!(reported_tokens(&t), Some(1230));
+    }
+
+    #[test]
+    fn limit_hints_point_at_controls_that_exist() {
+        // Settings › Safety has a step limit and a time limit, each with
+        // more than one choice to raise it to.
+        assert!(reason(Some(Outcome::StepLimit)).contains("Settings › Safety"));
+        assert!(reason(Some(Outcome::TimeLimit)).contains("Settings › Safety"));
+        let minutes = crate::pages::settings::MINUTES;
+        assert!(minutes.len() > 1 && minutes.windows(2).all(|w| w[0] < w[1]));
+    }
 }

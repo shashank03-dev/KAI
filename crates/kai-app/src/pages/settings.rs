@@ -59,8 +59,11 @@ fn stop_row(cx: &Context<KaiApp>) -> impl IntoElement {
     }
 }
 
+/// The time limits Settings › Safety offers, in minutes.
+pub(crate) const MINUTES: [u32; 4] = [5, 10, 20, 30];
+
 fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
-    let (level, steps, team) = (cx.entity(), cx.entity(), cx.entity());
+    let (level, steps, minutes, team) = (cx.entity(), cx.entity(), cx.entity(), cx.entity());
     let sel = match app.settings.approval {
         ApprovalLevel::Every => "every",
         ApprovalLevel::HighRiskOnly => "high",
@@ -77,16 +80,9 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         .row(row("Limits", &format!("At most {} steps and {} minutes per task.", app.settings.max_steps, app.settings.max_minutes), SegmentedControl::new("limits", app.settings.max_steps.to_string())
             .segment("20", "20 steps", None).segment("40", "40 steps", None).segment("80", "80 steps", None)
             .on_change(move |v, _, cx| steps.update(cx, |a, cx| { a.settings.max_steps = v.parse().unwrap_or(40); a.save_settings(cx); })), cx))
+        .row(row("Time limit", "A task stops when it runs longer than this.", MINUTES.iter().fold(SegmentedControl::new("minutes", app.settings.max_minutes.to_string()), |c, m| c.segment(m.to_string(), format!("{m} min"), None))
+            .on_change(move |v, _, cx| minutes.update(cx, |a, cx| { a.settings.max_minutes = v.parse().unwrap_or(10); a.save_settings(cx); })), cx))
         .row(stop_row(cx))
-        .row(Switch::new("use-executor", app.settings.use_executor).label("Fast executor: a local decision model (jevos) carries out Gemma's plan — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_executor = v; a.save_settings(cx); }) }))
-        .row(Switch::new("verify-outcomes", app.settings.verify_outcomes).label("Check the result before \"done\": Kai probes the outcomes Gemma named (files, window title, address bar) — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.verify_outcomes = v; a.save_settings(cx); }) }))
-        .row(Switch::new("macro-history", app.settings.macro_history).label("Remember older steps as a short summary instead of only the last three — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.macro_history = v; a.save_settings(cx); }) }))
-        .row(Switch::new("memo", app.settings.memo).label("Let the model keep a short memo of what it read, for long tasks — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.memo = v; a.save_settings(cx); }) }))
-        .row(Switch::new("task-checks", app.settings.task_checks).label("Check the file or folder a task asks for before accepting done — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.task_checks = v; a.save_settings(cx); }) }))
-        .row(Switch::new("procedures", app.settings.use_procedures).label("Replay remembered procedures for tasks Kai has done before, with no model calls — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_procedures = v; a.save_settings(cx); }) }))
-        .row(Switch::new("best-of", app.settings.best_of_plans).label("Plan long tasks three ways first and follow the plan they agree on (3 extra model calls) — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.best_of_plans = v; a.save_settings(cx); }) }))
-        .row(Switch::new("recover", app.settings.recover).label("When nothing changes, work out why and try another way once before asking — experimental").on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.recover = v; a.save_settings(cx); }) }))
-        .row(Switch::new("use-browser", app.settings.use_browser).label(if cfg!(unix) { "Do tasks in Kai's own browser: pages are read from the browser itself and Kai works in the background, without your mouse — experimental" } else { "Do tasks in Kai's own browser (Linux and macOS only for now) — experimental" }).disabled(!cfg!(unix)).on_change({ let e = cx.entity(); move |v, _, cx| e.update(cx, |a, cx| { a.settings.use_browser = v; a.save_settings(cx); }) }))
         .row(Switch::new("team-default", app.settings.team_mode).label("Use sub-agents by default").on_change(move |v, _, cx| team.update(cx, |a, cx| { a.settings.team_mode = v; a.team = v; a.save_settings(cx); })))
 }
 
@@ -155,7 +151,11 @@ fn privacy(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         ))
         .row(row(
             "Saved runs",
-            &format!("{} runs on disk.", app.pages.history.len()),
+            &format!(
+                "{} runs on disk, {} kept as training data.",
+                app.pages.history.len(),
+                app.pages.training_runs
+            ),
             Button::new("delete-all", "Delete all history")
                 .variant(ButtonVariant::Danger)
                 .on_click(move |_, _, cx| {
@@ -200,6 +200,22 @@ fn privacy(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         )
 }
 
+/// What "Delete all history" removes, said exactly: the traces folder and
+/// the training data folder ([`remove_all`]). Lessons have their own Clear
+/// in Settings › Memory.
+const DELETE_ALL: &str = "Every saved run, its screenshots and the training data kept from runs are removed from this computer. Lessons in Memory stay. This can't be undone.";
+
+/// Remove each folder and everything in it; one already gone is fine.
+fn remove_all(dirs: &[std::path::PathBuf]) -> std::io::Result<()> {
+    for d in dirs {
+        match std::fs::remove_dir_all(d) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn about(cx: &mut Context<KaiApp>) -> SettingsSection {
     SettingsSection::new("About")
         .row(row("Kai", concat!("Version ", env!("CARGO_PKG_VERSION"), " · MIT licence"), div(), cx))
@@ -213,6 +229,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         "appearance" => appearance(app, cx).into_any_element(),
         "privacy" => privacy(app, cx).into_any_element(),
         "memory" => crate::pages::memory::section(app, cx).into_any_element(),
+        "experimental" => crate::pages::experimental::render(app, cx).into_any_element(),
         "shortcuts" => SettingsSection::new("Shortcuts")
             .row(KeyboardShortcutsList::new(
                 crate::pages::shortcut_list(),
@@ -247,22 +264,33 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
     });
     let confirm = app.pages.confirm_delete.then(|| {
         let (closer, doer) = (cx.entity(), cx.entity());
-        ConfirmDialog::new("confirm-delete", "Delete all history?", "Every saved run and its screenshots are removed from this computer. This can't be undone.", move |_, cx| {
-            closer.update(cx, |a, cx| { a.pages.confirm_delete = false; cx.notify(); })
-        })
+        ConfirmDialog::new(
+            "confirm-delete",
+            "Delete all history?",
+            DELETE_ALL,
+            move |_, cx| {
+                closer.update(cx, |a, cx| {
+                    a.pages.confirm_delete = false;
+                    cx.notify();
+                })
+            },
+        )
         .confirm("Delete all")
         .destructive()
-        .on_confirm(move |_, cx| doer.update(cx, |a, cx| {
-            let r = std::fs::remove_dir_all(Settings::traces_dir());
-            a.pages.reload_history();
-            a.pages.open_trace = None;
-            let t = match r {
-                Ok(()) => Toast::new("History deleted").severity(Severity::Success),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Toast::new("History deleted").severity(Severity::Success),
-                Err(e) => Toast::new("Couldn't delete history").body(e.to_string()).severity(Severity::Danger),
-            };
-            a.toast(t, cx);
-        }))
+        .on_confirm(move |_, cx| {
+            doer.update(cx, |a, cx| {
+                let r = remove_all(&[Settings::traces_dir(), Settings::runs_dir()]);
+                a.pages.reload_history();
+                a.pages.open_trace(None);
+                let t = match r {
+                    Ok(()) => Toast::new("History deleted").severity(Severity::Success),
+                    Err(e) => Toast::new("Couldn't delete history")
+                        .body(e.to_string())
+                        .severity(Severity::Danger),
+                };
+                a.toast(t, cx);
+            })
+        })
     });
     div()
         .size_full()
@@ -279,6 +307,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                             ("appearance", "Appearance", IconName::Sun),
                             ("privacy", "Privacy", IconName::Lock),
                             ("memory", "Memory", IconName::BookOpen),
+                            ("experimental", "Experimental", IconName::Wrench),
                             ("shortcuts", "Shortcuts", IconName::Keyboard),
                             ("about", "About", IconName::Info),
                         ],
@@ -308,4 +337,28 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         )
         .children(confirm)
         .children(confirm_memory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_all_removes_runs_and_training_data_as_the_dialog_says() {
+        let root = std::env::temp_dir().join(format!("kai-delete-all-{}", std::process::id()));
+        let (traces, runs) = (root.join("traces"), root.join("runs"));
+        for d in [&traces, &runs] {
+            std::fs::create_dir_all(d.join("1/frames")).unwrap();
+            std::fs::write(d.join("1/frames/step-001.jpg"), b"x").unwrap();
+        }
+        remove_all(&[traces.clone(), runs.clone(), root.join("missing")]).unwrap();
+        assert!(!traces.exists() && !runs.exists());
+        assert!(DELETE_ALL.contains("screenshots") && DELETE_ALL.contains("training data"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_time_limit_offers_the_default() {
+        assert!(MINUTES.contains(&Settings::default().max_minutes));
+    }
 }

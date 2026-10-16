@@ -22,7 +22,31 @@ pub struct Check {
 }
 
 pub async fn check_all() -> Vec<Check> {
-    vec![screen().await, accessibility().await, input()]
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut checks = vec![screen().await, accessibility().await, input()];
+    #[cfg(target_os = "linux")]
+    if wayland() {
+        checks.push(stop_shortcut_on_wayland());
+    }
+    checks
+}
+
+/// A Wayland desktop session (input and global shortcuts reach only XWayland).
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn wayland() -> bool {
+    std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v.eq_ignore_ascii_case("wayland"))
+}
+
+/// The global stop shortcut is an X11 key grab: on Wayland it only fires
+/// while an XWayland window has focus. The corner gesture still works.
+#[cfg(target_os = "linux")]
+fn stop_shortcut_on_wayland() -> Check {
+    Check {
+        name: "Stop shortcut",
+        status: Status::Limited,
+        why: "The stop shortcut halts Kai from any app; the top-left corner gesture always works.",
+        fix: "On Wayland the shortcut only works while an X11 app has focus: push the pointer into the top-left corner to stop Kai, or pick an \"Xorg\"/\"X11\" session at the login screen.".into(),
+    }
 }
 
 pub fn all_granted(checks: &[Check]) -> bool {
@@ -114,6 +138,18 @@ async fn accessibility() -> Check {
     }
 }
 
+/// Other systems: no accessibility reader, so Kai works from the pixels.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+async fn accessibility() -> Check {
+    Check {
+        name: "Accessibility",
+        status: Status::Limited,
+        why: "Kai reads button and field names so it clicks the right thing instead of guessing pixels.",
+        fix: "Kai has no accessibility reader for this system yet; it clicks by grid instead."
+            .into(),
+    }
+}
+
 /// On a Mac, input rides on the Accessibility permission checked above.
 #[cfg(target_os = "macos")]
 fn input() -> Check {
@@ -131,9 +167,7 @@ fn input() -> Check {
 
 #[cfg(not(target_os = "macos"))]
 fn input() -> Check {
-    let wayland = std::env::var("XDG_SESSION_TYPE")
-        .map(|v| v.eq_ignore_ascii_case("wayland"))
-        .unwrap_or(false);
+    let wayland = wayland();
     Check {
         name: "Mouse and keyboard",
         status: if wayland {
@@ -189,7 +223,7 @@ pub async fn enable_accessibility() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub async fn enable_accessibility() -> anyhow::Result<()> {
     Ok(())
 }

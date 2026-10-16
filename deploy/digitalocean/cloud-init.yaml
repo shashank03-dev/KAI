@@ -7,9 +7,6 @@ package_update: true
 packages:
   - docker.io
   - curl
-  - debian-keyring
-  - debian-archive-keyring
-  - apt-transport-https
 
 write_files:
   - path: /etc/kai/vllm.env
@@ -83,6 +80,28 @@ write_files:
         http://127.0.0.1:8000/v1/chat/completions || echo 000)
       [[ "$code" == "200" ]] && echo ready || { echo "not-ready ($code)"; exit 1; }
 
+  # Stock Caddy (Ubuntu's package) has no `exec` or `rate_limit` module, so
+  # readiness is checked by a timer and served as a file (review TBD-01).
+  - path: /etc/systemd/system/kai-health.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Kai readiness check (written to /var/lib/kai/health.txt)
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/sh -c '/usr/local/bin/kai-health > /var/lib/kai/health.tmp 2>&1; mv /var/lib/kai/health.tmp /var/lib/kai/health.txt'
+
+  - path: /etc/systemd/system/kai-health.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Re-check Kai readiness every 30 s
+      [Timer]
+      OnBootSec=60
+      OnUnitActiveSec=30
+      [Install]
+      WantedBy=timers.target
+
   - path: /etc/caddy/Caddyfile
     permissions: "0644"
     content: |
@@ -92,21 +111,22 @@ write_files:
       # __HOSTNAME_MODE__ is "sslip" (auto IP host) or your real domain.
       :443 {
         tls internal
-        # Only expose the health check and the OpenAI API surface.
+        # Only expose the health check and the OpenAI API surface. /v1 needs
+        # the vLLM API key; stock Caddy has no rate limiter.
         handle /health {
-          exec /usr/local/bin/kai-health
+          root * /var/lib/kai
+          rewrite * /health.txt
+          file_server
         }
         handle /v1/* {
-          rate_limit {
-            zone kai { key {remote_host} events 60 window 1m }
-          }
           reverse_proxy 127.0.0.1:8000
         }
         respond 404
       }
 
 runcmd:
-  - mkdir -p /root/.cache/huggingface /etc/kai
+  - mkdir -p /root/.cache/huggingface /etc/kai /var/lib/kai
+  - echo "not-ready (starting)" > /var/lib/kai/health.txt
   # NVIDIA container toolkit so docker can see the GPU.
   - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
   - curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' > /etc/apt/sources.list.d/nvidia-container-toolkit.list
@@ -116,4 +136,5 @@ runcmd:
   - systemctl restart docker
   - systemctl daemon-reload
   - systemctl enable --now vllm.service
+  - systemctl enable --now kai-health.timer
   - systemctl enable --now caddy

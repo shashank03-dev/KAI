@@ -199,7 +199,7 @@ installed for you.
   kai memory pending | accept <id|all> | reject <id>
   kai memory exam <current.json> <candidate.json> [--accept]
   kai memory procedures [--forget N]
-  kai run --no-memory "…"     # neither use nor add lessons for this run
+  kai run --no-memory "…"     # neither use nor add lessons or a memory trace for this run
   ```
 
 `kai run` and the app use memory by default. `kai bench` does **not** (fair

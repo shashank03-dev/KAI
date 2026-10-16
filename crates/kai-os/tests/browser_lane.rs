@@ -88,6 +88,11 @@ async fn serve() -> String {
 
 async fn lane() -> Option<(BrowserLane, tempfile::TempDir)> {
     let Some(browser) = find_browser() else {
+        // CI sets KAI_REQUIRE_BROWSER so a missing browser fails, not passes.
+        assert!(
+            std::env::var_os("KAI_REQUIRE_BROWSER").is_none(),
+            "KAI_REQUIRE_BROWSER is set but no Chromium-family browser was found"
+        );
         eprintln!("no Chromium-family browser found (set KAI_BROWSER); skipping");
         return None;
     };
@@ -286,6 +291,7 @@ async fn engine_runs_a_web_task_through_the_lane() {
         r#"{"thought":"sent","action":"done","risk":"none"}"#.to_string(),
     ]);
     let engine = Engine {
+        grounder: None,
         client: &client,
         careful: None,
         perceptor: &lane,

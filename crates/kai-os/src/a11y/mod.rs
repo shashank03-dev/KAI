@@ -48,7 +48,8 @@ pub struct RawNode {
     pub secure: bool,
     /// Has keyboard focus (AT-SPI `Focused`, UIA `HasKeyboardFocus`).
     pub focused: bool,
-    /// Current text of a field (Linux: AT-SPI Text). `None` when unknown.
+    /// Current text of a field (AT-SPI Text, `AXValue`, UIA `ValueValue`),
+    /// see [`field_value`]. `None` when unknown.
     pub value: Option<String>,
     /// The live object, for accessibility-first actions. `None` in tests.
     pub handle: Option<NodeRef>,
@@ -93,6 +94,13 @@ async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
     tokio::task::spawn_blocking(macos::read).await?
 }
 
+/// The focused window of the app in front (macOS), for picking the display
+/// to capture.
+#[cfg(target_os = "macos")]
+pub(crate) fn focused_window_rect() -> Option<Rect> {
+    macos::focused_window_rect()
+}
+
 /// A running count of accessibility events from the active app (Linux,
 /// AT-SPI); `None` where events are not wired (Windows) or not running.
 pub fn ui_events() -> Option<u64> {
@@ -110,6 +118,23 @@ pub fn ui_events() -> Option<u64> {
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
     anyhow::bail!("no accessibility reader on this OS; using the grid")
+}
+
+/// Most characters of a field's text kept in the element list.
+pub const MAX_VALUE_CHARS: usize = 200;
+
+/// What the element list shows as a field's text: only for text fields,
+/// never for secure ones, the first [`MAX_VALUE_CHARS`] characters, `None`
+/// when blank.
+pub fn field_value(role: Role, secure: bool, text: Option<String>) -> Option<String> {
+    if role != Role::TextField || secure {
+        return None;
+    }
+    let text = text?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(text.chars().take(MAX_VALUE_CHARS).collect())
 }
 
 fn interactive(role: Role) -> bool {
@@ -138,47 +163,47 @@ pub async fn act_context(
     let Some((el, plan)) = live::resolve(decision, grounding) else {
         return Ok(false);
     };
-    let Some(node) = live::lookup(&el) else {
+    let Some(node) = live::lookup(&el, grounding) else {
         return Ok(false);
     };
-    platform_act(node, plan, el.role, context.clone()).await
+    platform_act(node, plan, el, context.clone()).await
 }
 
 #[cfg(target_os = "linux")]
 async fn platform_act(
     node: NodeRef,
     plan: live::Plan,
-    role: Role,
+    el: Element,
     context: kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
-    linux_act::act(&node, &plan, role, &context).await
+    linux_act::act(&node, &plan, &el, &context).await
 }
 
 #[cfg(target_os = "windows")]
 async fn platform_act(
     node: NodeRef,
     plan: live::Plan,
-    role: Role,
+    el: Element,
     context: kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
-    tokio::task::spawn_blocking(move || windows_act::act(&node, &plan, role, &context)).await?
+    tokio::task::spawn_blocking(move || windows_act::act(&node, &plan, &el, &context)).await?
 }
 
 #[cfg(target_os = "macos")]
 async fn platform_act(
     node: NodeRef,
     plan: live::Plan,
-    role: Role,
+    el: Element,
     context: kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
-    tokio::task::spawn_blocking(move || macos_act::act(&node, &plan, role, &context)).await?
+    tokio::task::spawn_blocking(move || macos_act::act(&node, &plan, &el, &context)).await?
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 async fn platform_act(
     _: NodeRef,
     _: live::Plan,
-    _: Role,
+    _: Element,
     _: kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
     Ok(false)
@@ -312,6 +337,19 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[test]
+    fn field_values_are_text_fields_only_never_secure_and_clipped() {
+        let some = |t: &str| Some(t.to_string());
+        assert_eq!(field_value(Role::TextField, false, some("hi")), some("hi"));
+        assert_eq!(field_value(Role::TextField, true, some("hunter2")), None);
+        assert_eq!(field_value(Role::PasswordField, false, some("x")), None);
+        assert_eq!(field_value(Role::Button, false, some("OK")), None);
+        assert_eq!(field_value(Role::TextField, false, some("  ")), None);
+        let long = "é".repeat(500);
+        let kept = field_value(Role::TextField, false, Some(long)).unwrap();
+        assert_eq!(kept.chars().count(), MAX_VALUE_CHARS);
     }
 
     const SCREEN: Rect = Rect {

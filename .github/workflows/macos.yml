@@ -61,11 +61,11 @@ jobs:
           n=$(ls shots/*.png 2>/dev/null | wc -l | tr -d ' ')
           echo "kai-app exit code $code, $n screens"
           [ "$n" -gt 0 ] || { tail -40 app-err.log; exit 1; }
+      # Fails below the known baseline (18/19 on 2026-10-15; DECISIONS.md),
+      # so a regression is red instead of hidden in the log (review TEST-02).
       - name: Real desktop, recorded replies
-        continue-on-error: true
         run: |
-          dist/Kai.app/Contents/MacOS/kai bench --backend replay --yes --out target/bench-replay
-          echo "replay exit $?"
+          dist/Kai.app/Contents/MacOS/kai bench --backend replay --yes --min-pass 18 --out target/bench-replay
       - uses: actions/upload-artifact@v4
         if: always()
         with:

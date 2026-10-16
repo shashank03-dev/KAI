@@ -2,9 +2,8 @@
 //! a corner so it never covers what Kai clicks. It is kept out of every frame
 //! Kai sends to the model.
 
-use crate::AgentHandle;
 use crate::agent::Agent;
-use crate::control::RunControl;
+use crate::app::KaiApp;
 use crate::i18n::t;
 use crate::pages::running::agent_state;
 use crate::state::{Phase, RunState};
@@ -17,28 +16,29 @@ use ely_gpui_component::{
     theme::{ActiveTheme, TextSize},
 };
 use gpui::{
-    App, AppContext, AsyncApp, Context, Entity, FocusHandle, Global, IntoElement, ParentElement,
-    Render, Styled, Window, WindowHandle, div, px, size,
+    App, AppContext, AsyncApp, ClickEvent, Context, Entity, FocusHandle, Global, IntoElement,
+    ParentElement, Render, Styled, WeakEntity, Window, WindowHandle, div, px, size,
 };
 use kai_core::human::HumanReply;
 use kai_core::{ApprovalChoice, Rect};
-use std::sync::Arc;
 
 struct Open(Option<WindowHandle<MiniWindow>>);
 impl Global for Open {}
 
+/// Shows the active run. Its answers and Stop go through the main window's
+/// [`KaiApp`], so both windows answer the same way.
 pub struct MiniView {
+    app: WeakEntity<KaiApp>,
     run: Entity<RunState>,
-    control: Arc<RunControl>,
     focus: FocusHandle,
 }
 
-pub fn open(run: Entity<RunState>, control: Arc<RunControl>, cx: &mut App) {
+pub fn open(app: WeakEntity<KaiApp>, run: Entity<RunState>, cx: &mut App) {
     let view = cx.new(|cx| {
         cx.observe(&run, |_, _, cx| cx.notify()).detach();
         MiniView {
+            app,
             run,
-            control,
             focus: cx.focus_handle(),
         }
     });
@@ -52,6 +52,15 @@ pub fn open(run: Entity<RunState>, control: Arc<RunControl>, cx: &mut App) {
         Ok(h) => cx.set_global(Open(Some(h))),
         Err(e) => log::error!("mini window: {e:#}"),
     }
+}
+
+/// Whether the mini window is still on screen (the person may close it).
+pub fn is_open(cx: &mut AsyncApp) -> bool {
+    cx.update(|cx| {
+        cx.try_global::<Open>()
+            .and_then(|o| o.0)
+            .is_some_and(|h| h.update(cx, |_, _, _| ()).is_ok())
+    })
 }
 
 pub fn close(cx: &mut AsyncApp) {
@@ -97,45 +106,20 @@ pub fn exclude_windows(agent: &Agent, cx: &mut App) {
     crate::agent::exclude(&agent.perceptor, rects);
 }
 
-impl MiniView {
-    fn answer(run: &Entity<RunState>, choice: ApprovalChoice, cx: &mut App) {
-        if let Some(p) = run.update(cx, |r, cx| {
-            cx.notify();
-            r.answer_approval(choice)
-        }) {
-            let _ = p.reply.send(choice);
-        }
-    }
-
-    /// The mini window's Stop: every approval and check of this run, shown
-    /// or queued, answers Stop.
-    fn stop_all(run: &Entity<RunState>, cx: &mut App) {
-        let (approvals, humans) = run.update(cx, |r, cx| {
-            cx.notify();
-            r.take_all()
-        });
-        for p in approvals {
-            let _ = p.reply.send(ApprovalChoice::Stop);
-        }
-        for h in humans {
-            let _ = h.reply.send(HumanReply::Stop);
-        }
-    }
-
-    /// Answer a human check (CAPTCHA, code, sign-in approval, question).
-    fn answer_human(run: &Entity<RunState>, reply: HumanReply, cx: &mut App) {
-        if let Some(h) = run.update(cx, |r, cx| {
-            r.phase = Phase::Running;
-            cx.notify();
-            r.take_human()
-        }) {
-            let _ = h.reply.send(reply);
-        }
+/// A click handler that acts through the main window's app (gone only
+/// while Kai quits, when nothing is left to answer).
+fn via_app(
+    app: &WeakEntity<KaiApp>,
+    f: fn(&mut KaiApp, &mut Context<KaiApp>),
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let app = app.clone();
+    move |_, _, cx| {
+        let _ = app.update(cx, f);
     }
 }
 
 impl Render for MiniView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let g = crate::ui::Glass::of(cx);
         let r = self.run.read(cx);
@@ -151,16 +135,9 @@ impl Render for MiniView {
                 ("max", &r.max_steps.to_string()),
             ],
         );
-        let (stop_run, a, s, d) = (
-            self.run.clone(),
-            self.run.clone(),
-            self.run.clone(),
-            self.run.clone(),
-        );
-
+        let app = &self.app;
         // A human check: the user does it on screen (or types a code or an
         // answer in Kai's main window), then says so here.
-        let (h_done, h_stop) = (self.run.clone(), self.run.clone());
         let human = r.human.as_ref().map(|h| {
             let typed = h.check.accepts_code() || h.check.accepts_answer();
             let hint = if typed {
@@ -185,38 +162,45 @@ impl Render for MiniView {
                         .child(
                             Button::new("mini-human-done", "I did it")
                                 .variant(ButtonVariant::Primary)
-                                .on_click(move |_, _, cx| {
-                                    Self::answer_human(&h_done, HumanReply::Resolved, cx)
-                                }),
+                                .on_click(via_app(app, |a, cx| {
+                                    a.answer_human(HumanReply::Resolved, cx)
+                                })),
                         )
                         .child(
                             Button::new("mini-human-stop", "Stop")
                                 .variant(ButtonVariant::Danger)
-                                .on_click(move |_, _, cx| {
-                                    Self::answer_human(&h_stop, HumanReply::Stop, cx)
-                                }),
+                                .on_click(via_app(app, |a, cx| {
+                                    a.answer_human(HumanReply::Stop, cx)
+                                })),
                         ),
                 )
         });
-        let has_human = human.is_some();
-        let answers = (waiting && !has_human).then(|| {
+        // Approve, Skip and Stop only while an approval is actually shown
+        // (not in the moment `Waiting` precedes it), and one check at a time.
+        let ready = r.approve_ready();
+        if !ready {
+            // Approve turns on once the grace is over (`APPROVE_GRACE`).
+            window.request_animation_frame();
+        }
+        let answers = (r.approval.is_some() && human.is_none()).then(|| {
             div()
                 .flex()
                 .gap_2()
                 .child(
                     Button::new("mini-approve", "Approve")
                         .variant(ButtonVariant::Primary)
-                        .on_click(move |_, _, cx| Self::answer(&a, ApprovalChoice::Approve, cx)),
+                        .disabled(!ready)
+                        .on_click(via_app(app, |a, cx| a.answer(ApprovalChoice::Approve, cx))),
                 )
                 .child(
                     Button::new("mini-skip", "Skip")
                         .variant(ButtonVariant::Secondary)
-                        .on_click(move |_, _, cx| Self::answer(&s, ApprovalChoice::Skip, cx)),
+                        .on_click(via_app(app, |a, cx| a.answer(ApprovalChoice::Skip, cx))),
                 )
                 .child(
                     Button::new("mini-deny", "Stop")
                         .variant(ButtonVariant::Danger)
-                        .on_click(move |_, _, cx| Self::answer(&d, ApprovalChoice::Stop, cx)),
+                        .on_click(via_app(app, |a, cx| a.answer(ApprovalChoice::Stop, cx))),
                 )
         });
 
@@ -271,7 +255,7 @@ impl Render for MiniView {
                         // caption while this approval waits.
                         format!(
                             "Waiting for you: {}",
-                            crate::state::describe(&p.decision, p.element.as_deref())
+                            crate::words::describe(&p.decision, p.element.as_deref())
                         )
                     } else {
                         r.caption.clone()
@@ -286,7 +270,6 @@ impl Render for MiniView {
             .children(human)
             .children(answers)
             .children((!waiting).then(|| {
-                let (control, run) = (self.control.clone(), self.run.clone());
                 let paused = r.paused;
                 div()
                     .flex()
@@ -294,26 +277,14 @@ impl Render for MiniView {
                     .child(
                         Button::new("mini-pause", if paused { "Resume" } else { "Pause" })
                             .variant(ButtonVariant::Secondary)
-                            .on_click(move |_, _, cx| {
-                                control.set_paused(!paused);
-                                run.update(cx, |r, cx| {
-                                    r.paused = !paused;
-                                    if paused {
-                                        r.held = false;
-                                    }
-                                    cx.notify();
-                                });
-                            }),
+                            .on_click(via_app(app, KaiApp::toggle_pause)),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .child(stop_button("mini-stop").full_width().on_click(
-                                move |_, _, cx| {
-                                    cx.global::<AgentHandle>().0.stop();
-                                    Self::stop_all(&stop_run, cx);
-                                },
-                            )),
+                        div().flex_1().child(
+                            stop_button("mini-stop")
+                                .full_width()
+                                .on_click(via_app(app, KaiApp::stop)),
+                        ),
                     )
             }))
     }

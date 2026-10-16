@@ -65,6 +65,9 @@ impl Engine<'_> {
             if r.step >= self.config.max_steps {
                 break;
             }
+            if r.out_of_time() {
+                return Some(Outcome::TimeLimit);
+            }
             if self.drain_steering(r, r.step) {
                 stopped_at = Some("you sent a message".into());
                 break;
@@ -92,8 +95,15 @@ impl Engine<'_> {
             let (output, path) = match self.act(&d, &g, &r.privacy, None).await {
                 Ok(x) => x,
                 Err(e) => {
-                    let _ = e;
-                    stopped_at = Some("the step failed".into());
+                    // Keep the cause: in the trace and for the model (review
+                    // CORE-ENG-04).
+                    let error = super::act::act_error(r, &e);
+                    let mut rec = StepRecord::new(r.step, &d, Timings::default(), PROCEDURE);
+                    rec.path = Some("error".into());
+                    rec.output = Some(error.clone());
+                    r.push(rec);
+                    r.step += 1;
+                    stopped_at = Some(format!("the step failed ({error})"));
                     break;
                 }
             };

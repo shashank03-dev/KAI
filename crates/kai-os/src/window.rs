@@ -43,6 +43,29 @@ pub fn region(wins: &[Win], display: Rect, own_pid: u32) -> Option<Rect> {
     r.filter(|r| r.w >= 32.0 && r.h >= 32.0)
 }
 
+/// The focused window of another app (Kai's own does not count), in global
+/// coordinates, for picking the display to capture.
+pub fn focused_rect() -> Option<Rect> {
+    #[cfg(target_os = "macos")]
+    {
+        // xcap re-reads the whole window list per window property; the
+        // accessibility API answers this in three calls.
+        crate::a11y::focused_window_rect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        focused_of(&list(), std::process::id())
+    }
+}
+
+/// The focused, not minimised window's rect, unless it is `own_pid`'s.
+pub fn focused_of(wins: &[Win], own_pid: u32) -> Option<Rect> {
+    wins.iter()
+        .find(|w| w.focused && !w.minimized)
+        .filter(|w| w.pid != own_pid)
+        .map(|w| w.rect)
+}
+
 /// The windows on this machine (X11, Windows). Wayland lists none.
 pub fn list() -> Vec<Win> {
     let Ok(all) = xcap::Window::all() else {
@@ -98,10 +121,18 @@ pub fn unchanged(before: &Option<Shot>, now: &Option<Shot>) -> bool {
 /// window list changes, so the next look sees the app and not the desktop
 /// it is still starting on (seen live: a cold Firefox took longer than the
 /// screen settle, the model saw a black screen and opened it three more
-/// times).
-pub fn wait_for_change(before: &Option<Shot>, max: std::time::Duration) {
+/// times). `false` only when the list was read and nothing changed; where
+/// windows cannot be listed (Wayland) a launch cannot be verified and
+/// counts as seen.
+pub fn wait_for_change(before: &Option<Shot>, max: std::time::Duration) -> bool {
     let deadline = std::time::Instant::now() + max;
-    while std::time::Instant::now() < deadline && unchanged(before, &shot()) {
+    loop {
+        if !unchanged(before, &shot()) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 }
@@ -160,6 +191,18 @@ mod tests {
             region(&wins, DISPLAY, 1),
             Some(Rect::new(100.0, 100.0, 950.0, 600.0))
         );
+    }
+
+    #[test]
+    fn the_focused_window_is_another_apps() {
+        let mut wins = [
+            win(20, 2000.0, 0.0, 800.0, 600.0, false),
+            win(10, -1500.0, 100.0, 800.0, 600.0, true),
+        ];
+        assert_eq!(focused_of(&wins, 1), Some(wins[1].rect));
+        assert_eq!(focused_of(&wins, 10), None, "Kai itself in front");
+        wins[1].minimized = true;
+        assert_eq!(focused_of(&wins, 1), None);
     }
 
     #[test]

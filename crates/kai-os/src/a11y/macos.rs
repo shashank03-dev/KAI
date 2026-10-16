@@ -72,7 +72,14 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
     // so no single call can wait on a hung app for long.
     let system = unsafe { AXUIElement::new_system_wide() };
     unsafe { system.set_messaging_timeout(MESSAGING_TIMEOUT) };
-    let app = frontmost_pid()
+    let front = frontmost_pid();
+    // Kai itself in front (the user just pressed Run): its own controls are
+    // painted out of the frame and must not become marks either.
+    if front == Some(std::process::id() as i32) {
+        super::active::set(None, None);
+        return Ok(Vec::new());
+    }
+    let app = front
         // SAFETY: creating an app element from a pid has no preconditions.
         .map(|pid| unsafe { AXUIElement::new_application(pid) })
         .or_else(|| attr(&system, "AXFocusedApplication").and_then(element))
@@ -112,6 +119,22 @@ pub fn read() -> anyhow::Result<Vec<RawNode>> {
         walk.run(bar);
     }
     Ok(walk.out)
+}
+
+/// The frontmost app's focused window, in points; `None` when Kai itself
+/// is in front or the window cannot be read. Three accessibility calls, so
+/// cheap enough to run before every capture.
+pub fn focused_window_rect() -> Option<Rect> {
+    let pid = frontmost_pid().filter(|p| *p != std::process::id() as i32)?;
+    if !trusted() {
+        return None;
+    }
+    // SAFETY: creating an app element from a pid has no preconditions;
+    // the timeout bounds every call on it.
+    let app = unsafe { AXUIElement::new_application(pid) };
+    unsafe { app.set_messaging_timeout(MESSAGING_TIMEOUT) };
+    let window = attr(&app, "AXFocusedWindow").and_then(element)?;
+    rect(attr(&window, "AXPosition"), attr(&window, "AXSize"))
 }
 
 /// The frontmost app's process id, read now. `activeApplication` is
@@ -169,7 +192,7 @@ impl Walk<'_> {
                     visible: in_clip(bounds, clip),
                     secure,
                     focused: flag(A_FOCUSED).unwrap_or(false),
-                    value: (role == Role::TextField).then(|| text(A_VALUE)),
+                    value: super::field_value(role, secure, Some(text(A_VALUE))),
                     handle: Some(AxRef(el.clone())),
                 });
             }
@@ -250,7 +273,10 @@ fn ax_value<T>(v: &CFType, kind: AXValueType, mut out: T) -> Option<T> {
     unsafe { ax.value(kind, NonNull::from(&mut out).cast()) }.then_some(out)
 }
 
-fn rect(pos: Option<CFRetained<CFType>>, size: Option<CFRetained<CFType>>) -> Option<Rect> {
+pub(super) fn rect(
+    pos: Option<CFRetained<CFType>>,
+    size: Option<CFRetained<CFType>>,
+) -> Option<Rect> {
     let p = ax_value(&*pos?, AXValueType::CGPoint, CGPoint { x: 0.0, y: 0.0 })?;
     let s = ax_value(
         &*size?,

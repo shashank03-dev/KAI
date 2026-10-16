@@ -20,10 +20,23 @@ pub struct Ab {
     #[arg(long)]
     pub computer_tools_v1: bool,
     /// Open models read and write OpenAI's computer-tool contract, with
-    /// coordinates in this frame: marks, pixels, norm1000 or smart-resize
+    /// coordinates in this frame: marks, pixels, norm1000, smart-resize, or
+    /// auto (the model's documented frame from the catalog)
     /// (`docs/RESEARCH_2026_10_OPENAI_PARITY.md` §5b). Implies the tools.
     #[arg(long, value_name = "FRAME", value_parser = frame)]
-    pub oai_contract: Option<kai_core::oai_contract::CoordFrame>,
+    pub oai_contract: Option<OaiFrame>,
+    /// Kai's own OpenAI-shaped safety checks: ask before acting on a site
+    /// the task does not name, or on a sensitive one (mail, money, identity).
+    #[arg(long)]
+    pub local_safety_checks: bool,
+    /// Most actions per turn on the OpenAI contract (default 1); later
+    /// actions run only while the screen layout holds.
+    #[arg(long, value_name = "K", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=16))]
+    pub oai_batch: u8,
+    /// Replies sampled per step on the OpenAI contract; the largest group
+    /// of agreeing replies wins and only its action runs. Costs K model calls.
+    #[arg(long, value_name = "K", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=8))]
+    pub step_candidates: u8,
     /// Disable multi-action steps (one action per model call).
     #[arg(long)]
     pub no_batch: bool,
@@ -95,6 +108,15 @@ impl Ab {
         if self.oai_contract.is_some() {
             v.push("--oai-contract");
         }
+        if self.local_safety_checks {
+            v.push("--local-safety-checks");
+        }
+        if self.oai_batch > 1 {
+            v.push("--oai-batch");
+        }
+        if self.step_candidates > 1 {
+            v.push("--step-candidates");
+        }
         if self.executor {
             v.push("--executor");
         }
@@ -143,7 +165,13 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.memo = ab.memo;
     config.task_checks = ab.task_checks;
     config.computer_tools_v1 = ab.computer_tools_v1 || ab.oai_contract.is_some();
-    config.oai_contract = ab.oai_contract;
+    config.oai_contract = match ab.oai_contract {
+        Some(OaiFrame::Frame(f)) => Some(f),
+        _ => None,
+    };
+    config.local_safety_checks = ab.local_safety_checks;
+    config.oai_batch = ab.oai_batch.max(1);
+    config.step_candidates = ab.step_candidates.max(1);
     Ok(true)
 }
 
@@ -154,15 +182,43 @@ impl Ab {
     }
 }
 
-fn frame(name: &str) -> Result<kai_core::oai_contract::CoordFrame, String> {
-    kai_core::oai_contract::CoordFrame::parse(name).ok_or_else(|| {
-        format!("unknown frame {name:?}: use marks, pixels, norm1000 or smart-resize")
-    })
+/// `--oai-contract`: a coordinate frame, or the model's own from the catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OaiFrame {
+    Auto,
+    Frame(kai_core::oai_contract::CoordFrame),
+}
+
+fn frame(name: &str) -> Result<OaiFrame, String> {
+    if name.trim().eq_ignore_ascii_case("auto") {
+        return Ok(OaiFrame::Auto);
+    }
+    kai_core::oai_contract::CoordFrame::parse(name)
+        .map(OaiFrame::Frame)
+        .ok_or_else(|| {
+            format!("unknown frame {name:?}: use marks, pixels, norm1000, smart-resize or auto")
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oai_contract_takes_a_frame_or_auto() {
+        use kai_core::oai_contract::CoordFrame;
+        assert_eq!(frame("auto"), Ok(OaiFrame::Auto));
+        assert_eq!(frame("norm1000"), Ok(OaiFrame::Frame(CoordFrame::Norm1000)));
+        assert!(frame("guess").is_err());
+        let mut c = Config::default();
+        let ab = Ab {
+            oai_contract: Some(OaiFrame::Frame(CoordFrame::Marks)),
+            ..Ab::default()
+        };
+        apply_ab(&mut c, &ab).unwrap();
+        assert_eq!(c.oai_contract, Some(CoordFrame::Marks));
+        assert!(c.computer_tools_v1, "the contract implies the tools");
+    }
 
     #[test]
     fn switches_map_onto_config() {

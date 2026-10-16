@@ -224,6 +224,41 @@ fn file_names_slug_the_model() {
 }
 
 #[test]
+fn repeat_bench_writes_do_not_replace_earlier_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = summary("mock", "recorded", "2026-10-16", true);
+    let second = summary("mock", "recorded", "2026-10-16", false);
+    let (first_json, first_md) = report::write(&first, dir.path()).unwrap();
+    let before = std::fs::read_to_string(&first_json).unwrap();
+    let (second_json, second_md) = report::write(&second, dir.path()).unwrap();
+    assert_ne!(first_json, second_json);
+    assert_ne!(first_md, second_md);
+    assert_eq!(std::fs::read_to_string(first_json).unwrap(), before);
+    assert!(
+        std::fs::read_to_string(second_json)
+            .unwrap()
+            .contains("\"passed\": 0")
+    );
+}
+
+#[test]
+fn bench_status_distinguishes_empty_and_failed_runs() {
+    use std::process::ExitCode;
+    let mut s = summary("mock", "recorded", "2026-10-16", false);
+    assert_eq!(super::exit_status(&s, false, None), ExitCode::SUCCESS);
+    assert_eq!(super::exit_status(&s, true, None), ExitCode::FAILURE);
+    // A known baseline: pass at it, fail below it.
+    let n = s.passed;
+    assert_eq!(super::exit_status(&s, false, Some(n)), ExitCode::SUCCESS);
+    assert_eq!(
+        super::exit_status(&s, false, Some(n + 1)),
+        ExitCode::FAILURE
+    );
+    s.total = 0;
+    assert_eq!(super::exit_status(&s, false, None), ExitCode::FAILURE);
+}
+
+#[test]
 fn report_merges_latest_per_backend_and_model_from_files_only() {
     let dir = tempfile::tempdir().unwrap();
     for s in [

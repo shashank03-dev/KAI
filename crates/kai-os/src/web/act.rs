@@ -3,7 +3,7 @@
 //! its browser while the user works elsewhere.
 
 use super::cdp::{DialogOpen, TabGone};
-use super::dialog::{self, DialogTarget};
+use super::dialog;
 use super::keys::{self, Chord};
 use super::lane::{BrowserLane, MarkTarget};
 use async_trait::async_trait;
@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 /// Longest a navigation may take before the step fails.
-const LOAD_LIMIT: Duration = Duration::from_secs(20);
+pub(super) const LOAD_LIMIT: Duration = Duration::from_secs(20);
 /// Longest wait for typed text to show in the focused element.
 const TYPED_WAIT: Duration = Duration::from_millis(600);
 
@@ -66,7 +66,7 @@ impl BrowserLane {
     /// element (role, name and box match; its value and enabled state may
     /// have changed since, e.g. by Kai's own typing). `None` when the marks
     /// are stale; the caller then uses the box from the grounding.
-    fn target_for(&self, mark: u32, g: &Grounding) -> Option<MarkTarget> {
+    pub(super) fn target_for(&self, mark: u32, g: &Grounding) -> Option<MarkTarget> {
         let m = self.marked.lock().ok()?;
         let seen = m.grounding.as_ref()?.element(mark)?;
         let asked = g.element(mark)?;
@@ -109,7 +109,7 @@ impl BrowserLane {
     ) -> anyhow::Result<()> {
         self.page(
             "Input.dispatchMouseEvent",
-            json!({"type": kind, "x": x, "y": y, "button": button, "clickCount": clicks}),
+            mouse_event(kind, x, y, button, clicks),
         )
         .await
         .map(drop)
@@ -124,7 +124,7 @@ impl BrowserLane {
                 &self.cdp,
                 &self.input_poisoned,
                 "Input.dispatchMouseEvent",
-                json!({"type":"mouseReleased","x":x,"y":y,"button":button,"clickCount":n}),
+                mouse_event("mouseReleased", x, y, button, n),
                 self.current().session,
             );
             super::release::guarded(release, async {
@@ -222,49 +222,6 @@ impl BrowserLane {
         .map(drop)
     }
 
-    /// Answer the open page dialog.
-    async fn answer(&self, accept: bool) -> anyhow::Result<()> {
-        let session = self.current().session;
-        let mut params = json!({ "accept": accept });
-        if accept && let Some(text) = self.answer.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            params["promptText"] = json!(text);
-        }
-        self.cdp
-            .call("Page.handleJavaScriptDialog", params, Some(&session))
-            .await?;
-        self.cdp.clear_dialog(&session);
-        // A `beforeunload` answer lets the navigation go on.
-        self.wait_loaded(LOAD_LIMIT).await;
-        Ok(())
-    }
-
-    /// While a dialog is open only its own marks, Enter and Esc work.
-    async fn act_on_dialog(&self, d: &Decision, g: &Grounding, open: &Value) -> anyhow::Result<()> {
-        let target = d.target.and_then(|m| self.target_for(m, g));
-        match (d.action, target) {
-            (
-                Action::Click | Action::DoubleClick,
-                Some(MarkTarget::Dialog(DialogTarget::Accept)),
-            ) => self.answer(true).await,
-            (
-                Action::Click | Action::DoubleClick,
-                Some(MarkTarget::Dialog(DialogTarget::Dismiss)),
-            ) => self.answer(false).await,
-            (Action::Type, Some(MarkTarget::Dialog(DialogTarget::Field))) => {
-                *self.answer.lock().unwrap_or_else(|e| e.into_inner()) = d.text.clone();
-                Ok(())
-            }
-            (Action::Click, Some(MarkTarget::Dialog(DialogTarget::Field))) => Ok(()),
-            (Action::Key, _) if d.keys == ["enter"] => self.answer(true).await,
-            (Action::Key, _) if d.keys == ["esc"] => self.answer(false).await,
-            (Action::Wait | Action::AskUser | Action::Done, _) => Ok(()),
-            _ => anyhow::bail!(
-                "{}: answer it first (click OK or Cancel)",
-                dialog::describe(open)
-            ),
-        }
-    }
-
     /// Navigate after the lane's address policy (`kai_core::web`).
     pub async fn navigate(&self, raw: &str) -> anyhow::Result<()> {
         let url = kai_core::web::normalise_url(raw).map_err(anyhow::Error::msg)?;
@@ -283,6 +240,19 @@ impl BrowserLane {
         self.wait_loaded(LOAD_LIMIT).await;
         Ok(())
     }
+}
+
+/// One `Input.dispatchMouseEvent`. `buttons` is the mask of buttons held
+/// once the event happened, as Chromium's own DevTools sends it: pages that
+/// read it ignore a right press that claims no button is down.
+fn mouse_event(kind: &str, x: f64, y: f64, button: &str, clicks: u32) -> Value {
+    let held = match (kind, button) {
+        ("mousePressed", "left") => 1,
+        ("mousePressed", "right") => 2,
+        ("mousePressed", "middle") => 4,
+        _ => 0,
+    };
+    json!({"type": kind, "x": x, "y": y, "button": button, "buttons": held, "clickCount": clicks})
 }
 
 /// The option's own text from its mark name (`Billing (option)`).
@@ -469,6 +439,23 @@ impl BrowserLane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pressed_button_is_in_the_buttons_mask_until_released() {
+        assert_eq!(
+            mouse_event("mousePressed", 1.0, 2.0, "right", 1)["buttons"],
+            2
+        );
+        assert_eq!(
+            mouse_event("mousePressed", 1.0, 2.0, "left", 2)["buttons"],
+            1
+        );
+        assert_eq!(
+            mouse_event("mouseReleased", 1.0, 2.0, "right", 1)["buttons"],
+            0
+        );
+        assert_eq!(mouse_event("mouseMoved", 1.0, 2.0, "none", 0)["buttons"], 0);
+    }
 
     #[test]
     fn quad_centre_is_the_mean_of_four_corners() {

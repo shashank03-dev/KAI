@@ -23,12 +23,9 @@ pub struct VllmClient {
 impl VllmClient {
     /// `endpoint` is the base, e.g. `https://host/v1`.
     pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
-        let http = reqwest::Client::builder()
-            .pool_max_idle_per_host(2)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .tcp_keepalive(Duration::from_secs(30))
-            .build()
-            .expect("reqwest client");
+        // The shared client, so corporate roots (`SSL_CERT_FILE`) reach the
+        // Droplet too.
+        let http = super::http_client();
         Self {
             http,
             endpoint: endpoint.into().trim_end_matches('/').to_string(),

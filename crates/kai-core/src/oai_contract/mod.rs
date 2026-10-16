@@ -8,6 +8,8 @@ mod prompt;
 mod reply;
 #[cfg(test)]
 mod tests;
-pub use frame::{CoordFrame, rescale, smart_resize};
-pub use prompt::system;
-pub use reply::{Turn, decode, schema};
+mod vote;
+pub use frame::{CoordFrame, rescale, smart_resize, stopped_note};
+pub use prompt::{grounding, system};
+pub use reply::{LATER_FOCUS, Turn, decode, schema};
+pub use vote::vote;

@@ -1,11 +1,11 @@
 //! Screenshot fixtures for local models: the Models page ranked, mid-download
 //! and ready, and onboarding's "Run on this computer" choice. Made-up
-//! hardware; the catalog is whatever `local_api` provides. Settings are only
+//! hardware; the catalog is whatever `local_models` provides. Settings are only
 //! changed in memory, never saved.
 
 use crate::app::{KaiApp, Page};
 use crate::local::{Job, LocalState, Step};
-use crate::local_api::{HardwareSummary, LocalServer, Progress};
+use crate::local_models::{HardwareSummary, LocalServer, Progress};
 use gpui::{AppContext, Context, Window};
 use kai_core::settings::BackendChoice;
 

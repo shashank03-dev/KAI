@@ -38,15 +38,24 @@ impl Engine<'_> {
             temperature: TEMPERATURE,
         };
         let replies = futures::future::join_all((0..n).map(|_| self.client.decide(&req))).await;
-        let plans: Vec<Vec<String>> = replies
+        let replies: Vec<_> = replies
             .into_iter()
             .filter_map(|x| {
                 x.map_err(|e| log::info!("best-of: a plan call failed: {e}"))
                     .ok()
             })
+            .collect();
+        let sum = |f: fn(&crate::client::ModelReply) -> Option<u32>| {
+            replies.iter().filter_map(f).reduce(|a, b| a + b)
+        };
+        let (prompt_tokens, completion_tokens) =
+            (sum(|r| r.prompt_tokens), sum(|r| r.completion_tokens));
+        let plans: Vec<Vec<String>> = replies
+            .iter()
             .filter_map(|reply| best_of::parse(&reply.raw))
             .collect();
-        if let Some(b) = best_of::judge(plans, n) {
+        if let Some(mut b) = best_of::judge(plans, n) {
+            (b.prompt_tokens, b.completion_tokens) = (prompt_tokens, completion_tokens);
             log::info!(
                 "best-of: plan {} of {} chosen (scores {:?})",
                 b.chosen + 1,

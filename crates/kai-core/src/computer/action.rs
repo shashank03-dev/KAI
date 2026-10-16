@@ -125,6 +125,18 @@ impl ComputerAction {
         }
     }
 
+    /// The targets, for updating them in place (all but drag points).
+    pub fn targets_mut(&mut self) -> Vec<&mut Target> {
+        match self {
+            Self::Click { target, .. }
+            | Self::Move { target, .. }
+            | Self::Type { target, .. }
+            | Self::Scroll { target, .. } => vec![target],
+            Self::Drag { points, .. } => points.iter_mut().collect(),
+            _ => vec![],
+        }
+    }
+
     pub fn kind(&self) -> ActionKind {
         match self {
             Self::Observe => ActionKind::Observe,

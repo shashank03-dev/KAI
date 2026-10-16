@@ -27,6 +27,9 @@ pub enum BackendArg {
     OpenaiNative,
     /// An open model on this computer (`kai models`); `--model <catalog id>`.
     Local,
+    /// A model through the Codex CLI and your ChatGPT sign-in; `--model`
+    /// required (e.g. gpt-6-luna). Each step is one `codex exec` call.
+    Codex,
     /// Recorded replies on a scripted screen; touches nothing (bench only).
     Mock,
     /// Recorded replies, executed for real on this desktop (bench only).
@@ -43,6 +46,7 @@ impl BackendArg {
             BackendArg::OpenAi => "openai",
             BackendArg::OpenaiNative => "openai-native",
             BackendArg::Local => "local",
+            BackendArg::Codex => "codex",
             BackendArg::Mock => "mock",
             BackendArg::Replay => "replay",
         }
@@ -63,8 +67,52 @@ pub struct BackendOpts {
     /// Used for both the fast and the careful slot.
     #[arg(long)]
     pub model: Option<String>,
+    /// A grounding model for screens without marks on the OpenAI contract:
+    /// the planner describes a target and this model finds it.
+    #[arg(long, value_name = "MODEL")]
+    pub grounder: Option<String>,
+    /// The grounder's coordinate frame (default: its catalog entry).
+    #[arg(long, value_name = "FRAME", value_parser = grounder_frame)]
+    pub grounder_frame: Option<kai_core::oai_contract::CoordFrame>,
     #[command(flatten)]
     pub ab: Ab,
+}
+
+fn grounder_frame(name: &str) -> Result<kai_core::oai_contract::CoordFrame, String> {
+    kai_core::oai_contract::CoordFrame::parse(name)
+        .ok_or_else(|| format!("unknown frame {name:?}: use pixels, norm1000 or smart-resize"))
+}
+
+/// The `--grounder` client and its frame, on the same backend as the planner.
+pub fn grounder(
+    s: &Settings,
+    keys: &Keys,
+    o: &BackendOpts,
+) -> anyhow::Result<
+    Option<(
+        Box<dyn kai_core::ModelClient>,
+        kai_core::oai_contract::CoordFrame,
+    )>,
+> {
+    let Some(model) = o.grounder.as_deref() else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        o.ab.oai_contract.is_some(),
+        "--grounder works with --oai-contract (the planner describes targets on its contract)"
+    );
+    let frame = match o.grounder_frame {
+        Some(f) => f,
+        None => kai_core::models::Catalog::load()
+            .coord_frame(model)
+            .filter(|f| f.unmarked())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{model} has no documented pixel frame: pass --grounder-frame, or calibrate it"
+                )
+            })?,
+    };
+    Ok(Some((s.client(keys, model)?, frame)))
 }
 
 /// Settings with the chosen backend and model applied.
@@ -77,6 +125,7 @@ pub fn settings_for(b: BackendArg, model: Option<&str>) -> anyhow::Result<Settin
         BackendArg::Gateway => BackendChoice::Gateway,
         BackendArg::OpenAi | BackendArg::OpenaiNative => BackendChoice::OpenAi,
         BackendArg::Local => BackendChoice::Local,
+        BackendArg::Codex => BackendChoice::Codex,
         BackendArg::Mock | BackendArg::Replay => BackendChoice::Mock,
     };
     if b == BackendArg::Local || (b == BackendArg::Auto && s.backend == BackendChoice::Local) {
@@ -144,6 +193,21 @@ pub fn config(s: &Settings, ab: &Ab) -> anyhow::Result<(Config, bool)> {
         ..Config::default()
     };
     let applied = apply_ab(&mut c, ab)?;
+    if ab.oai_contract == Some(crate::ab::OaiFrame::Auto) {
+        let model = match s.backend {
+            BackendChoice::Local => &s.local_model,
+            _ => &s.fast_model,
+        };
+        let frame = kai_core::models::Catalog::load()
+            .coord_frame(model)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{model} has no documented coordinate frame: pass --oai-contract <frame>, \
+                     or calibrate it first (docs/RESEARCH_2026_10_OPENAI_PARITY.md §5b)"
+                )
+            })?;
+        c.oai_contract = Some(frame);
+    }
     Ok((c, applied))
 }
 

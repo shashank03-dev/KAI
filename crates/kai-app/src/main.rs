@@ -17,7 +17,7 @@ mod human_dialog;
 mod i18n;
 mod keys;
 mod local;
-mod local_api;
+mod local_models;
 mod mini;
 mod nav;
 mod onboarding;
@@ -28,6 +28,7 @@ mod store;
 mod switcher;
 mod team;
 mod ui;
+mod words;
 
 use ely_gpui_component::{
     Assets,
@@ -60,6 +61,13 @@ impl StopHotkey {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let _instance = match single_instance() {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("Kai is already running, or could not lock its settings: {e}");
+            std::process::exit(1);
+        }
+    };
     let agent = match agent::Agent::start() {
         Ok(a) => Arc::new(a),
         Err(e) => {
@@ -72,9 +80,10 @@ fn main() {
     gpui_platform::application()
         .with_assets(Assets::before(assets::KaiAssets))
         .run(move |cx: &mut App| {
-            ely_gpui_component::init(cx).expect("Ely failed to start");
+            if let Err(e) = ely_gpui_component::init(cx) {
+                fail("Kai could not start its interface", e);
+            }
             let settings = kai_core::settings::Settings::load();
-            i18n::install(cx);
             brand::apply(settings.glass, cx);
             let mode = match settings.theme.as_str() {
                 "dark" => Mode::Dark,
@@ -121,17 +130,60 @@ fn main() {
                 window_background: material(settings.glass),
                 ..Default::default()
             };
-            let window = cx
-                .open_window(options, |window, cx| {
-                    cx.new(|cx| app::KaiApp::new(settings, capture_dir.clone(), window, cx))
-                })
-                .expect("Kai's window failed to open");
+            let window = match cx.open_window(options, |window, cx| {
+                cx.new(|cx| app::KaiApp::new(settings, capture_dir.clone(), window, cx))
+            }) {
+                Ok(w) => w,
+                Err(e) => fail("Kai could not open its window", e),
+            };
             if let Some(s) = splash {
                 let _ = s.update(cx, |_, window, _| window.remove_window());
             }
             let _ = window.update(cx, |app, window, cx| app.after_open(window, cx));
             cx.activate(true);
         });
+}
+
+/// A start-up failure the user (or a script) can act on: what failed and
+/// why on stderr, and exit code 1, like a failed agent start.
+fn fail(what: &str, e: impl std::fmt::Display) -> ! {
+    eprintln!("{what}: {e:#}");
+    std::process::exit(1)
+}
+
+/// Held until the GUI exits. Keep the lock file itself in place: deleting it
+/// would allow another process to lock a new inode while this one still runs.
+fn single_instance() -> std::io::Result<std::fs::File> {
+    lock_instance(&kai_core::settings::Settings::dir())
+}
+
+fn lock_instance(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(dir)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("kai-app.lock"))?;
+    file.try_lock()?;
+    Ok(file)
+}
+
+#[cfg(test)]
+#[test]
+fn a_second_app_cannot_take_the_first_apps_lock() {
+    let dir = std::env::temp_dir().join(format!(
+        "kai-app-lock-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let first = lock_instance(&dir).unwrap();
+    assert!(lock_instance(&dir).is_err());
+    drop(first);
+    assert!(lock_instance(&dir).is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// The window material: Mica on Windows 11, compositor blur elsewhere, or

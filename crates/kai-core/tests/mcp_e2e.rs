@@ -55,6 +55,13 @@ async fn handshake_lists_the_tools() {
         .await
         .unwrap();
     assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
+    // A version Kai does not know is answered with the one it speaks.
+    let newer = s
+        .handle(&json!({"jsonrpc":"2.0","id":9,"method":"initialize",
+            "params":{"protocolVersion":"2099-01-01"}}))
+        .await
+        .unwrap();
+    assert_eq!(newer["result"]["protocolVersion"], kai_core::mcp::PROTOCOL);
     assert_eq!(init["result"]["serverInfo"]["name"], "kai");
     // Notifications get no reply.
     let note = json!({"jsonrpc":"2.0","method":"notifications/initialized"});

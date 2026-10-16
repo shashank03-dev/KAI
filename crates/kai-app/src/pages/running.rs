@@ -11,8 +11,8 @@ use crate::ui::{self, Glass};
 use ely_gpui_component::{
     agent::{AgentPlan, AgentState, AgentStatus, BrowserPreview, ComputerUseViewer},
     buttons::{Button, ButtonVariant},
-    chat::{CostEstimator, PromptInput, StepState, ThinkingIndicator, TokenCounter, stop_button},
-    data_display::{Badge, Tone, UsageBar},
+    chat::{PromptInput, StepState, ThinkingIndicator, stop_button},
+    data_display::{Badge, Tone},
     forms::Choice,
     layout::{Panel, ScrollArea, SplitPane},
     navigation::Tabs,
@@ -23,10 +23,6 @@ use gpui::{
     AnyElement, Axis, Context, FontWeight, IntoElement, ParentElement, ScrollHandle, Styled,
     Window, div, point, px,
 };
-
-/// Context a step costs, roughly: the stable prompt plus one screenshot.
-const TOKENS_PER_STEP: usize = 1_400;
-const CONTEXT_WINDOW: f64 = 16_384.0;
 
 pub fn agent_state(r: &RunState) -> AgentState {
     match r.phase {
@@ -304,34 +300,22 @@ pub fn seen(app: &KaiApp, r: &RunState, cx: &Context<KaiApp>) -> AnyElement {
         )
     });
 
-    let tokens = r.steps.len() * TOKENS_PER_STEP;
-    let hours = r.elapsed.as_secs_f64() / 3600.0;
-    let droplet = app.settings.droplet_hourly_usd as f64;
+    let note = panes::usage_note(
+        app.settings.backend,
+        app.settings.droplet_hourly_usd as f64,
+        r.elapsed,
+    );
     let meters = Panel::new("Usage").child(
         div()
             .flex()
             .flex_col()
             .gap_3()
             .children(panes::latency(r, cx))
-            .child(TokenCounter::new(tokens).limit(CONTEXT_WINDOW as usize))
-            .child(UsageBar::new(CONTEXT_WINDOW).part(
-                "This step's context",
-                (TOKENS_PER_STEP as f64).min(CONTEXT_WINDOW),
-            ))
-            .child(CostEstimator::new(
-                "cost",
-                tokens,
-                r.steps.len() * 40,
-                (droplet * hours / tokens.max(1) as f64 * 1_000_000.0, 0.0),
-            ))
             .child(
                 div()
                     .text_size(theme.text_size(TextSize::Xs))
                     .text_color(theme.colors.fg_muted)
-                    .child(format!(
-                        "Tokens are estimated ({TOKENS_PER_STEP} per step). Droplet time so far: {:.1} min at ${droplet:.2}/h",
-                        r.elapsed.as_secs_f64() / 60.0
-                    )),
+                    .child(note),
             ),
     );
     div()

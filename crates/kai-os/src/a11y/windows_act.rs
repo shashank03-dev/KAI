@@ -3,9 +3,9 @@
 //! chosen by control role. Fill → Value.SetValue on an empty, writable,
 //! non-password field, then read back to confirm. Runs on a blocking thread.
 
-use super::live::Plan;
-use super::windows::UiaRef;
-use kai_core::Role;
+use super::live::{Plan, same_place};
+use super::windows::{UiaRef, bounds};
+use kai_core::{Element, Role};
 use uiautomation::UIAutomation;
 use uiautomation::patterns::{
     UIExpandCollapsePattern, UIInvokePattern, UISelectionItemPattern, UITogglePattern,
@@ -37,7 +37,7 @@ fn press_patterns(role: Role) -> &'static [Pattern] {
 pub fn act(
     node: &UiaRef,
     plan: &Plan,
-    role: Role,
+    seen: &Element,
     ctx: &kai_core::computer::ExecutionContext,
 ) -> anyhow::Result<bool> {
     // Joins this blocking thread to the MTA (see `UiaRef`).
@@ -50,8 +50,15 @@ pub fn act(
     if !enabled || el.is_password().unwrap_or(true) {
         return Ok(false);
     }
+    if !same_place(
+        seen.bounds,
+        el.get_bounding_rectangle().ok().and_then(bounds),
+    ) {
+        log::debug!("UIA: the element moved since the observation; using the mouse");
+        return Ok(false);
+    }
     match plan {
-        Plan::Press => press(node, role, ctx),
+        Plan::Press => press(node, seen.role, ctx),
         Plan::Fill(text) => fill(node, text, ctx),
     }
 }
@@ -63,44 +70,39 @@ fn press(
 ) -> anyhow::Result<bool> {
     let el = &node.0;
     for p in press_patterns(role) {
+        // A cancelled step stops here, as an error: never a mouse fallback.
+        ctx.check()?;
         // None: pattern not supported, try the next one.
         let done: Option<Result<(), String>> = match p {
-            Pattern::Invoke => el.get_pattern::<UIInvokePattern>().ok().map(|x| {
-                ctx.check()
-                    .map_err(|e| e.to_string())
-                    .and_then(|_| x.invoke().map_err(|e| e.to_string()))
-            }),
-            Pattern::Toggle => el.get_pattern::<UITogglePattern>().ok().map(|x| {
-                ctx.check()
-                    .map_err(|e| e.to_string())
-                    .and_then(|_| x.toggle().map_err(|e| e.to_string()))
-            }),
-            Pattern::SelectionItem => el.get_pattern::<UISelectionItemPattern>().ok().map(|x| {
-                ctx.check()
-                    .map_err(|e| e.to_string())
-                    .and_then(|_| x.select().map_err(|e| e.to_string()))
-            }),
+            Pattern::Invoke => el
+                .get_pattern::<UIInvokePattern>()
+                .ok()
+                .map(|x| x.invoke().map_err(|e| e.to_string())),
+            Pattern::Toggle => el
+                .get_pattern::<UITogglePattern>()
+                .ok()
+                .map(|x| x.toggle().map_err(|e| e.to_string())),
+            Pattern::SelectionItem => el
+                .get_pattern::<UISelectionItemPattern>()
+                .ok()
+                .map(|x| x.select().map_err(|e| e.to_string())),
             Pattern::ExpandCollapse => {
                 el.get_pattern::<UIExpandCollapsePattern>()
                     .ok()
                     .and_then(|x| match x.get_state() {
                         Ok(ExpandCollapseState::LeafNode) => None,
-                        Ok(ExpandCollapseState::Expanded) => Some(
-                            ctx.check()
-                                .map_err(|e| e.to_string())
-                                .and_then(|_| x.collapse().map_err(|e| e.to_string())),
-                        ),
-                        _ => Some(
-                            ctx.check()
-                                .map_err(|e| e.to_string())
-                                .and_then(|_| x.expand().map_err(|e| e.to_string())),
-                        ),
+                        Ok(ExpandCollapseState::Expanded) => {
+                            Some(x.collapse().map_err(|e| e.to_string()))
+                        }
+                        _ => Some(x.expand().map_err(|e| e.to_string())),
                     })
             }
         };
         match done {
             None => continue,
             Some(Ok(())) => return Ok(true),
+            // A pattern call that failed may still have done something, so
+            // no second pattern is tried (as on Linux): the mouse takes over.
             Some(Err(e)) => {
                 log::debug!("UIA {p:?} failed: {e}");
                 return Ok(false);

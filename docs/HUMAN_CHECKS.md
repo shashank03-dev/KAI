@@ -109,9 +109,12 @@ closed, run stopped) is `Stop`.
   `Engine::look` and the batch re-check), so it never reaches the model, the
   verifier, the trace, the UI events or experience memory. The step in the
   trace reads `type "[one-time code]"`.
-- Caveat, stated plainly: while the code is visible on the page, it is in
-  the **screenshot** like anything else on screen, and screenshots go only to
-  the model endpoint you configured. Codes are single-use and short-lived.
+- Once Kai types a code (or any other sensitive entry), **no screenshot or
+  crop leaves the computer for the rest of that run** (`engine/privacy.rs`),
+  so the code cannot reach the model through pixels either. The model is told
+  and works from the element list; a screen with no element list (a grid
+  only) then needs you. This replaced the earlier caveat that a visible code
+  could appear in screenshots (review CORE-ENG-03).
 
 ## Guarantees (and the test that holds each one)
 

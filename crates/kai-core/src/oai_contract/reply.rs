@@ -9,11 +9,16 @@ use serde_json::{Value, json};
 
 /// What the model may write: a short thought, at most one action, or a
 /// message that ends the turn.
-pub fn schema(frame: CoordFrame) -> Value {
+/// `batch`: most actions per turn (1 unless `--oai-batch`). `describe`: the
+/// screen has no marks and a grounder will find a described target.
+pub fn schema(frame: CoordFrame, batch: usize, describe: bool) -> Value {
     let int = json!({"type": ["integer", "null"]});
     let mut point = vec![("x", int.clone()), ("y", int.clone())];
     if frame == CoordFrame::Marks {
         point.push(("mark", int.clone()));
+    }
+    if describe {
+        point.push(("target", json!({"type": ["string", "null"]})));
     }
     let keys = json!({"type": ["array", "null"], "items": {"type": "string"}});
     let object = |ty: &str, extra: &[(&str, Value)]| {
@@ -59,19 +64,23 @@ pub fn schema(frame: CoordFrame) -> Value {
         "required": ["thought", "actions", "message", "phase"],
         "properties": {
             "thought": {"type": "string"},
-            "actions": {"type": "array", "maxItems": 1, "items": {"anyOf": variants}},
+            "actions": {"type": "array", "maxItems": batch.max(1), "items": {"anyOf": variants}},
             "message": {"type": ["string", "null"]},
             "phase": {"type": "string", "enum": ["commentary", "final_answer"]}
         }
     })
 }
 
-/// A decoded turn: one action, or a message (done, or a question).
+/// A placeholder focus for a `type` that follows another action in the same
+/// turn: the engine resolves the real field when that action's turn comes.
+pub const LATER_FOCUS: u32 = u32::MAX;
+
+/// A decoded turn: actions in order, or a message (done, or a question).
 #[derive(Debug, PartialEq)]
 pub enum Turn {
     Act {
         thought: String,
-        action: ComputerAction,
+        actions: Vec<ComputerAction>,
     },
     Done {
         message: String,
@@ -98,6 +107,8 @@ fn to_openai(
         .unwrap_or("")
         .to_string();
     let mark = a.remove("mark").filter(|m| !m.is_null());
+    // A description the grounder already turned into x and y.
+    a.remove("target");
     if !POINTED.contains(&ty.as_str()) {
         a.retain(|k, v| !(matches!(k.as_str(), "x" | "y") && v.is_null()));
         return Ok((Value::Object(a), None));
@@ -132,6 +143,7 @@ pub fn decode(
     size: (u32, u32),
     observation: u64,
     focused: Option<u32>,
+    batch: usize,
 ) -> Result<Turn, ToolError> {
     let start = raw.find('{').ok_or(ToolError::InvalidArguments)?;
     let end = raw.rfind('}').ok_or(ToolError::InvalidArguments)?;
@@ -154,23 +166,45 @@ pub fn decode(
                 _ => Turn::Ask { message },
             })
         }
-        [one] => {
-            let (openai, mark) = to_openai(one, frame, size)?;
+        list if list.len() <= batch.max(1) => {
+            let mut marks = Vec::new();
+            let mut openai = Vec::new();
+            for a in list {
+                let (a, mark) = to_openai(a, frame, size)?;
+                openai.push(a);
+                marks.push(mark);
+            }
+            // Typing first needs a field with focus now; a later `type`
+            // gets its field when its turn comes.
+            if openai[0]["type"] == "type" && focused.is_none() {
+                return Err(ToolError::NeedsUser);
+            }
             let response = json!({"status": "completed", "output": [
                 {"type": "reasoning", "summary": [{"type": "summary_text", "text": thought}]},
                 {"type": "computer_call", "call_id": "local", "status": "completed",
-                 "pending_safety_checks": [], "actions": [openai]}
+                 "pending_safety_checks": [], "actions": openai}
             ]});
-            let mut parsed = cua_protocol::parse_response(&response, observation, focused)?;
-            let mut action = parsed.calls.remove(0).actions.remove(0);
-            if let Some(mark) = mark
-                && let ComputerAction::Click { target, .. }
-                | ComputerAction::Move { target, .. }
-                | ComputerAction::Scroll { target, .. } = &mut action
-            {
-                *target = Target::Element { observation, mark };
+            let parsed = cua_protocol::parse_response(
+                &response,
+                observation,
+                focused.or(Some(LATER_FOCUS)),
+            )?;
+            let mut actions = parsed
+                .calls
+                .into_iter()
+                .next()
+                .ok_or(ToolError::InvalidArguments)?
+                .actions;
+            for (action, mark) in actions.iter_mut().zip(marks) {
+                if let Some(mark) = mark
+                    && let ComputerAction::Click { target, .. }
+                    | ComputerAction::Move { target, .. }
+                    | ComputerAction::Scroll { target, .. } = action
+                {
+                    *target = Target::Element { observation, mark };
+                }
             }
-            Ok(Turn::Act { thought, action })
+            Ok(Turn::Act { thought, actions })
         }
         _ => Err(ToolError::InvalidArguments),
     }

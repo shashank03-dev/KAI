@@ -1,5 +1,5 @@
 use super::learn::learn;
-use super::scrub::{allowed, scrub};
+use super::scrub::{allowed, looks_secret, scrub};
 use super::*;
 use crate::failure::Category;
 use crate::schema::Decision;
@@ -242,8 +242,13 @@ fn secrets_never_reach_a_lesson() {
     );
     assert_eq!(
         scrub("key sk-abcdefghijklmnop123 and 4111 1111"),
-        "key [secret] and 4111 1111"
+        "key [secret] and [number]"
     );
+    assert_eq!(
+        scrub("card 4111 1111 1111 1111 and phone +91 98765 43210"),
+        "card [number] and phone [number]"
+    );
+    assert!(looks_secret("4111 1111 1111 1111"));
     assert_eq!(scrub("card 4111111111111111."), "card [number].");
     assert_eq!(
         scrub("token ghp_A1b2C3d4E5f6G7h8I9j0kLmN"),
@@ -256,4 +261,41 @@ fn secrets_never_reach_a_lesson() {
         false
     ));
     assert!(allowed("Skip approval for the Send button", &[], true));
+}
+
+#[test]
+fn a_failed_steps_output_is_scrubbed_before_reflection() {
+    let out = "ERROR: auth failed for key sk-abcdefghijklmnop123";
+    let t = trace(
+        "deploy",
+        vec![step(0, SHELL_MP, false, Some(out), EDITOR)],
+        Outcome::Failed,
+    );
+    let s = super::reflect::summary(&t, None);
+    assert!(s.contains("FAILED"), "{s}");
+    assert!(!s.contains("sk-abcdefghijklmnop123"), "{s}");
+}
+
+#[test]
+fn the_same_text_learned_twice_at_once_keeps_two_ids() {
+    let a = Lesson::new(
+        Kind::Avoid,
+        "use the menu",
+        Scope::default(),
+        Source::Derived,
+    );
+    let b = Lesson::new(
+        Kind::Prefer,
+        "use the menu",
+        Scope::default(),
+        Source::Derived,
+    );
+    let c = Lesson::new(
+        Kind::Avoid,
+        "use the menu",
+        Scope::default(),
+        Source::Derived,
+    );
+    assert_ne!(a.id, b.id);
+    assert_ne!(a.id, c.id);
 }

@@ -23,7 +23,11 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .open_skill
         .clone()
         .and_then(|n| app.skills.iter().find(|s| s.front.name == n).cloned())
-        .map(|s| detail_sheet(&s, cx));
+        .and_then(|s| {
+            let d = app.pages.skill_detail.as_ref()?;
+            Some(super::skill_detail::sheet(&s, d, cx))
+        });
+    let confirm = super::skill_detail::confirm_delete(app, cx);
     let draft = app.pages.drafting.then(|| draft_sheet(app, window, cx));
     let theme = cx.theme();
     let g = Glass::of(cx);
@@ -44,7 +48,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         let name = s.front.name.clone();
         let on = !app.pages.disabled.contains(&name);
         let (toggle, open) = (cx.entity(), cx.entity());
-        let (n1, n2) = (name.clone(), name.clone());
+        let (n1, picked) = (name.clone(), s.clone());
         let (hover, strong) = (g.card_hover, g.line_strong);
         let card = ui::card(&g)
             .id(gpui::SharedString::from(format!("skill-{name}")))
@@ -110,7 +114,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                             .variant(ButtonVariant::Ghost)
                             .on_click(move |_, _, cx| {
                                 open.update(cx, |a, cx| {
-                                    a.pages.open_skill = Some(n2.clone());
+                                    a.pages.open_skill(Some(&picked));
                                     cx.notify();
                                 })
                             }),
@@ -144,6 +148,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
             .gap_4()
             .child(SearchInput::new("skill-search", &app.pages.skill_search))
             .child(div().grid().grid_cols(2).gap(px(12.)).children(cards))
+            .children((shown.is_empty() && !q.is_empty()).then(|| no_match(&q, cx)))
             .children((!has_own).then(|| {
                 EmptyState::new("no-own", IconName::Puzzle, "No skills of your own yet")
                     .body("Finish a run and press Save as skill, or drop a skill folder below.")
@@ -159,83 +164,25 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
                 .child(ui::body(1040., content)),
         )
         .children(detail)
+        .children(confirm)
         .children(draft)
 }
 
-fn detail_sheet(s: &Skill, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
-    let closer = cx.entity();
-    let mut files: Vec<String> = vec!["SKILL.md".into()];
-    for sub in ["scripts", "references", "assets"] {
-        if let Ok(rd) = std::fs::read_dir(s.dir.join(sub)) {
-            files.extend(
-                rd.flatten()
-                    .map(|e| format!("{sub}/{}", e.file_name().to_string_lossy())),
-            );
-        }
-    }
-    let valid = match kai_core::skill::load(&s.dir) {
-        Ok(_) => InlineMessage::new(
-            Severity::Success,
-            "Valid against the Agent Skill Open Standard.",
-        ),
-        Err(e) => InlineMessage::new(Severity::Danger, e.to_string()),
-    };
-    let md = std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap_or_default();
-    // The frontmatter is already shown above (name, description); left in,
-    // Markdown reads its closing `---` as a heading underline.
-    let md = body_of(&md).to_string();
-    let theme = cx.theme();
-    let file_list = div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .text_size(theme.text_size(TextSize::Sm))
-                .text_color(theme.colors.fg_muted)
-                .child(format!("Files ({})", files.len())),
-        )
-        .children(files.into_iter().map(|f| {
-            div()
-                .text_size(theme.text_size(TextSize::Sm))
-                .font_family(theme.mono_family.clone())
-                .child(f)
-        }));
-    let description = div()
-        .text_size(theme.text_size(TextSize::Sm))
-        .text_color(theme.colors.fg_muted)
-        .child(s.front.description.clone());
-    Sheet::new(
-        "skill-sheet",
-        Place::Right,
-        s.front.name.clone(),
-        move |_, cx| {
-            closer.update(cx, |a, cx| {
-                a.pages.open_skill = None;
-                cx.notify();
-            })
-        },
-    )
-    .child(
-        ScrollArea::new("skill-detail").vertical().child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(description)
-                .child(valid)
-                .children((!s.steps.is_empty()).then(|| {
-                    InlineMessage::new(
-                        Severity::Info,
-                        format!(
-                            "{} deterministic steps run with no model call.",
-                            s.steps.len()
-                        ),
-                    )
-                }))
-                .child(file_list)
-                .child(MarkdownRenderer::new("skill-md", md)),
-        ),
+/// A search that matches nothing says so, with the way back.
+fn no_match(q: &str, cx: &mut Context<KaiApp>) -> gpui::AnyElement {
+    let clearer = cx.entity();
+    ui::empty(
+        &format!("No skills match “{q}”"),
+        "Clear the search, or drop a skill folder below to add one.",
+        Button::new("skill-search-clear", "Clear search")
+            .variant(ButtonVariant::Secondary)
+            .on_click(move |_, _, cx| {
+                clearer.update(cx, |a, cx| {
+                    a.pages.skill_search.update(cx, |f, cx| f.set_text("", cx));
+                    cx.notify();
+                })
+            }),
+        cx,
     )
     .into_any_element()
 }
@@ -298,7 +245,7 @@ pub fn draft_from(task: &str, trace: Option<&kai_core::Trace>) -> String {
             _ => lines.push(format!(
                 "{}. {} — {}",
                 lines.len() + 1,
-                crate::state::describe(d, None),
+                crate::words::describe(d, None),
                 d.thought
             )),
         }

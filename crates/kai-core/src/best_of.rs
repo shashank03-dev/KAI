@@ -95,6 +95,12 @@ pub struct BestOf {
     pub chosen: usize,
     /// Planning calls made (including ones that returned no plan).
     pub calls: u32,
+    /// Tokens all planning calls used, when the backend reports them
+    /// (review CORE-ENG-09).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u32>,
 }
 
 /// Pick a plan: highest agreement with the others, then the shorter one,
@@ -134,6 +140,8 @@ pub fn judge(plans: Vec<Vec<String>>, calls: u32) -> Option<BestOf> {
         scores,
         chosen,
         calls,
+        prompt_tokens: None,
+        completion_tokens: None,
     })
 }
 

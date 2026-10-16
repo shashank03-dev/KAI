@@ -39,8 +39,13 @@ impl Engine<'_> {
         }
 
         // ---- Decide ----
+        let queued = self.next_queued(r, obs, step as u64 + 1);
         self.sink.emit(&EngineEvent::Thinking { step });
-        let mut notes = std::mem::take(&mut r.notes);
+        // A queued action calls no model: its step leaves the notes for the next call.
+        let mut notes = match queued {
+            Some(_) => Vec::new(),
+            None => std::mem::take(&mut r.notes),
+        };
         notes.extend(r.plan_note.clone());
         if std::mem::take(&mut r.read_page) && !r.privacy.active() {
             let read = self.perceptor.page_text(crate::web::PAGE_TEXT_MAX).await;
@@ -74,25 +79,29 @@ impl Engine<'_> {
         };
         let (schema, extra) = first.as_ref().map_or((schema, 0), |(s, n)| (s, *n));
         let max_tokens = self.config.max_tokens + extra;
-        let decided = self
-            .decide(
-                client,
-                system,
-                &user_text,
-                record::DecisionObservation {
-                    obs,
-                    id: step as u64 + 1,
-                    result: r.computer_result.as_ref(),
-                },
-                schema,
-                max_tokens,
-            )
-            .await;
+        let decided = match queued {
+            Some(action) => self.queued_decision(client, action),
+            None => {
+                self.decide(
+                    client,
+                    system,
+                    &user_text,
+                    record::DecisionObservation {
+                        obs,
+                        id: step as u64 + 1,
+                        result: r.computer_result.as_ref(),
+                    },
+                    schema,
+                    max_tokens,
+                )
+                .await
+            }
+        };
         if self.interrupt.cancelled() {
             return Some(Outcome::Stopped);
         }
         r.step += 1;
-        let decided = match decided {
+        let mut decided = match decided {
             Ok(d) => d,
             Err(e) => {
                 log::warn!("undecodable reply at step {step}: {e}");
@@ -104,6 +113,7 @@ impl Engine<'_> {
             }
         };
         r.failure_streak = 0;
+        Self::queue_rest(r, obs, std::mem::take(&mut decided.queued));
         self.ledger_start(r, step, &decided.reply.outcomes);
         r.protect(&decided.reply.decision, &obs.grounding, false);
         let call = self.record_call(r, step, &user_text, obs, &decided, careful);
@@ -208,14 +218,10 @@ impl Engine<'_> {
         let (output, path) = match acted {
             Ok((o, p)) => (o, p),
             Err(e) => {
-                let e = if r.privacy.active() {
-                    "sensitive action failed".into()
-                } else {
-                    e.to_string()
-                };
+                let e = super::act::act_error(r, &e);
                 log::error!("act failed at step {step}: {e}");
                 r.failure_streak += 1;
-                (Some(format!("ERROR: {e}")), "error")
+                (Some(e), "error")
             }
         };
         let output = output.map(|text| r.privacy.text(&text));

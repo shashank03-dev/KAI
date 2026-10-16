@@ -32,8 +32,10 @@ deploy/digitalocean/up.sh
 `cloud-init.yaml` installs the NVIDIA container toolkit, pulls
 `vllm/vllm-openai:v0.25.0`, downloads `google/gemma-4-26B-A4B-it`, and runs vLLM
 as a systemd service bound to localhost with prefix caching and image input
-(2 per prompt). Caddy terminates TLS and rate-limits `/v1/*`; `/health` returns
-`ready` only after the model answers a warm-up request **with an image**.
+(2 per prompt). Caddy (Ubuntu's stock package) terminates TLS and proxies
+`/v1/*`, which needs the vLLM API key; it does not rate-limit. `/health`
+returns `ready` only after the model answers a warm-up request **with an
+image** (a timer re-checks every 30 s, so allow up to half a minute).
 
 ```sh
 curl -s https://<host>/health     # -> ready, once the model is loaded

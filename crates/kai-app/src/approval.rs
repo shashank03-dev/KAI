@@ -6,7 +6,8 @@
 
 use crate::agent::Pending;
 use crate::app::KaiApp;
-use crate::state::{RunState, describe};
+use crate::state::RunState;
+use crate::words::{decision_json, describe, more_waiting};
 use ely_gpui_component::{
     agent::ComputerUseViewer,
     buttons::{Button, ButtonVariant},
@@ -19,12 +20,14 @@ use kai_core::ApprovalChoice;
 use std::cell::Cell;
 use std::rc::Rc;
 
-pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElement {
+/// `more`: other decisions waiting after this one.
+pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState, more: usize) -> impl IntoElement {
     let what = describe(&p.decision, p.element.as_deref());
+    let ready = run.approve_ready();
     let chosen = Rc::new(Cell::new(ApprovalChoice::Stop));
     let (on_close, skip, approve) = (chosen.clone(), chosen.clone(), chosen);
     // Approve the exact action, including suffixes beyond the compact title.
-    let json = approval_json(&p.decision);
+    let json = decision_json(&p.decision);
 
     let frame = run.frames.last().map(|f| {
         let mut v = ComputerUseViewer::new("approval-frame", f.to_string_lossy().to_string())
@@ -54,17 +57,23 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     Dialog::new(
         "approval",
         format!("Allow this step? {what}"),
-        move |_, cx| {
+        move |window, cx| {
             let choice = on_close.get();
+            // An approved step acts at once: the main window steps aside
+            // first, so it never covers what Kai clicks (review APP-SH-03).
+            if choice != ApprovalChoice::Stop && app.read(cx).capture.is_none() {
+                window.minimize_window();
+            }
             app.update(cx, |a, cx| a.answer(choice, cx));
         },
     )
     .detail(format!(
-        "{}{reason}{why}Nothing happens until you choose. Escape stops the run.",
+        "{}{reason}{why}Nothing happens until you choose. Escape stops the run.{}",
         p.explain
             .as_deref()
             .map(|e| format!("{e} "))
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        more_waiting(more)
     ))
     // The exact action first, in view without scrolling at the smallest
     // window; then a small picture of where it lands.
@@ -93,8 +102,11 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
             })
     })
     .action(move |close| {
+        // Off for a moment after the card appears, so a click meant for
+        // something else cannot approve it (`APPROVE_GRACE`).
         Button::new("approval-ok", "Approve")
             .variant(ButtonVariant::Primary)
+            .disabled(!ready)
             .on_click(move |_, window, cx| {
                 approve.set(ApprovalChoice::Approve);
                 close(window, cx)
@@ -102,13 +114,9 @@ pub fn dialog(p: &Pending, app: Entity<KaiApp>, run: &RunState) -> impl IntoElem
     })
 }
 
-fn approval_json(decision: &kai_core::Decision) -> String {
-    serde_json::to_string_pretty(decision).expect("Decision serializes without fallible values")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::approval_json;
+    use crate::words::decision_json;
 
     #[test]
     fn approval_preserves_commands_that_differ_after_the_summary() {
@@ -122,7 +130,7 @@ mod tests {
             )
             .unwrap();
             let displayed: serde_json::Value =
-                serde_json::from_str(&approval_json(&decision)).unwrap();
+                serde_json::from_str(&decision_json(&decision)).unwrap();
             assert_eq!(displayed["text"].as_str(), Some(command.as_str()));
         }
     }

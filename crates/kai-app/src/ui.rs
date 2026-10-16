@@ -370,7 +370,10 @@ pub fn empty(title: &str, body: &str, action: impl IntoElement, cx: &App) -> Div
         .child(div().pt_2().child(action))
 }
 
-// Exercise the exact vendored wheel policy in the workspace test command.
+// Exercise the exact vendored wheel policy in the workspace test command:
+// Ely is excluded from the workspace, so its own tests never run there. Tied
+// to the local scroll patch recorded in vendor/README.md ("Local UI patch");
+// move or drop this with that file.
 #[cfg(test)]
 #[path = "../../../vendor/ely-gpui-component/src/layout/scroll_policy.rs"]
 mod scroll_policy_contract;

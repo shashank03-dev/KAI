@@ -9,31 +9,39 @@
 
 use atspi::events::{DocumentEvents, ObjectEvents, WindowEvents};
 use futures::StreamExt;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 static COUNT: AtomicU64 = AtomicU64::new(0);
 static LISTENING: AtomicBool = AtomicBool::new(false);
-static STARTED: OnceLock<()> = OnceLock::new();
+/// A listener task exists (running, or waiting to allow a restart).
+static STARTED: AtomicBool = AtomicBool::new(false);
+/// After the listener fails or its stream ends (the bus restarted), the
+/// next look starts a new one no sooner than this.
+const RESTART_AFTER: Duration = Duration::from_secs(30);
 
 /// Object-event members that fire by themselves and say nothing about an
 /// action.
 const NOISY: &[&str] = &["BoundsChanged", "VisibleDataChanged", "TextCaretMoved"];
 
-/// Start the listener once, on the current Tokio runtime. Cheap to call on
-/// every observation.
+/// Start the listener on the current Tokio runtime unless one is running.
+/// Cheap to call on every observation; off a runtime it does nothing (and a
+/// later call on one still starts it).
 pub fn start() {
-    if STARTED.set(()).is_err() {
-        return;
-    }
     let Ok(rt) = tokio::runtime::Handle::try_current() else {
         return;
     };
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
     rt.spawn(async {
-        if let Err(e) = listen().await {
-            log::info!("accessibility events unavailable: {e}");
+        match listen().await {
+            Ok(()) => log::warn!("accessibility event stream ended; restarting it later"),
+            Err(e) => log::warn!("accessibility events unavailable: {e}"),
         }
         LISTENING.store(false, Ordering::SeqCst);
+        tokio::time::sleep(RESTART_AFTER).await;
+        STARTED.store(false, Ordering::SeqCst);
     });
 }
 
@@ -100,5 +108,11 @@ mod tests {
         ));
         assert!(!super::counts("org.a11y.atspi.Event.Mouse", "Button"));
         assert_eq!(super::count(), None, "not listening in tests");
+    }
+
+    #[test]
+    fn a_first_call_off_the_runtime_does_not_block_a_later_start() {
+        std::thread::spawn(super::start).join().unwrap();
+        assert!(!super::STARTED.load(super::Ordering::SeqCst));
     }
 }

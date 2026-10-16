@@ -3,11 +3,12 @@
 
 use crate::agent::{HumanPending, Pending, Ui};
 use crate::team::{OutputView, SteerView, Team};
+use crate::words::{decision_json, describe};
 use ely_gpui_component::chat::StepState;
 use kai_core::engine::{ApprovalChoice, EngineEvent};
 use kai_core::orchestrator::Plan;
 use kai_core::trace::{Outcome, Timings};
-use kai_core::{Action, Decision, Rect, Trace};
+use kai_core::{Rect, Trace};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -69,6 +70,8 @@ pub struct RunState {
     pub plan: Option<Plan>,
     pub report: Option<String>,
     pub trace: Option<Trace>,
+    /// This run's folder under the traces folder, once it started.
+    pub trace_dir: Option<PathBuf>,
     pub error: Option<String>,
     pub started: Option<Instant>,
     pub elapsed: Duration,
@@ -112,16 +115,50 @@ impl RunState {
     /// within [`APPROVE_GRACE`] of it appearing (Skip and Stop always go).
     pub fn answer_approval(&mut self, choice: ApprovalChoice) -> Option<Pending> {
         self.approval.as_ref()?;
-        if choice == ApprovalChoice::Approve
-            && self
-                .approval_since
-                .is_some_and(|t| t.elapsed() < APPROVE_GRACE)
-        {
+        if choice == ApprovalChoice::Approve && !self.approve_ready() {
             log::info!("approve ignored: the approval appeared a moment ago");
             return None;
         }
-        self.phase = Phase::Running;
-        self.take_approval()
+        let p = self.take_approval();
+        self.settle();
+        p
+    }
+
+    /// The user's answer to the check being shown: the pending check, if
+    /// any. The run goes on only when nothing else waits on the user.
+    pub fn answer_human(&mut self) -> Option<HumanPending> {
+        let h = self.take_human();
+        if h.is_some() {
+            self.settle();
+        }
+        h
+    }
+
+    /// Whether Approve counts yet: [`APPROVE_GRACE`] has passed since the
+    /// approval being shown appeared.
+    pub fn approve_ready(&self) -> bool {
+        self.approval_since
+            .is_none_or(|t| t.elapsed() >= APPROVE_GRACE)
+    }
+
+    /// Approvals and checks waiting on the user, shown or queued.
+    pub fn decisions_waiting(&self) -> usize {
+        self.approval.iter().count()
+            + self.human.iter().count()
+            + self.approvals_waiting.len()
+            + self.humans_waiting.len()
+    }
+
+    /// A live run waits while a decision is out, and runs otherwise.
+    fn settle(&mut self) {
+        if self.is_live() {
+            let waiting = self.approval.is_some() || self.human.is_some();
+            self.phase = if waiting {
+                Phase::Waiting
+            } else {
+                Phase::Running
+            };
+        }
     }
 
     /// Every approval and check, shown and queued, for stopping the run.
@@ -298,7 +335,9 @@ impl RunState {
                 self.phase = Phase::Done;
                 self.thinking = false;
                 self.error = Some(e);
-                self.human = None;
+                // Dropping what still waits answers Stop; no dead card
+                // outlives the run.
+                self.take_all();
                 self.team_view.settle();
             }
         }
@@ -341,7 +380,7 @@ impl RunState {
                     thought: decision.thought.clone(),
                     state: StepState::Working,
                     timings: None,
-                    json: serde_json::to_string_pretty(&*decision).unwrap_or_default(),
+                    json: decision_json(&decision),
                     path: None,
                     backend: None,
                 });
@@ -424,42 +463,6 @@ impl RunState {
                 }
             }
         }
-    }
-}
-
-/// A run's outcome in a few plain words, for lists, toasts and badges.
-pub fn outcome_text(o: Outcome) -> &'static str {
-    match o {
-        Outcome::Success => "Done",
-        Outcome::Failed => "Couldn't finish",
-        Outcome::Stopped => "Stopped",
-        Outcome::StepLimit => "Hit the step limit",
-        Outcome::TimeLimit => "Hit the time limit",
-        Outcome::AskedUser => "Needs your answer",
-    }
-}
-
-/// An action in plain words: "Clicking “Save”", "Typing “hello”".
-pub fn describe(d: &Decision, element: Option<&str>) -> String {
-    let on = element
-        .map(|e| format!(" “{e}”"))
-        .unwrap_or_else(|| d.target.map(|t| format!(" #{t}")).unwrap_or_default());
-    let text = d.text.as_deref().unwrap_or("");
-    let short: String = text.chars().take(48).collect();
-    match d.action {
-        Action::Computer => "Using computer tool".into(),
-        Action::Click => format!("Clicking{on}"),
-        Action::DoubleClick => format!("Double-clicking{on}"),
-        Action::RightClick => format!("Right-clicking{on}"),
-        Action::Type => format!("Typing “{short}”"),
-        Action::Key => format!("Pressing {}", d.keys.join("+")),
-        Action::Scroll => "Scrolling".into(),
-        Action::OpenApp => format!("Opening {short}"),
-        Action::OpenUrl => format!("Opening {short}"),
-        Action::Wait => "Waiting for the screen".into(),
-        Action::AskUser => format!("Asking you: {short}"),
-        Action::Done => "Finished".into(),
-        Action::Shell => format!("Running `{short}`"),
     }
 }
 

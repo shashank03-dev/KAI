@@ -4,6 +4,7 @@ pub mod bench;
 pub mod capture;
 pub mod capture_models;
 pub mod done;
+pub mod experimental;
 pub mod history;
 pub mod home;
 pub mod memory;
@@ -15,6 +16,7 @@ pub mod panes;
 pub mod running;
 pub mod sessions;
 pub mod settings;
+pub mod skill_detail;
 pub mod skills;
 
 use crate::app::KaiApp;
@@ -43,13 +45,23 @@ pub struct PageState {
     pub answer: Entity<TextInput>,
     pub disabled: BTreeSet<String>,
     pub open_skill: Option<String>,
+    /// The open skill's details, read when it was opened.
+    pub skill_detail: Option<skill_detail::Detail>,
+    /// Skills › Delete skill, waiting for a yes.
+    pub confirm_delete_skill: bool,
     pub drafting: bool,
     pub settings_section: String,
     pub history: Vec<history::Entry>,
+    /// Runs kept as training data (Settings › Privacy), counted with history.
+    pub training_runs: usize,
     pub open_trace: Option<PathBuf>,
+    /// The open trace, read from disk when it was picked.
+    pub trace_view: Option<history::TraceView>,
     pub trace_range: Option<(f64, f64)>,
     pub bench: Vec<bench::Results>,
     pub bench_running: bool,
+    /// The `kai` tool that runs benchmarks, looked for once at start.
+    pub bench_cli: Option<PathBuf>,
     /// The results file whose tasks the Benchmarks page shows.
     pub bench_pick: String,
     /// The backend being tested ("" for none) and the last result per backend.
@@ -100,13 +112,18 @@ impl PageState {
             answer: field("Type your answer", window, cx),
             disabled: settings.disabled_skills.iter().cloned().collect(),
             open_skill: None,
+            skill_detail: None,
+            confirm_delete_skill: false,
             drafting: false,
             settings_section: "model".into(),
             history: history::load(),
+            training_runs: history::training_runs(),
             open_trace: None,
+            trace_view: None,
             trace_range: None,
             bench: bench::load(),
             bench_running: false,
+            bench_cli: bench::cli(),
             bench_pick: String::new(),
             testing: String::new(),
             test_results: Vec::new(),
@@ -128,6 +145,21 @@ impl PageState {
 
     pub fn reload_history(&mut self) {
         self.history = history::load();
+        self.training_runs = history::training_runs();
+    }
+
+    /// Open a skill's details sheet (or close it), reading them once here.
+    pub fn open_skill(&mut self, skill: Option<&kai_core::Skill>) {
+        self.skill_detail = skill.map(skill_detail::Detail::load);
+        self.open_skill = skill.map(|s| s.front.name.clone());
+        self.confirm_delete_skill = false;
+    }
+
+    /// Show this run's trace in History (or none), read once here.
+    pub fn open_trace(&mut self, dir: Option<PathBuf>) {
+        self.trace_view = dir.clone().and_then(history::TraceView::load);
+        self.open_trace = dir;
+        self.trace_range = None;
     }
 }
 

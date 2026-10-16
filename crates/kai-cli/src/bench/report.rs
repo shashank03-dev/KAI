@@ -6,6 +6,7 @@
 use super::stats::{Summary, failures_text};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 /// `google/gemma-4-26b-a4b-it` -> `google-gemma-4-26b-a4b-it`.
@@ -33,11 +34,51 @@ pub fn file_stem(s: &Summary) -> String {
 pub fn write(summary: &Summary, dir: &Path) -> anyhow::Result<(PathBuf, PathBuf)> {
     std::fs::create_dir_all(dir)?;
     let stem = file_stem(summary);
-    let json = dir.join(format!("{stem}.json"));
-    let md = dir.join(format!("{stem}.md"));
-    std::fs::write(&json, serde_json::to_string_pretty(summary)? + "\n")?;
-    std::fs::write(&md, single_markdown(summary))?;
-    Ok((json, md))
+    let json_body = serde_json::to_string_pretty(summary)? + "\n";
+    let md_body = single_markdown(summary);
+    for n in 1..=10_000 {
+        let name = if n == 1 {
+            stem.clone()
+        } else {
+            format!("{stem}-{n}")
+        };
+        let json = dir.join(format!("{name}.json"));
+        let md = dir.join(format!("{name}.md"));
+        let mut json_file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&json)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let mut md_file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&md)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                std::fs::remove_file(&json)?;
+                continue;
+            }
+            Err(e) => {
+                std::fs::remove_file(&json)?;
+                return Err(e.into());
+            }
+        };
+        if let Err(e) = json_file
+            .write_all(json_body.as_bytes())
+            .and_then(|_| md_file.write_all(md_body.as_bytes()))
+        {
+            let _ = std::fs::remove_file(&json);
+            let _ = std::fs::remove_file(&md);
+            return Err(e.into());
+        }
+        return Ok((json, md));
+    }
+    anyhow::bail!("too many result files for {stem}")
 }
 
 fn label(s: &Summary) -> String {

@@ -74,6 +74,14 @@ const HANDS_RETRY: Duration = Duration::from_secs(2);
 struct Hands {
     now: Option<Arc<DesktopActuator>>,
     tried: Instant,
+    /// A retry is running on the blocking pool.
+    trying: bool,
+}
+
+type HandsSlot = Arc<std::sync::Mutex<Hands>>;
+
+fn lock(slot: &HandsSlot) -> std::sync::MutexGuard<'_, Hands> {
+    slot.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn hands(kill: &KillSwitch) -> anyhow::Result<Arc<DesktopActuator>> {
@@ -87,7 +95,7 @@ pub struct Agent {
     pub perceptor: Arc<DesktopPerceptor>,
     /// `None` until the OS lets Kai control input (a Mac asks for the
     /// Accessibility permission first); retried now and then.
-    actuator: std::sync::Mutex<Hands>,
+    actuator: HandsSlot,
     pub running: Arc<AtomicBool>,
     /// Kai's own browser, when Settings › use_browser is on.
     lanes: Arc<crate::browser::Lanes>,
@@ -108,38 +116,38 @@ impl Agent {
             runtime,
             kill,
             perceptor: Arc::new(DesktopPerceptor::new()),
-            actuator: std::sync::Mutex::new(Hands {
+            actuator: Arc::new(std::sync::Mutex::new(Hands {
                 now: actuator,
                 tried: Instant::now(),
-            }),
+                trying: false,
+            })),
             running: Arc::new(AtomicBool::new(false)),
             lanes: Arc::default(),
         })
     }
 
+    /// Whether Kai has the mouse and keyboard. Cheap: Home asks on every
+    /// repaint. Without them, a retry starts off the UI thread (at most once
+    /// per [`HANDS_RETRY`]), since building them waits on the OS.
     pub fn can_act(&self) -> bool {
-        self.actuator().is_some()
-    }
-
-    /// The hands, created now if an earlier try had no permission (at most
-    /// once per [`HANDS_RETRY`]: this runs on every repaint of Home).
-    fn actuator(&self) -> Option<Arc<DesktopActuator>> {
-        let mut h = self.actuator.lock().unwrap_or_else(|e| e.into_inner());
-        if h.now.is_none() && h.tried.elapsed() >= HANDS_RETRY {
-            h.tried = Instant::now();
-            h.now = hands(&self.kill)
-                .map_err(|e| log::debug!("agent: still no mouse/keyboard control: {e}"))
-                .ok();
+        let mut h = lock(&self.actuator);
+        if h.now.is_none() && !h.trying && h.tried.elapsed() >= HANDS_RETRY {
+            h.trying = true;
+            let (slot, kill) = (self.actuator.clone(), self.kill.clone());
+            self.runtime.spawn_blocking(move || {
+                retry_hands(&slot, &kill);
+            });
         }
-        h.now.clone()
+        h.now.is_some()
     }
 
     pub fn stop(&self) {
         self.kill.trip("stop button");
     }
 
-    /// Start a run. Events arrive on the returned receiver until `Finished`.
-    /// `control` pauses, stops and steers this run.
+    /// Start a run. Events arrive on the returned receiver until `Finished`;
+    /// the folder is where its trace is saved. `control` pauses, stops and
+    /// steers this run.
     pub fn run(
         &self,
         task: String,
@@ -147,15 +155,9 @@ impl Agent {
         settings: Settings,
         skills: Vec<Skill>,
         control: Arc<RunControl>,
-    ) -> mpsc::UnboundedReceiver<Ui> {
+    ) -> (mpsc::UnboundedReceiver<Ui>, PathBuf) {
         let (tx, rx) = mpsc::unbounded();
-        let Some(actuator) = self.actuator() else {
-            let _ = tx.unbounded_send(Ui::Failed(
-                "Kai can't move the mouse or type on this desktop. Open Settings › Permissions."
-                    .into(),
-            ));
-            return rx;
-        };
+        let dir = run_dir();
         self.kill.reset();
         self.running.store(true, Ordering::SeqCst);
         let (held_tx, mut held_rx) = mpsc::unbounded();
@@ -168,13 +170,35 @@ impl Agent {
             }
         });
         let (perceptor, running) = (self.perceptor.clone(), self.running.clone());
-        let lanes = self.lanes.clone();
-        self.runtime.spawn(kai_os::kill::watch_corner(
-            self.kill.clone(),
-            actuator.input.clone(),
-            running.clone(),
-        ));
+        let (lanes, slot, kill) = (self.lanes.clone(), self.actuator.clone(), self.kill.clone());
+        let trace_dir = dir.clone();
         self.runtime.spawn(async move {
+            // The hands, tried once more off the UI thread if still missing.
+            let have = lock(&slot).now.clone();
+            let actuator = match have {
+                Some(a) => Some(a),
+                None => {
+                    let (slot, kill) = (slot.clone(), kill.clone());
+                    tokio::task::spawn_blocking(move || retry_hands(&slot, &kill))
+                        .await
+                        .ok()
+                        .flatten()
+                }
+            };
+            let Some(actuator) = actuator else {
+                running.store(false, Ordering::SeqCst);
+                control.detach_reporter();
+                let _ = tx.unbounded_send(Ui::Failed(
+                    "Kai can't move the mouse or type on this desktop. Open Settings › Permissions."
+                        .into(),
+                ));
+                return;
+            };
+            tokio::spawn(kai_os::kill::watch_corner(
+                kill,
+                actuator.input.clone(),
+                running.clone(),
+            ));
             let keys = crate::keys::resolve(Keys::default()).await;
             // Kai's own browser (Settings): its eyes and hands for this run.
             let lane = match settings.use_browser {
@@ -191,6 +215,7 @@ impl Agent {
                         settings,
                         keys,
                         skills,
+                        &dir,
                         t,
                         c,
                         l.as_ref(),
@@ -201,7 +226,7 @@ impl Agent {
                 None => {
                     let (t, c) = (&tx, control.as_ref());
                     let (p, a) = (perceptor.as_ref(), actuator.as_ref());
-                    drive(task, team, settings, keys, skills, t, c, p, a).await
+                    drive(task, team, settings, keys, skills, &dir, t, c, p, a).await
                 }
             };
             // Close the pause reporter so the UI's receiver ends with the run.
@@ -211,7 +236,7 @@ impl Agent {
                 let _ = tx.unbounded_send(Ui::Failed(friendly(&e)));
             }
         });
-        rx
+        (rx, trace_dir)
     }
 
     /// Check screen, accessibility and input access (runs on the agent runtime,
@@ -267,6 +292,7 @@ async fn drive(
     settings: Settings,
     keys: Keys,
     skills: Vec<Skill>,
+    dir: &std::path::Path,
     tx: &mpsc::UnboundedSender<Ui>,
     control: &RunControl,
     perceptor: &dyn kai_core::Perceptor,
@@ -274,11 +300,10 @@ async fn drive(
 ) -> anyhow::Result<()> {
     let (fast, careful) = settings.clients(&keys)?;
     let config = settings.engine_config();
-    let dir = run_dir();
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(dir)?;
     let sink = Sink {
         tx: tx.clone(),
-        dir: dir.clone(),
+        dir: dir.to_path_buf(),
     };
     let approver = crate::asks::UiApprover { tx: tx.clone() };
     let human = crate::asks::UiHuman { tx: tx.clone() };
@@ -314,7 +339,7 @@ async fn drive(
             }
         }
         trace.finish(report.outcome());
-        save(&dir, &trace);
+        save(dir, &trace);
         let results = report
             .results
             .iter()
@@ -332,6 +357,7 @@ async fn drive(
         let _ = tx.unbounded_send(Ui::Finished(Box::new(trace)));
     } else {
         let engine = Engine {
+            grounder: None,
             client: fast.as_ref(),
             careful: careful.as_deref(),
             perceptor,
@@ -394,10 +420,25 @@ async fn drive(
                 },
             )
             .await;
-        save(&dir, &trace);
+        save(dir, &trace);
         let _ = tx.unbounded_send(Ui::Finished(Box::new(trace)));
     }
     Ok(())
+}
+
+/// Build the hands now (blocking: it waits for the OS input backend) and
+/// keep them for later runs.
+fn retry_hands(slot: &HandsSlot, kill: &KillSwitch) -> Option<Arc<DesktopActuator>> {
+    let made = hands(kill)
+        .map_err(|e| log::debug!("agent: still no mouse/keyboard control: {e}"))
+        .ok();
+    let mut h = lock(slot);
+    h.tried = Instant::now();
+    h.trying = false;
+    if h.now.is_none() {
+        h.now = made;
+    }
+    h.now.clone()
 }
 
 /// Each run gets a folder of its own under the local traces folder.

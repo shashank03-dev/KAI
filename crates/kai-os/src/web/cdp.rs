@@ -30,6 +30,7 @@ const KEPT_EVENTS: &[&str] = &[
     "Target.targetDestroyed",
     "Inspector.targetCrashed",
     "Page.fileChooserOpened",
+    "Browser.downloadWillBegin",
 ];
 
 /// A JavaScript dialog (`alert`, `confirm`, `prompt`, `beforeunload`) is

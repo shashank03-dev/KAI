@@ -163,7 +163,7 @@ impl ModelClient for Provider<'_> {
                     return Ok(ask(&format!("Provider batch stopped: {why}"), started));
                 }
                 state.notes += 1;
-                note = Some(turn::stopped_note(ran, state.batch, why));
+                note = Some(crate::oai_contract::stopped_note(ran, state.batch, why));
             }
         }
         if state.actions.is_empty()

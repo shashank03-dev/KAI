@@ -85,11 +85,39 @@ pub(super) struct Run<'t> {
     pub(super) recoveries: u32,
     /// The model's scratchpad (`Config::memo`).
     pub(super) memo: crate::memo::Memo,
+    /// Sites this run may act on without a local safety check.
+    pub(super) domains: crate::safety_checks::RunDomains,
+    /// The rest of a multi-action turn (`--oai-batch`), the layout it was
+    /// planned on, the turn's size and how many of it were handed out.
+    pub(super) queued: std::collections::VecDeque<crate::computer::ComputerAction>,
+    pub(super) queued_on: Option<crate::Grounding>,
+    pub(super) queued_turn: (usize, usize),
+    /// Computer actions refused in a row (invalid or stale): the model
+    /// gets each error back; after [`super::computer::MAX_REJECTED`] the user does.
+    pub(super) rejected: u32,
+    /// When the run's time limit ends (moved on by time spent waiting for
+    /// the user); every loop checks it, not only the model's (CORE-ENG-11).
+    pub(super) deadline: std::time::Instant,
 }
 
 impl<'t> Run<'t> {
+    /// Past the run's time limit (time spent waiting for the user does not count).
+    pub(super) fn out_of_time(&self) -> bool {
+        std::time::Instant::now() >= self.deadline + self.human.waited
+    }
+
     pub(super) fn protect(&mut self, d: &crate::Decision, g: &crate::Grounding, force: bool) {
+        let was = self.privacy.active();
         self.privacy.protect(d, g, force);
+        if !was && self.privacy.active() {
+            // Say why the screenshots stop, so the model works from the
+            // element list instead of guessing (review CORE-ENG-03).
+            self.notes.push(
+                "Screenshots are off for the rest of this run: a code or other sensitive \
+                 entry was typed. Work from the element list."
+                    .into(),
+            );
+        }
         for rec in &mut self.trace.steps {
             self.privacy.record(rec);
         }
@@ -158,6 +186,12 @@ impl<'t> Run<'t> {
             plan_note: None,
             recoveries: 0,
             memo: Default::default(),
+            domains: crate::safety_checks::RunDomains::new(task),
+            queued: Default::default(),
+            queued_on: None,
+            queued_turn: (0, 0),
+            rejected: 0,
+            deadline: std::time::Instant::now(),
         }
     }
 }

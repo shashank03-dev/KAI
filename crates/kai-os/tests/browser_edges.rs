@@ -83,6 +83,20 @@ async fn alert_confirm_and_prompt_become_marks_and_are_answered() {
         assert_eq!(after.window_title.as_deref(), Some(want));
     }
 
+    let g = lane.observe().await.unwrap().grounding;
+    lane.act(&click(mark(&g, Role::Button, "Confirm")), &g)
+        .await
+        .unwrap();
+    let d = quick_look(&lane).await.grounding;
+    let refused = lane.act(&key(r#"["enter"]"#), &d).await.unwrap_err();
+    assert!(
+        refused.to_string().contains("click its OK mark"),
+        "{refused}"
+    );
+    lane.act(&click(mark(&d, Role::Button, "Cancel")), &d)
+        .await
+        .unwrap();
+
     // prompt: type an answer into the dialog's field, then OK.
     let g = lane.observe().await.unwrap().grounding;
     lane.act(&click(mark(&g, Role::Button, "Prompt")), &g)
@@ -233,7 +247,7 @@ async fn native_dropdowns_are_chosen_by_label() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn file_pickers_are_reported_and_downloads_land_in_the_folder() {
+async fn file_pickers_and_downloads_are_reported_without_writing_a_file() {
     let downloads = tempfile::tempdir().unwrap();
     let Some((lane, _p)) = lane_with(Some(downloads.path().to_path_buf())).await else {
         return;
@@ -248,15 +262,13 @@ async fn file_pickers_are_reported_and_downloads_land_in_the_folder() {
     assert!(err.to_string().contains("file picker"), "{err}");
     // Nothing is left blocking the page.
     let g = quick_look(&lane).await.grounding;
-    lane.act(&click(mark(&g, Role::Link, "Get the file")), &g)
+    let notice = lane
+        .act(&click(mark(&g, Role::Link, "Get the file")), &g)
         .await
-        .unwrap();
+        .unwrap_err();
+    assert!(notice.to_string().contains("download"), "{notice}");
     let file = downloads.path().join("file.txt");
-    let t = Instant::now();
-    while !file.exists() && t.elapsed() < Duration::from_secs(10) {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello from kai");
+    assert!(!file.exists());
 }
 
 /// Whether any process's command line contains `pattern`.

@@ -82,6 +82,7 @@ async fn run_on(text: Option<&str>, mac: bool) -> (Recording, Trace) {
     let approve = approve_all();
     let stop = flag();
     let trace = Engine {
+        grounder: None,
         client: &client,
         careful: None,
         perceptor: &page,

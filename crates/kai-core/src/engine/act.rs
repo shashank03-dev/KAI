@@ -246,6 +246,9 @@ impl Engine<'_> {
             if self.interrupt.stopped() {
                 return Some(Outcome::Stopped);
             }
+            if r.out_of_time() {
+                return Some(Outcome::TimeLimit);
+            }
             // Untargeted typing lands wherever focus is: read the screen
             // first, so a focused password field, a CAPTCHA or suspicious
             // text hands over to the model instead of being typed into.
@@ -269,7 +272,9 @@ impl Engine<'_> {
                     break;
                 }
             }
-            if label == CACHED {
+            // Every prefix honours the user's approval level: a step that
+            // needs approval hands over to the model, where it is asked.
+            {
                 let level = self.config.approval;
                 let pw = risk::is_payment_or_password(d, &g);
                 if risk::needs_approval(level, risk::classify(d, &g), pw) {
@@ -281,8 +286,19 @@ impl Engine<'_> {
             let (output, path) = match self.act(d, &g, &r.privacy, None).await {
                 Ok(x) => x,
                 Err(e) => {
+                    // Say which step failed and why, for every prefix kind
+                    // (review CORE-ENG-04): the model takes over from here.
                     log::warn!("{label} step failed; handing over to the model");
-                    let _ = e;
+                    let error = act_error(r, &e);
+                    let step = r.step;
+                    let mut rec = StepRecord::new(step, d, Timings::default(), label);
+                    rec.path = Some("error".into());
+                    rec.output = Some(error.clone());
+                    r.push(rec);
+                    r.step += 1;
+                    r.notes.push(format!(
+                        "A {label} step failed ({error}). Check the screen and take over from here."
+                    ));
                     break;
                 }
             };
@@ -317,6 +333,17 @@ impl Engine<'_> {
         r.force_full = true;
         r.pending = None::<Pending>;
         None
+    }
+}
+
+/// What the model hears when an action fails: the real cause, unless the
+/// run has typed something sensitive (the error could echo it). One wording
+/// for the model step, batches, the executor and prefixes (review CORE-ENG-05).
+pub(super) fn act_error(r: &Run<'_>, e: &anyhow::Error) -> String {
+    if r.privacy.active() {
+        "ERROR: sensitive action failed".into()
+    } else {
+        format!("ERROR: {e:#}")
     }
 }
 

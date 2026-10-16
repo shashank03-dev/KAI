@@ -84,6 +84,11 @@ impl KaiApp {
         });
         let local = cx.new(|_| crate::local::LocalState::new(&settings.local_model));
         crate::local::stop_on_quit(&local, cx);
+        cx.on_app_quit(|app, cx| {
+            app.quit_runs(cx);
+            async {}
+        })
+        .detach();
         let onboarding = (!settings.onboarded).then(|| {
             let (this, local) = (cx.entity().downgrade(), local.clone());
             cx.new(|cx| Onboarding::new(settings.clone(), this, local, window, cx))
@@ -372,17 +377,21 @@ impl Render for KaiApp {
             Page::Settings => pages::settings::render(self, window, cx).into_any_element(),
         };
         let me = cx.entity();
-        let approval = self.active_state().and_then(|state| {
+        // One decision on screen at a time: a check first (a code or a
+        // sign-in does not wait long), then approvals; the rest queue.
+        let decision = self.active_state().and_then(|state| {
             let r = state.read(cx);
-            r.approval
-                .as_ref()
-                .map(|p| approval::dialog(p, me.clone(), r).into_any_element())
-        });
-        let human = self.active_state().and_then(|state| {
-            let r = state.read(cx);
-            r.human.as_ref().map(|h| {
-                crate::human_dialog::dialog(h, me.clone(), &self.human_draft).into_any_element()
-            })
+            let more = r.decisions_waiting().saturating_sub(1);
+            if let Some(h) = &r.human {
+                let d = crate::human_dialog::dialog(h, me.clone(), &self.human_draft, more);
+                return Some(d.into_any_element());
+            }
+            let p = r.approval.as_ref()?;
+            if !r.approve_ready() {
+                // Approve turns on once the grace is over (`APPROVE_GRACE`).
+                window.request_animation_frame();
+            }
+            Some(approval::dialog(p, me.clone(), r, more).into_any_element())
         });
         let shortcuts = self.shortcuts.then(|| {
             pages::shortcuts_dialog(me.clone(), self.pages.shortcut_search.clone())
@@ -455,8 +464,7 @@ impl Render for KaiApp {
                         ),
                     )
                     .children(palette)
-                    .children(approval)
-                    .children(human)
+                    .children(decision)
                     .children(shortcuts)
                     .child(ToastViewport::new("toasts", &self.toaster)),
             )

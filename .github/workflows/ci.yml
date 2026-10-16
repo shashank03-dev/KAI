@@ -49,4 +49,10 @@ jobs:
       - name: Validate shipped skills (Agent Skill Open Standard)
         run: cargo run -q -p kai-cli -- skill validate skills
       - name: Mock benchmark (harness plumbing)
-        run: cargo run -q -p kai-cli -- bench --backend mock --out target/bench
+        run: cargo run -q -p kai-cli -- bench --backend mock --out target/bench --fail-on-any-failure
+      # The runners ship Google Chrome; a missing browser fails these tests
+      # instead of letting them pass by skipping (review TEST-01).
+      - name: Live browser lane
+        env:
+          KAI_REQUIRE_BROWSER: "1"
+        run: cargo test -p kai-os --test browser_lane --test browser_edges

@@ -136,6 +136,22 @@ pub fn user_turn(
 }
 
 /// [`user_turn`] with notes and the screenshot flag.
+/// A skill folder's absolute path, resolved once per folder: building a turn
+/// must not touch the disk every step (review CORE-ENG-08).
+fn canonical(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    let mut seen = SEEN
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    seen.entry(dir.to_path_buf())
+        .or_insert_with(|| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf()))
+        .clone()
+}
+
 pub fn build_turn(t: &TurnInput) -> String {
     let mut s = String::new();
 
@@ -144,7 +160,7 @@ pub fn build_turn(t: &TurnInput) -> String {
         s.push_str(&sk.front.name);
         s.push('\n');
         // `{skill_dir}` lets a skill point at its own helper scripts.
-        let dir = std::fs::canonicalize(&sk.dir).unwrap_or_else(|_| sk.dir.clone());
+        let dir = canonical(&sk.dir);
         s.push_str(&sk.body.replace("{skill_dir}", &dir.display().to_string()));
         s.push_str("\n\n");
     }
@@ -201,7 +217,7 @@ pub fn build_turn(t: &TurnInput) -> String {
 
     if t.no_progress {
         s.push_str(
-            "WARNING: the screen has not changed for two steps. Try a different \
+            "WARNING: the screen did not change after your last step. Try a different \
              approach or ask the user.\n",
         );
     }

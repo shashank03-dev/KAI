@@ -90,6 +90,7 @@ impl CuaRunner<'_> {
             self.actuator.computer_capabilities(),
         )?;
         let engine = crate::Engine {
+            grounder: None,
             client: &client,
             careful: None,
             perceptor: self.perceptor,

@@ -66,6 +66,21 @@ impl CoordFrame {
         (px < fw && py < fh).then_some((px, py))
     }
 
+    /// Pixels of a `(w, h)` image to this frame: the inverse of
+    /// [`CoordFrame::to_image`].
+    pub fn from_image(self, x: f64, y: f64, (w, h): (u32, u32)) -> (f64, f64) {
+        let (fw, fh) = (w.max(1) as f64, h.max(1) as f64);
+        match self {
+            Self::Marks | Self::Pixels => (x, y),
+            Self::Norm1000 => (x * 1000. / fw, y * 1000. / fh),
+            Self::SmartResize => {
+                let (rh, rw) =
+                    smart_resize(h, w, QWEN25_FACTOR, QWEN25_MIN_PIXELS, QWEN25_MAX_PIXELS);
+                (x * rw as f64 / fw, y * rh as f64 / fh)
+            }
+        }
+    }
+
     /// The sentence that tells the model its coordinate frame.
     pub fn line(self) -> &'static str {
         match self {
@@ -129,9 +144,25 @@ pub fn rescale(action: &mut ComputerAction, from: (u32, u32), to: (u32, u32)) {
     }
 }
 
+/// Which actions of a stopped batch ran.
+pub fn stopped_note(ran: usize, total: usize, why: &str) -> String {
+    match ran {
+        0 => format!("none of the {total} actions ran: {why}."),
+        _ => format!("actions 1 to {ran} of {total} ran; the rest did not: {why}."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn notes_say_what_ran() {
+        assert_eq!(
+            stopped_note(2, 5, "the layout changed"),
+            "actions 1 to 2 of 5 ran; the rest did not: the layout changed."
+        );
+        assert!(stopped_note(0, 3, "declined").starts_with("none of the 3"));
+    }
     use crate::computer::ScrollUnit;
 
     #[test]

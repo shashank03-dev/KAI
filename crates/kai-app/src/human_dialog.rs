@@ -20,10 +20,12 @@ use kai_core::human::{CheckKind, HumanReply};
 use std::cell::Cell;
 use std::rc::Rc;
 
+/// `more`: other decisions waiting after this one.
 pub fn dialog(
     h: &HumanPending,
     app: Entity<KaiApp>,
     draft: &Entity<TextInput>,
+    more: usize,
 ) -> impl IntoElement {
     let check = &h.check;
     let resolved = Rc::new(Cell::new(false));
@@ -60,8 +62,10 @@ pub fn dialog(
         app.update(cx, |a, cx| a.answer_human(reply, cx));
     })
     .detail(format!(
-        "{}{what} Kai is paused until you answer (seen: {}). Escape stops the run.",
-        check.prompt, check.evidence
+        "{}{what} Kai is paused until you answer (seen: {}). Escape stops the run.{}",
+        check.prompt,
+        check.evidence,
+        crate::words::more_waiting(more)
     ))
     .children(input)
     .action(|close| {

@@ -351,6 +351,7 @@ async fn run_task(
     } else {
         s.clients(&keys)?
     };
+    let grounder = backend::grounder(&s, &keys, o)?;
     let skills = all_skills();
     let kill = kai_os::KillSwitch::new();
     let _hotkey = if kai_os::kill::HOTKEY_WITHOUT_EVENT_LOOP {
@@ -405,7 +406,9 @@ async fn run_task(
         if let Some(e) = &run.error {
             eprintln!("native loop error: {e}");
         }
-        memory::save_trace(&run.trace);
+        if use_memory {
+            memory::save_trace(&run.trace);
+        }
         if let Some(rec) = &recorder {
             rec.finish(&run.trace)?;
         }
@@ -436,6 +439,10 @@ async fn run_task(
         report.outcome() == kai_core::Outcome::Success
     } else {
         let engine = Engine {
+            grounder: grounder.as_ref().map(|(c, frame)| kai_core::Grounder {
+                client: c.as_ref(),
+                frame: *frame,
+            }),
             client: fast.as_ref(),
             careful: careful.as_deref(),
             perceptor: screen,
@@ -479,7 +486,9 @@ async fn run_task(
                 },
             )
             .await;
-        memory::save_trace(&trace);
+        if use_memory {
+            memory::save_trace(&trace);
+        }
         if let Some(rec) = &recorder {
             eprintln!("recorded to {}", rec.dir().display());
         }

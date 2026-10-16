@@ -7,9 +7,28 @@
 use crate::risk;
 use crate::schema::Action;
 use crate::trace::Trace;
+use regex::Regex;
+use std::sync::OnceLock;
+
+fn spaced_digits() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| Regex::new(r"\+?\d[\d -]*\d").expect("valid digit pattern"))
+}
+
+fn long_number(matched: &str) -> bool {
+    matched.bytes().filter(u8::is_ascii_digit).count() >= 6
+}
 
 /// Replace emails, key-like tokens and long digit runs.
 pub fn scrub(text: &str) -> String {
+    let text = spaced_digits().replace_all(text, |caps: &regex::Captures<'_>| {
+        let m = caps.get(0).expect("whole match").as_str();
+        if long_number(m) {
+            "[number]".to_string()
+        } else {
+            m.to_string()
+        }
+    });
     let mut out: Vec<String> = Vec::new();
     for word in text.split(' ') {
         out.push(scrub_word(word));
@@ -94,6 +113,12 @@ fn long_digits(s: &str) -> bool {
 
 /// Does `text` still look like it carries a secret after [`scrub`]?
 pub fn looks_secret(text: &str) -> bool {
+    if spaced_digits()
+        .find_iter(text)
+        .any(|m| long_number(m.as_str()))
+    {
+        return true;
+    }
     text.split_whitespace().any(|w| {
         let c = w.trim_matches(|c: char| "`'\"()[]{}<>,;:.!?".contains(c));
         is_email(c) || is_tokenish(c) || long_digits(c)

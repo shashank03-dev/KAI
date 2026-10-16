@@ -32,7 +32,8 @@
       "runtime": "llama.cpp",
       "served_name": "gemma-4-e2b-it",
       "notes": "Smallest Gemma 4 with vision (2.3B effective, 5.1B with per-layer embeddings). Runs on almost any computer, CPU included; weakest at reading dense screens. Model supports 128K context; Kai asks for 16K.",
-      "computer_use": "experimental"
+      "computer_use": "experimental",
+      "coord_frame": "marks"
     },
     {
       "id": "gemma-4-e4b-it-q4",
@@ -65,7 +66,8 @@
       "runtime": "llama.cpp",
       "served_name": "gemma-4-e4b-it",
       "notes": "Gemma 4 for laptops and 8 GB graphics cards (4.5B effective, 8B with per-layer embeddings). Fits fully on an 8 GB GPU. Model supports 128K context; Kai asks for 16K.",
-      "computer_use": "experimental"
+      "computer_use": "experimental",
+      "coord_frame": "marks"
     },
     {
       "id": "gemma-4-26b-a4b-it-q4",
@@ -98,7 +100,8 @@
       "runtime": "llama.cpp",
       "served_name": "gemma-4-26b-a4b-it",
       "notes": "Kai's default model on the cloud backends, here on your own computer. Mixture of experts: all 25.2B weights must fit in memory, but only 3.8B work per token, so it runs nearly as fast as a 4B model and can split between GPU and RAM. Model supports 256K context; Kai asks for 16K.",
-      "computer_use": "recommended"
+      "computer_use": "recommended",
+      "coord_frame": "marks"
     },
     {
       "id": "gemma-4-31b-it-q4",
@@ -130,7 +133,8 @@
       "runtime": "llama.cpp",
       "served_name": "gemma-4-31b-it",
       "notes": "The largest, most careful Gemma 4 (dense: every weight works on every token). Wants a 24 GB graphics card; on CPU or split it is very slow. Model supports 256K context; Kai asks for 16K.",
-      "computer_use": "recommended"
+      "computer_use": "recommended",
+      "coord_frame": "marks"
     },
     {
       "id": "qwen3-vl-4b-instruct-q4",
@@ -162,7 +166,8 @@
       "runtime": "llama.cpp",
       "served_name": "qwen3-vl-4b-instruct",
       "notes": "Open vision model from Qwen (official GGUF). Not yet tried with Kai's harness.",
-      "computer_use": "untested"
+      "computer_use": "untested",
+      "coord_frame": "norm1000"
     },
     {
       "id": "qwen3-vl-8b-instruct-q4",
@@ -194,7 +199,8 @@
       "runtime": "llama.cpp",
       "served_name": "qwen3-vl-8b-instruct",
       "notes": "Open vision model from Qwen (official GGUF). Not yet tried with Kai's harness.",
-      "computer_use": "untested"
+      "computer_use": "untested",
+      "coord_frame": "norm1000"
     },
     {
       "id": "ui-tars-1.5-7b-q4",
@@ -227,7 +233,8 @@
       "served_name": "ui-tars-1.5-7b",
       "notes": "A model trained for computer use (Qwen2.5-VL based), community GGUF conversion by mradermacher. It was trained on its own action format, not Kai's JSON replies; not yet tried with Kai's harness.",
       "computer_use": "untested",
-      "agent_trained": true
+      "agent_trained": true,
+      "coord_frame": "smart-resize"
     },
     {
       "id": "holo-3.1-4b-q4",
@@ -427,7 +434,8 @@
       "served_name": "gemma-4-12b-it",
       "notes": "Google's own quantisation-aware 4-bit build of the dense Gemma 4 12B: trained for 4 bits, so it keeps more quality than a plain Q4 conversion. Same family as Kai's default model; fits a 12 GB graphics card. Model supports 256K context; Kai asks for 16K.",
       "computer_use": "untested",
-      "agent_trained": false
+      "agent_trained": false,
+      "coord_frame": "marks"
     },
     {
       "id": "fara-7b-q4",
@@ -460,7 +468,8 @@
       "served_name": "fara-7b",
       "notes": "Microsoft's small computer-use agent for the web (Qwen2.5-VL 7B base, community GGUF by bartowski). Microsoft reports 73.5% on WebVoyager (vendor-run). It was trained on its own action format; Kai's JSON reply is enforced by the server's grammar. Model supports 128K context; Kai asks for 16K.",
       "computer_use": "untested",
-      "agent_trained": true
+      "agent_trained": true,
+      "coord_frame": "pixels"
     },
     {
       "id": "glm-4.6v-flash-q4",

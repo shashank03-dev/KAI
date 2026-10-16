@@ -11,6 +11,9 @@ use base64::Engine;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
+/// Thinking off for Flash, the cheapest for Gemma: one step needs no plan
+/// (DECISIONS.md records why it is "minimal", not "low").
+const THINKING_LEVEL: &str = "minimal";
 const THINKING_UNKNOWN: u8 = 0;
 const THINKING_SUPPORTED: u8 = 1;
 const THINKING_UNSUPPORTED: u8 = 2;
@@ -119,7 +122,7 @@ impl GeminiClient {
             }
         }
         if include_thinking {
-            gen_cfg["thinkingConfig"] = serde_json::json!({ "thinkingLevel": "minimal" });
+            gen_cfg["thinkingConfig"] = serde_json::json!({ "thinkingLevel": THINKING_LEVEL });
         }
 
         let mut all_parts = Vec::new();

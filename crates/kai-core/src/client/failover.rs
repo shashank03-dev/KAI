@@ -158,6 +158,34 @@ mod tests {
         }
     }
 
+    struct RateLimited;
+    #[async_trait]
+    impl ModelClient for RateLimited {
+        fn backend(&self) -> Backend {
+            Backend::Vllm
+        }
+        async fn decide(&self, _: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
+            Err(ClientError::from_status(429, "busy"))
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limit_fails_over() {
+        let f = FailoverClient::new(
+            Box::new(RateLimited),
+            Some(Box::new(MockClient::always("secondary"))),
+        );
+        let schema = crate::schema::Decision::json_schema();
+        let imgs = Images {
+            screenshot_jpeg: vec![],
+            crop_jpeg: None,
+        };
+        assert_eq!(
+            f.decide(&req(&schema, &imgs)).await.unwrap().raw,
+            "secondary"
+        );
+    }
+
     #[tokio::test]
     async fn unavailable_model_fails_over_for_good() {
         let f = FailoverClient::new(

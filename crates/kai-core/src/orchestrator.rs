@@ -230,7 +230,9 @@ pub struct Report {
 
 impl Report {
     pub fn outcome(&self) -> Outcome {
-        if self
+        if self.results.is_empty() {
+            Outcome::Failed
+        } else if self
             .results
             .iter()
             .any(|r| r.trace.outcome == Some(Outcome::Stopped))
@@ -351,6 +353,7 @@ impl Orchestrator<'_> {
 
     fn engine<'b>(&'b self, perceptor: &'b dyn Perceptor) -> Engine<'b> {
         Engine {
+            grounder: None,
             client: self.client,
             careful: self.careful,
             perceptor,
@@ -410,6 +413,16 @@ impl Orchestrator<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_team_report_is_not_success() {
+        let report = Report {
+            plan: Plan::single("do something"),
+            results: vec![],
+            summary: String::new(),
+        };
+        assert_eq!(report.outcome(), Outcome::Failed);
+    }
 
     fn st(id: &str, deps: &[&str]) -> Subtask {
         Subtask {

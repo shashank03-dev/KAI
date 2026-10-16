@@ -114,6 +114,53 @@ fn policy(action: &ComputerAction, original: &Decision, g: &Grounding) -> Decisi
     d
 }
 impl Engine<'_> {
+    /// Kai's own safety checks for this action's site: the person accepts
+    /// them (never an auto-policy) or the action does not run, and the step
+    /// ends with the returned outcome.
+    async fn local_checks(
+        &self,
+        r: &mut Run<'_>,
+        request: &ToolRequest,
+        obs: &Observation,
+        mut rec: StepRecord,
+    ) -> Result<StepRecord, Option<Outcome>> {
+        let url = match &request.action {
+            ComputerAction::Observe | ComputerAction::Wait { .. } | ComputerAction::Move { .. } => {
+                return Ok(rec);
+            }
+            ComputerAction::OpenUrl { url } => Some(url.as_str()),
+            _ => obs.url.as_deref(),
+        };
+        let checks = crate::safety_checks::checks(url, &r.domains);
+        if checks.is_empty() {
+            return Ok(rec);
+        }
+        let said: Vec<&str> = checks.iter().filter_map(|c| c.message.as_deref()).collect();
+        let mut ask = rec.decision.clone();
+        ask.thought = format!("Kai flagged this step: {} Allow it?", said.join(" "));
+        match self
+            .approver
+            .approve_safety_check(&ask, &obs.grounding)
+            .await
+        {
+            ApprovalChoice::Approve => {
+                r.domains.accept(&checks);
+                rec.approval = Some("safety check accepted".into());
+                Ok(rec)
+            }
+            choice => {
+                rec.approval = Some("safety check declined".into());
+                rec.output = Some(said.join(" "));
+                rec.path = Some("none".into());
+                r.push(rec);
+                Err(Some(match choice {
+                    ApprovalChoice::Stop => Outcome::Stopped,
+                    _ => Outcome::AskedUser,
+                }))
+            }
+        }
+    }
+
     pub(super) async fn computer_step(
         &self,
         r: &mut Run<'_>,
@@ -138,14 +185,23 @@ impl Engine<'_> {
             action,
         };
         if let Err(e) = request.validate(&self.actuator.computer_capabilities(), &space) {
-            rec.output = Some(e.to_string());
-            rec.path = Some("error".into());
-            r.push(rec);
-            return Some(Outcome::AskedUser);
+            return self.refused(r, rec, &request, e);
         }
         // Resolve every point/drag waypoint against known semantic elements.
         // A synthetic coordinate target must not hide a CAPTCHA/secure field.
-        let mut mandatory = false;
+        // A grounder chooses pixels without an accessibility identity. Even
+        // Autopilot needs a person before committing such a click or drag.
+        let mut mandatory = self.grounder.is_some()
+            && matches!(obs.grounding, Grounding::Grid { .. })
+            && matches!(
+                request.action,
+                ComputerAction::Click { .. } | ComputerAction::Drag { .. }
+            )
+            && request
+                .action
+                .targets()
+                .into_iter()
+                .any(|t| matches!(t, Target::Point { .. }));
         for target in request.action.targets() {
             let marks = match target {
                 Target::Element { mark, .. } => vec![*mark],
@@ -171,15 +227,11 @@ impl Engine<'_> {
                 if matches!(obs.grounding, Grounding::Marks(_))
                     && obs.grounding.element(mark).is_none()
                 {
-                    rec.output = Some(ToolError::StaleObservation.to_string());
-                    r.push(rec);
-                    return Some(Outcome::AskedUser);
+                    return self.refused(r, rec, &request, ToolError::StaleObservation);
                 }
                 if let Some(el) = obs.grounding.element(mark) {
                     if !el.enabled {
-                        rec.output = Some(ToolError::StaleObservation.to_string());
-                        r.push(rec);
-                        return Some(Outcome::AskedUser);
+                        return self.refused(r, rec, &request, ToolError::StaleObservation);
                     }
                     let mut probe = d.clone();
                     probe.target = Some(mark);
@@ -193,6 +245,12 @@ impl Engine<'_> {
                     mandatory |= crate::risk::is_payment_or_password(&probe, &obs.grounding);
                 }
             }
+        }
+        if self.config.local_safety_checks {
+            rec = match self.local_checks(r, &request, obs, rec).await {
+                Ok(rec) => rec,
+                Err(end) => return end,
+            };
         }
         r.protect(&d, &obs.grounding, mandatory);
         d.risk = crate::risk::classify(&d, &obs.grounding);
@@ -244,6 +302,9 @@ impl Engine<'_> {
             obs,
             privacy: &r.privacy,
         };
+        // One dispatcher per step on purpose: its replay guard is per request,
+        // and the process-wide mutation lock (`MUTATION_OWNER`) is what
+        // orders input across steps and runs (review CORE-ENG-10).
         let dispatcher = Dispatcher::new(&executor, &Authorized, self.interrupt);
         let t = Instant::now();
         let result = dispatcher.dispatch(&request, &space).await;
@@ -273,9 +334,80 @@ impl Engine<'_> {
         r.force_full = true;
         self.perceptor.settle(Duration::from_secs(3)).await;
         match result.error {
-            Some(ToolError::Cancelled) => Some(Outcome::Stopped),
-            Some(_) => Some(Outcome::AskedUser),
-            None => None,
+            None => {
+                r.rejected = 0;
+                None
+            }
+            Some(e) => end_for(e, &mut r.rejected),
         }
+    }
+
+    /// A computer action that cannot run as given (invalid, or aimed at a
+    /// stale or disabled element): the model hears why and gets a fresh look,
+    /// instead of the run ending at once (review CORE-ENG-02).
+    fn refused(
+        &self,
+        r: &mut Run<'_>,
+        mut rec: StepRecord,
+        request: &ToolRequest,
+        e: ToolError,
+    ) -> Option<Outcome> {
+        r.computer_result = Some(ToolResult {
+            id: request.id,
+            session: request.session,
+            error: Some(e),
+            elapsed_ms: 0,
+            requires_observation: true,
+        });
+        rec.output = Some(e.to_string());
+        rec.path = Some("error".into());
+        r.notes.push(format!(
+            "ERROR: that computer action was refused ({e}); look again and retry."
+        ));
+        r.push(rec);
+        r.force_full = true;
+        end_for(e, &mut r.rejected)
+    }
+}
+
+/// Refusals in a row before the user is asked.
+pub(super) const MAX_REJECTED: u32 = 3;
+
+/// How a computer-tool error ends the step: errors the model can recover
+/// from go back to it (until [`MAX_REJECTED`] in a row); a person is needed
+/// for permission and human checks; a stop stops.
+fn end_for(e: ToolError, rejected: &mut u32) -> Option<Outcome> {
+    match e {
+        ToolError::Cancelled => Some(Outcome::Stopped),
+        ToolError::NeedsUser | ToolError::PermissionDenied => Some(Outcome::AskedUser),
+        _ => {
+            *rejected += 1;
+            (*rejected >= MAX_REJECTED).then_some(Outcome::AskedUser)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recoverable_tool_errors_go_back_to_the_model_until_repeated() {
+        let mut n = 0;
+        assert_eq!(end_for(ToolError::StaleObservation, &mut n), None);
+        assert_eq!(end_for(ToolError::InvalidArguments, &mut n), None);
+        assert_eq!(
+            end_for(ToolError::Unsupported, &mut n),
+            Some(Outcome::AskedUser)
+        );
+        let mut n = 0;
+        assert_eq!(
+            end_for(ToolError::NeedsUser, &mut n),
+            Some(Outcome::AskedUser)
+        );
+        assert_eq!(
+            end_for(ToolError::Cancelled, &mut n),
+            Some(Outcome::Stopped)
+        );
     }
 }

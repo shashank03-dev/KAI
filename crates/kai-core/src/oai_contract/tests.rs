@@ -6,7 +6,7 @@ use serde_json::json;
 const SIZE: (u32, u32) = (1440, 900);
 
 fn act(raw: serde_json::Value, frame: CoordFrame) -> Result<Turn, ToolError> {
-    decode(&raw.to_string(), frame, SIZE, 9, Some(4))
+    decode(&raw.to_string(), frame, SIZE, 9, Some(4), 1)
 }
 
 #[test]
@@ -32,20 +32,21 @@ fn an_open_models_click_equals_openais_click() {
         open,
         Turn::Act {
             thought: "open Filters".into(),
-            action: openai
+            actions: vec![openai]
         }
     );
 }
 
 #[test]
 fn normalised_coordinates_become_screenshot_pixels() {
-    let Turn::Act { action, .. } = act(
+    let Turn::Act { actions, .. } = act(
         json!({"thought":"t","actions":[{"type":"click","button":"left","x":500,"y":500,"keys":null}],"message":null,"phase":"commentary"}),
         CoordFrame::Norm1000,
     )
     .unwrap() else {
         panic!()
     };
+    let action = actions[0].clone();
     assert_eq!(
         action,
         ComputerAction::Click {
@@ -69,13 +70,14 @@ fn normalised_coordinates_become_screenshot_pixels() {
 
 #[test]
 fn a_mark_stays_an_element_target() {
-    let Turn::Act { action, .. } = act(
+    let Turn::Act { actions, .. } = act(
         json!({"thought":"t","actions":[{"type":"click","button":"left","x":null,"y":null,"mark":14,"keys":null}],"message":null,"phase":"commentary"}),
         CoordFrame::Marks,
     )
     .unwrap() else {
         panic!()
     };
+    let action = actions[0].clone();
     assert!(matches!(
         action,
         ComputerAction::Click {
@@ -103,13 +105,10 @@ fn typing_keys_and_waits_use_openais_vocabulary() {
     .unwrap();
     assert!(matches!(
         typed,
-        Turn::Act {
-            action: ComputerAction::Type {
-                target: Target::Element { mark: 4, .. },
-                ..
-            },
-            ..
-        }
+        Turn::Act { ref actions, .. } if matches!(
+            actions[..],
+            [ComputerAction::Type { target: Target::Element { mark: 4, .. }, .. }]
+        )
     ));
     let keys = act(
         json!({"thought":"t","actions":[{"type":"keypress","keys":["CTRL","RETURN"]}],"message":null,"phase":"commentary"}),
@@ -117,7 +116,7 @@ fn typing_keys_and_waits_use_openais_vocabulary() {
     )
     .unwrap();
     assert!(
-        matches!(keys, Turn::Act { action: ComputerAction::Keypress { ref keys }, .. } if keys == &["ctrl", "enter"])
+        matches!(&keys, Turn::Act { actions, .. } if actions[..] == [ComputerAction::Keypress { keys: vec!["ctrl".into(), "enter".into()] }])
     );
 }
 
@@ -161,9 +160,47 @@ fn messages_end_the_turn_as_done_or_a_question() {
 
 #[test]
 fn the_schema_offers_marks_only_in_marks_frame() {
-    let marks = schema(CoordFrame::Marks).to_string();
-    let pixels = schema(CoordFrame::Pixels).to_string();
+    let marks = schema(CoordFrame::Marks, 1, false).to_string();
+    let pixels = schema(CoordFrame::Pixels, 1, false).to_string();
     assert!(marks.contains("\"mark\""));
     assert!(!pixels.contains("\"mark\""));
     assert!(pixels.contains("\"wheel\""));
+}
+
+#[test]
+fn a_turn_carries_up_to_its_batch_of_actions_in_order() {
+    let two = json!({"thought":"click then type","actions":[
+        {"type":"click","button":"left","x":null,"y":null,"mark":2,"keys":null},
+        {"type":"type","text":"penguin"}],"message":null,"phase":"commentary"});
+    // A batch of one refuses two actions.
+    assert!(decode(&two.to_string(), CoordFrame::Marks, SIZE, 9, None, 1).is_err());
+    let Turn::Act { actions, .. } =
+        decode(&two.to_string(), CoordFrame::Marks, SIZE, 9, None, 3).unwrap()
+    else {
+        panic!()
+    };
+    assert!(matches!(
+        actions[0],
+        ComputerAction::Click {
+            target: Target::Element { mark: 2, .. },
+            ..
+        }
+    ));
+    // The field gets focus from the click: its mark is resolved when it runs.
+    assert!(matches!(
+        actions[1],
+        ComputerAction::Type {
+            target: Target::Element {
+                mark: LATER_FOCUS,
+                ..
+            },
+            ..
+        }
+    ));
+    // Typing first, with nothing focused now, needs the person.
+    let typing = json!({"thought":"t","actions":[{"type":"type","text":"x"}],"message":null,"phase":"commentary"});
+    assert_eq!(
+        decode(&typing.to_string(), CoordFrame::Marks, SIZE, 9, None, 3),
+        Err(ToolError::NeedsUser)
+    );
 }

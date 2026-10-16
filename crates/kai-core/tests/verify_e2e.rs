@@ -47,6 +47,7 @@ fn engine<'a>(
     config: Config,
 ) -> Engine<'a> {
     Engine {
+        grounder: None,
         client,
         careful: None,
         perceptor,

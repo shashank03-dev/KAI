@@ -173,8 +173,16 @@ impl Lesson {
     pub fn new(kind: Kind, text: &str, scope: Scope, source: Source) -> Self {
         let text = clip_words(text.trim(), MAX_WORDS);
         let now = now();
+        // Kind, process and a counter too: the same text learned twice in
+        // one second (as Avoid and Prefer) must not share an id (CORE-SAFE-06).
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let pid = std::process::id();
         Self {
-            id: format!("{:08x}", fnv1a(&format!("{text}|{now}")) as u32),
+            id: format!(
+                "{:016x}",
+                crate::plan_cache::fnv1a(&format!("{kind:?}|{text}|{now}|{pid}|{n}"))
+            ),
             kind,
             text,
             scope,
@@ -269,12 +277,3 @@ pub fn similarity(a: &str, b: &str) -> f32 {
 
 /// Two lessons at or above this token overlap (same kind) are merged.
 pub const MERGE_SIMILARITY: f32 = 0.8;
-
-fn fnv1a(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in s.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
-}

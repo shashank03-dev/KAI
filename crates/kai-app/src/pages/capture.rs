@@ -338,7 +338,7 @@ fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiAp
     app.palette = false;
     app.run_tab = "steps".into();
     app.shortcuts = false;
-    app.pages.open_skill = None;
+    app.pages.open_skill(None);
     app.pages.drafting = false;
     app.conn = Conn::Online("DigitalOcean (Gemma 4) · 640 ms".into());
     if i < 5 {
@@ -455,7 +455,8 @@ fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiAp
         "31-done-failure" => fake_runs(app, cx, |r| fake_run(r, Some(Outcome::StepLimit))),
         "40-skills" => app.go(Page::Skills, cx),
         "41-skill-detail" => {
-            app.pages.open_skill = app.skills.first().map(|s| s.front.name.clone());
+            let first = app.skills.first().cloned();
+            app.pages.open_skill(first.as_ref());
             app.go(Page::Skills, cx);
         }
         "42-save-as-skill" => {
@@ -464,7 +465,8 @@ fn stage(app: &mut KaiApp, i: usize, window: &mut Window, cx: &mut Context<KaiAp
         }
         "50-history" => {
             app.pages.reload_history();
-            app.pages.open_trace = app.pages.history.first().map(|e| e.dir.clone());
+            let newest = app.pages.history.first().map(|e| e.dir.clone());
+            app.pages.open_trace(newest);
             app.go(Page::History, cx);
         }
         "60-bench" => {
