@@ -116,7 +116,7 @@ impl ClientError {
             self,
             ClientError::Transport(_)
                 | ClientError::Timeout(_)
-                | ClientError::Status(500..=599, _)
+                | ClientError::Status(429 | 500..=599, _)
                 | ClientError::Unavailable(_)
         )
     }

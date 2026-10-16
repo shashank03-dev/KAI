@@ -278,12 +278,50 @@ impl Settings {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        std::fs::create_dir_all(Self::dir())?;
-        std::fs::write(
-            Self::dir().join("settings.json"),
-            serde_json::to_string_pretty(self)?,
-        )?;
-        Ok(())
+        self.save_at(&Self::dir().join("settings.json"))
+    }
+
+    /// Never truncate the only copy of user settings, including API keys.
+    /// If an old file is malformed, refuse to overwrite it with defaults.
+    fn save_at(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        use std::io::Write;
+        let parent = path.parent().ok_or_else(|| anyhow::anyhow!("invalid settings path"))?;
+        std::fs::create_dir_all(parent)?;
+        match std::fs::read_to_string(path) {
+            Ok(old) => {
+                anyhow::ensure!(
+                    serde_json::from_str::<Settings>(&old).is_ok(),
+                    "settings at {} are invalid; repair or back up that file before saving",
+                    path.display()
+                );
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        static NEXT_TMP: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT_TMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_file_name(format!(
+            "settings-{}-{n}.tmp", std::process::id()
+        ));
+        let result = (|| -> anyhow::Result<()> {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&tmp)?;
+            file.write_all(serde_json::to_string_pretty(self)?.as_bytes())?;
+            file.sync_all()?;
+            std::fs::rename(&tmp, path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(tmp);
+        }
+        result
     }
 
     /// Environment overrides, for CI and the deploy scripts' `endpoint.env`.

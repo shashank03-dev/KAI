@@ -11,10 +11,46 @@ use crate::trace::Trace;
 /// Replace emails, key-like tokens and long digit runs.
 pub fn scrub(text: &str) -> String {
     let mut out: Vec<String> = Vec::new();
-    for word in text.split(' ') {
+    let grouped = scrub_grouped_numbers(text);
+    for word in grouped.split(' ') {
         out.push(scrub_word(word));
     }
     out.join(" ")
+}
+
+/// Hide digit runs even when a card or account number is grouped using spaces
+/// or hyphens. Keep surrounding punctuation and ordinary short numbers intact.
+fn scrub_grouped_numbers(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let (mut i, mut copied) = (0, 0);
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            let (mut end, mut digits, mut last_digit) = (i, 0, i);
+            while end < bytes.len() {
+                if bytes[end].is_ascii_digit() {
+                    digits += 1;
+                    end += 1;
+                    last_digit = end;
+                } else if matches!(bytes[end], b' ' | b'-') {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if digits >= 6 {
+                out.push_str(&text[copied..start]);
+                out.push_str("[number]");
+                copied = last_digit;
+                i = last_digit;
+                continue;
+            }
+        }
+        i += text[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    out.push_str(&text[copied..]);
+    out
 }
 
 fn scrub_word(w: &str) -> String {
@@ -94,10 +130,7 @@ fn long_digits(s: &str) -> bool {
 
 /// Does `text` still look like it carries a secret after [`scrub`]?
 pub fn looks_secret(text: &str) -> bool {
-    text.split_whitespace().any(|w| {
-        let c = w.trim_matches(|c: char| "`'\"()[]{}<>,;:.!?".contains(c));
-        is_email(c) || is_tokenish(c) || long_digits(c)
-    })
+    scrub(text) != text
 }
 
 /// Everything a run typed into a password/secure field (and the text of any

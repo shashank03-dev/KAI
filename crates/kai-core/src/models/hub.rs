@@ -197,6 +197,22 @@ pub fn entry_from_hub(
             r.repo
         )
     })?;
+    // A Hub pull is promised as hash-checked. Refuse a tree that has no
+    // verifiable LFS metadata rather than persisting unchecked downloads.
+    for f in [model, mmproj] {
+        anyhow::ensure!(
+            f.size.is_some_and(|size| size > 0),
+            "{} has no verified byte size; cannot safely pull it",
+            f.path
+        );
+        anyhow::ensure!(
+            f.sha256.as_deref().is_some_and(|h| {
+                h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit())
+            }),
+            "{} has no valid SHA-256; cannot safely pull it",
+            f.path
+        );
+    }
     let name = model_name(&r.repo);
     let total: u64 = [model, mmproj].iter().filter_map(|f| f.size).sum();
     let model_gb = model.size.unwrap_or(0) as f32 / 1e9;

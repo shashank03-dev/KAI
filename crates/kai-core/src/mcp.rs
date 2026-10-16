@@ -91,10 +91,7 @@ impl<'a> Server<'a> {
         let params = msg.get("params").cloned().unwrap_or(Value::Null);
         let result = match method {
             "initialize" => Ok(json!({
-                "protocolVersion": params
-                    .get("protocolVersion")
-                    .and_then(Value::as_str)
-                    .unwrap_or(PROTOCOL),
+                "protocolVersion": PROTOCOL,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "kai", "version": env!("CARGO_PKG_VERSION")},
                 "instructions": "Kai sees and drives this desktop. Call kai_observe first; \

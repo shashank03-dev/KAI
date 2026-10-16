@@ -5,7 +5,7 @@
 //! Streams by default (same SSE wire format as OpenAI) for real TTFT.
 
 use super::stream::{self, StreamOutcome};
-use super::{Backend, ClientError, ModelClient, ModelReply, ModelRequest, send_error};
+use super::{Backend, ClientError, ModelClient, ModelReply, ModelRequest, http_client, send_error};
 use async_trait::async_trait;
 use base64::Engine;
 use std::time::{Duration, Instant};
@@ -23,12 +23,7 @@ pub struct VllmClient {
 impl VllmClient {
     /// `endpoint` is the base, e.g. `https://host/v1`.
     pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
-        let http = reqwest::Client::builder()
-            .pool_max_idle_per_host(2)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .tcp_keepalive(Duration::from_secs(30))
-            .build()
-            .expect("reqwest client");
+        let http = http_client();
         Self {
             http,
             endpoint: endpoint.into().trim_end_matches('/').to_string(),
@@ -110,15 +105,32 @@ impl ModelClient for VllmClient {
 
     async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
         let started = Instant::now();
-        let resp = self
-            .http
-            .post(format!("{}/chat/completions", self.endpoint))
-            .bearer_auth(&self.api_key)
-            .json(&self.body(req))
-            .timeout(self.timeout)
-            .send()
-            .await
-            .map_err(|e| send_error(e, self.timeout))?;
+        // A transient rate limit must not fail the whole task. After three
+        // attempts, return 429 so a configured secondary can take over.
+        let mut rate_limited = 0;
+        let resp = loop {
+            let response = self
+                .http
+                .post(format!("{}/chat/completions", self.endpoint))
+                .bearer_auth(&self.api_key)
+                .json(&self.body(req))
+                .timeout(self.timeout)
+                .send()
+                .await
+                .map_err(|e| send_error(e, self.timeout))?;
+            if response.status().as_u16() != 429 || rate_limited >= 2 {
+                break response;
+            }
+            rate_limited += 1;
+            let after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(rate_limited)
+                .min(10);
+            tokio::time::sleep(Duration::from_secs(after)).await;
+        };
 
         let status = resp.status();
         if !status.is_success() {

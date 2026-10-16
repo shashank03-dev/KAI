@@ -187,3 +187,19 @@ fn typed_keys_win_and_stored_keys_fill_the_rest() {
     assert_eq!(k.openai.as_deref(), Some("stored-openai"));
     assert_eq!(k.vllm, None);
 }
+
+#[test]
+fn settings_save_is_atomic_and_preserves_corrupt_existing_content() {
+    let folder = std::env::temp_dir().join(format!("kai-settings-{}", std::process::id()));
+    let path = folder.join("settings.json");
+    let _ = std::fs::remove_dir_all(&folder);
+    let settings = Settings::default();
+    settings.save_at(&path).unwrap();
+    let stored: Settings = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(stored.max_steps, settings.max_steps);
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1);
+    std::fs::write(&path, "{unreadable").unwrap();
+    assert!(settings.save_at(&path).is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{unreadable");
+    let _ = std::fs::remove_dir_all(folder);
+}

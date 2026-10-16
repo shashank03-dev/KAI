@@ -98,6 +98,19 @@ fn a_real_repo_becomes_a_pinned_entry() {
 }
 
 #[test]
+fn hub_pull_refuses_files_missing_a_hash_or_size() {
+    let mut files = files_from_tree(&holo4_tree());
+    files[0].sha256 = None;
+    let err = pull("o/m-GGUF", &files).unwrap_err().to_string();
+    assert!(err.contains("SHA-256"), "{err}");
+
+    let mut files = files_from_tree(&holo4_tree());
+    files[1].size = None;
+    let err = pull("o/m-GGUF", &files).unwrap_err().to_string();
+    assert!(err.contains("byte size"), "{err}");
+}
+
+#[test]
 fn picks_the_asked_or_the_preferred_quantisation() {
     let files = [
         file("m-IQ4_XS.gguf", 10),

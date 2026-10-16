@@ -11,7 +11,7 @@ pub enum Mapped {
 /// (`"text": 5`) is refused, never a panic.
 fn decision(v: serde_json::Value) -> Option<Decision> {
     let mut d: Decision = serde_json::from_value(v).ok()?;
-    let _ = d.validate_and_clamp();
+    d.validate_and_clamp().ok()?;
     Some(d)
 }
 
@@ -59,7 +59,6 @@ pub fn map_action(a: &serde_json::Value, img: (u32, u32), screen: Rect) -> Mappe
         }])
     };
     let none = || Grounding::Marks(Vec::new());
-    let ty = a["type"].as_str().unwrap_or("");
     let at = || point(&a["x"], &a["y"]);
     let act = |v: serde_json::Value, g: Grounding| match decision(v) {
         Some(d) => Mapped::Act(d, g),
@@ -70,14 +69,6 @@ pub fn map_action(a: &serde_json::Value, img: (u32, u32), screen: Rect) -> Mappe
             "right" => act(
                 serde_json::json!({"thought":"native right click","action":"right_click","target":1,"risk":"none"}),
                 at(),
-            ),
-            "back" => act(
-                serde_json::json!({"thought":"native back","action":"key","keys":["alt","left"],"risk":"none"}),
-                none(),
-            ),
-            "forward" => act(
-                serde_json::json!({"thought":"native forward","action":"key","keys":["alt","right"],"risk":"none"}),
-                none(),
             ),
             _ => act(
                 serde_json::json!({"thought":"native click","action":"click","target":1,"risk":"none"}),
