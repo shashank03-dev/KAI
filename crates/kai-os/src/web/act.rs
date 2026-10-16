@@ -20,7 +20,7 @@ const TYPED_WAIT: Duration = Duration::from_millis(600);
 /// An input call that a page dialog interrupted did its job: the click or
 /// key landed and the page answered with a dialog. The next observation
 /// shows the dialog.
-fn landed(r: anyhow::Result<()>) -> anyhow::Result<()> {
+pub(super) fn landed(r: anyhow::Result<()>) -> anyhow::Result<()> {
     match r {
         Err(e) if e.downcast_ref::<DialogOpen>().is_some() => Ok(()),
         // The action closed its own tab (a "Close" button): done; the next
@@ -38,7 +38,7 @@ impl BrowserLane {
     /// `input` handler. Never fails the step: a rich editor that keeps its
     /// text elsewhere just costs the wait. Only a yes/no comes back, never
     /// the field's contents.
-    async fn wait_typed(&self, text: &str) {
+    pub(super) async fn wait_typed(&self, text: &str) {
         let probe = format!(
             "(() => {{ const e = document.activeElement; \
              const v = e ? (e.value ?? e.textContent ?? '') : ''; \
@@ -115,10 +115,11 @@ impl BrowserLane {
         .map(drop)
     }
 
-    async fn click(&self, (x, y): (f64, f64), button: &str, times: u32) -> anyhow::Result<()> {
+    pub(super) async fn click(&self, at: (f64, f64), button: &str, k: u32) -> anyhow::Result<()> {
+        let (x, y) = at;
         self.file_chooser.store(false, Ordering::SeqCst);
         self.mouse("mouseMoved", x, y, "none", 0).await?;
-        for n in 1..=times {
+        for n in 1..=k {
             let release = super::release::Release::new(
                 &self.cdp,
                 &self.input_poisoned,
@@ -144,7 +145,7 @@ impl BrowserLane {
         Ok(())
     }
 
-    async fn press(&self, chord: &[String]) -> anyhow::Result<()> {
+    pub(super) async fn press(&self, chord: &[String]) -> anyhow::Result<()> {
         match keys::chord(chord)? {
             Chord::Keys(downs) => {
                 for down in downs {
@@ -174,7 +175,7 @@ impl BrowserLane {
         }
     }
 
-    async fn history(&self, delta: i64) -> anyhow::Result<()> {
+    pub(super) async fn history(&self, delta: i64) -> anyhow::Result<()> {
         let h = self.page("Page.getNavigationHistory", json!({})).await?;
         let at = h["currentIndex"].as_i64().unwrap_or(0) + delta;
         let entry = usize::try_from(at)

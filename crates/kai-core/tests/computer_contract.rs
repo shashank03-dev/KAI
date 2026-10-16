@@ -46,7 +46,10 @@ fn points_map_each_axis_and_origin_without_clamping() {
 
 #[test]
 fn unknown_version_session_and_stale_targets_are_rejected() {
-    let mut r = request(ComputerAction::Move { target: target() });
+    let mut r = request(ComputerAction::Move {
+        target: target(),
+        modifiers: vec![],
+    });
     r.version = 2;
     assert_eq!(
         r.validate(&caps(), &space()).unwrap_err(),
@@ -60,6 +63,7 @@ fn unknown_version_session_and_stale_targets_are_rejected() {
     );
     r.session = 7;
     r.action = ComputerAction::Move {
+        modifiers: vec![],
         target: Target::Point {
             observation: 8,
             x: 1.,
@@ -77,6 +81,7 @@ fn unsupported_buttons_and_units_do_not_fall_back() {
     let mut c = caps();
     c.buttons = vec![MouseButton::Left];
     let click = request(ComputerAction::Click {
+        modifiers: vec![],
         target: target(),
         button: MouseButton::Middle,
         count: 1,
@@ -87,6 +92,7 @@ fn unsupported_buttons_and_units_do_not_fall_back() {
     );
     c.scroll_units = vec![ScrollUnit::WheelNotches];
     let scroll = request(ComputerAction::Scroll {
+        modifiers: vec![],
         target: target(),
         dx: 1,
         dy: 2,
@@ -102,6 +108,7 @@ fn unsupported_buttons_and_units_do_not_fall_back() {
 fn scroll_preserves_zero_and_both_signed_axes() {
     for (dx, dy) in [(0, 0), (-150, 250), (4096, -4096)] {
         let r = request(ComputerAction::Scroll {
+            modifiers: vec![],
             target: target(),
             dx,
             dy,
@@ -113,6 +120,7 @@ fn scroll_preserves_zero_and_both_signed_axes() {
         assert_eq!(json["action"]["dy"], dy);
     }
     let r = request(ComputerAction::Scroll {
+        modifiers: vec![],
         target: target(),
         dx: 4097,
         dy: 0,
@@ -127,6 +135,7 @@ fn scroll_preserves_zero_and_both_signed_axes() {
 #[test]
 fn drag_key_text_and_batch_limits_are_enforced() {
     let action = |points| ComputerAction::Drag {
+        modifiers: vec![],
         points,
         button: MouseButton::Left,
         duration_ms: 50,
@@ -169,14 +178,14 @@ fn drag_key_text_and_batch_limits_are_enforced() {
         ToolError::InvalidArguments
     );
     let r = request(ComputerAction::Wait { duration_ms: 1 });
-    let requests: Vec<_> = (1..=4).map(|id| ToolRequest { id, ..r.clone() }).collect();
-    assert!(validate_batch(&requests, &caps(), &space()).is_ok());
+    let batch = |n: u64| -> Vec<_> { (1..=n).map(|id| ToolRequest { id, ..r.clone() }).collect() };
+    assert!(validate_batch(&batch(MAX_BATCH as u64), &caps(), &space()).is_ok());
     assert_eq!(
         validate_batch(&vec![r.clone(); 2], &caps(), &space()).unwrap_err(),
         ToolError::InvalidArguments
     );
     assert_eq!(
-        validate_batch(&vec![r; 5], &caps(), &space()).unwrap_err(),
+        validate_batch(&batch(MAX_BATCH as u64 + 1), &caps(), &space()).unwrap_err(),
         ToolError::InvalidArguments
     );
 }

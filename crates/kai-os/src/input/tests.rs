@@ -155,3 +155,35 @@ fn failed_drag_cleanup_marks_the_session_unsafe_even_when_cancelled() {
     .unwrap_err();
     assert!(error.downcast_ref::<execute::CleanupFailed>().is_some());
 }
+
+#[test]
+fn held_modifiers_wrap_the_click_and_are_released() {
+    let mut fake = Fake::default();
+    let click = Cmd::Click {
+        x: 1,
+        y: 2,
+        button: Button::Left,
+        count: 1,
+    };
+    let held = Cmd::Held {
+        keys: vec![Key::Shift],
+        inner: Box::new(click),
+    };
+    run(&mut fake, held, None).unwrap();
+    assert_eq!(
+        fake.log,
+        ["Shift Press", "Left Press", "Left Release", "Shift Release"]
+    );
+}
+
+#[test]
+fn held_modifiers_are_released_when_the_action_fails() {
+    // The inner chord fails on its second key; Shift must still come up.
+    let mut fake = Fake::default();
+    let held = Cmd::Held {
+        keys: vec![Key::Shift],
+        inner: Box::new(Cmd::Keys(vec![Key::Control, Key::Unicode('x')])),
+    };
+    assert!(run(&mut fake, held, None).is_err());
+    assert_eq!(fake.log.last().unwrap(), "Shift Release");
+}

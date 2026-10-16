@@ -7,6 +7,7 @@ use crate::{Decision, Grounding, Trace};
 use std::time::Duration;
 mod mapping;
 mod provider;
+mod turn;
 pub use mapping::{Mapped, map_action};
 /// Settings for one native run.
 #[derive(Debug, Clone)]
@@ -80,10 +81,12 @@ impl CuaRunner<'_> {
         task: &str,
         approver: Option<&dyn Approver>,
     ) -> Result<CuaRun, ClientError> {
+        let approver = approver.unwrap_or(&NoApproval);
         let client = provider::Provider::new(
             &self.config,
             task,
             self.perceptor,
+            approver,
             self.actuator.computer_capabilities(),
         )?;
         let engine = crate::Engine {
@@ -93,7 +96,7 @@ impl CuaRunner<'_> {
             actuator: self.actuator,
             interrupt: self.interrupt,
             sink: self.sink,
-            approver: approver.unwrap_or(&NoApproval),
+            approver,
             steering: &NoSteering,
             verifier: None,
             human: None,
@@ -140,6 +143,10 @@ impl Approver for Unattended {
         } else {
             ApprovalChoice::Approve
         }
+    }
+    /// A provider's safety check is a person's call, never the bench's.
+    async fn approve_safety_check(&self, _: &Decision, _: &Grounding) -> ApprovalChoice {
+        ApprovalChoice::Stop
     }
 }
 

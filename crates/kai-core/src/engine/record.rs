@@ -126,6 +126,11 @@ impl Engine<'_> {
         schema: &serde_json::Value,
         max_tokens: u32,
     ) -> anyhow::Result<Decided> {
+        if let Some(frame) = self.config.oai_contract {
+            return self
+                .decide_oai(client, frame, user_text, observed, max_tokens)
+                .await;
+        }
         let obs = observed.obs;
         // A `type` with no target goes to the field that has focus.
         let focused = obs.grounding.focused_field();
@@ -191,7 +196,7 @@ impl Engine<'_> {
         }
     }
 
-    async fn decision_request(
+    pub(super) async fn decision_request(
         &self,
         client: &dyn ModelClient,
         req: &ModelRequest<'_>,

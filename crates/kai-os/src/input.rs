@@ -47,6 +47,11 @@ enum Cmd {
         amount: i32,
     },
     Cursor,
+    /// Run `inner` with `keys` held (Shift+click), released afterwards.
+    Held {
+        keys: Vec<Key>,
+        inner: Box<Cmd>,
+    },
 }
 
 type Reply = mpsc::Sender<anyhow::Result<(i32, i32)>>;
@@ -56,6 +61,8 @@ type Reply = mpsc::Sender<anyhow::Result<(i32, i32)>>;
 pub struct Input {
     tx: mpsc::Sender<(Cmd, Reply, Option<ExecutionContext>)>,
     context: Option<ExecutionContext>,
+    /// Modifiers held around every command sent through this handle.
+    held: Vec<Key>,
 }
 
 impl Input {
@@ -143,14 +150,32 @@ impl Input {
                 }
             })?;
         ready_rx.recv()??;
-        Ok(Self { tx, context: None })
+        Ok(Self {
+            tx,
+            context: None,
+            held: Vec::new(),
+        })
     }
 
     pub fn with_context(&self, context: &ExecutionContext) -> Self {
         Self {
             tx: self.tx.clone(),
             context: Some(context.clone()),
+            held: self.held.clone(),
         }
+    }
+
+    /// The same handle, holding `modifiers` (canonical names) around each
+    /// command it sends.
+    pub fn holding(&self, modifiers: &[String]) -> anyhow::Result<Self> {
+        Ok(Self {
+            tx: self.tx.clone(),
+            context: self.context.clone(),
+            held: modifiers
+                .iter()
+                .map(|m| parse_key(m))
+                .collect::<anyhow::Result<_>>()?,
+        })
     }
 
     pub(crate) fn context(&self) -> Option<ExecutionContext> {
@@ -158,6 +183,13 @@ impl Input {
     }
 
     async fn call(&self, cmd: Cmd) -> anyhow::Result<(i32, i32)> {
+        let cmd = match self.held.is_empty() {
+            true => cmd,
+            false => Cmd::Held {
+                keys: self.held.clone(),
+                inner: Box::new(cmd),
+            },
+        };
         let (rtx, rrx) = mpsc::channel();
         self.tx
             .send((cmd, rtx, self.context.clone()))

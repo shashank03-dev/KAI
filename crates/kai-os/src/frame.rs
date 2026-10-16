@@ -127,6 +127,16 @@ pub fn mask(img: &mut RgbaImage, rects: &[Rect]) {
     }
 }
 
+/// Frames for pixel-trained models (OpenAI's computer tool): unmarked, up
+/// to 1600 px long and about 1.44 MP (OpenAI reports its best click accuracy
+/// at 1440x900 and 1600x900), JPEG at 90.
+pub const NATIVE: FrameConfig = FrameConfig {
+    max_side: 1600,
+    max_pixels: 1_440_000,
+    quality: 90,
+    window_scope: false,
+};
+
 /// Downscale to the configured size (see [`config`]).
 pub fn downscale(src: &RgbaImage) -> Frame {
     downscale_with(src, &config())

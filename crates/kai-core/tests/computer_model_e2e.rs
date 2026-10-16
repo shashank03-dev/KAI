@@ -56,7 +56,8 @@ async fn opt_in_model_receives_schema_and_uses_shared_move_executor() {
             target: Target::Element {
                 observation: 1,
                 mark: 1
-            }
+            },
+            modifiers: vec![],
         }]
     );
     let seen = model.seen();

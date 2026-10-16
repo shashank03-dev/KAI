@@ -36,6 +36,15 @@ pub struct ObserveTiming {
 }
 
 /// Looks at the screen and grounds it (Set-of-Marks or grid).
+/// An unmarked screenshot and its size in pixels.
+#[derive(Debug, Clone)]
+pub struct NativeFrame {
+    pub image: Vec<u8>,
+    pub mime: &'static str,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[async_trait]
 pub trait Perceptor: Send + Sync {
     async fn observe(&self) -> anyhow::Result<Observation>;
@@ -45,6 +54,13 @@ pub trait Perceptor: Send + Sync {
     /// that cannot read a tree fall back to a full observation.
     async fn observe_tree_only(&self) -> anyhow::Result<Observation> {
         self.observe().await
+    }
+    /// The screen as a pixel-trained model expects it: no marks, larger
+    /// than the Set-of-Marks frame (`docs/RESEARCH_2026_10_OPENAI_PARITY.md`
+    /// §3.5). `None` when these eyes have no such frame; callers then use
+    /// the observation's image.
+    async fn native_frame(&self) -> Option<NativeFrame> {
+        None
     }
     /// A zoomed JPEG of `rect` (global screen pixels), for a second look
     /// after a missed click. `None` when unsupported.
@@ -231,6 +247,16 @@ pub trait Verifier: Send + Sync {
 pub trait Approver: Send + Sync {
     /// Return true to proceed, false to skip/stop the action.
     async fn approve(&self, decision: &Decision, grounding: &Grounding) -> ApprovalChoice;
+    /// A model provider flagged the next actions (OpenAI's
+    /// `pending_safety_checks`; `decision.thought` names each check). Only
+    /// a person may accept: auto-policies must answer Stop.
+    async fn approve_safety_check(
+        &self,
+        decision: &Decision,
+        grounding: &Grounding,
+    ) -> ApprovalChoice {
+        self.approve(decision, grounding).await
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -346,6 +372,10 @@ pub enum EngineEvent {
 pub struct Config {
     /// Versioned shared computer tools, experimental until measured.
     pub computer_tools_v1: bool,
+    /// Open models read and write OpenAI's computer-tool contract in this
+    /// coordinate frame (`crate::oai_contract`). Implies the computer tools.
+    /// `None` (default): Kai's own reply format.
+    pub oai_contract: Option<crate::oai_contract::CoordFrame>,
     pub max_steps: u32,
     pub max_time: Duration,
     pub approval: ApprovalLevel,
@@ -410,6 +440,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             computer_tools_v1: false,
+            oai_contract: None,
             max_steps: 40,
             max_time: Duration::from_secs(600),
             approval: ApprovalLevel::HighRiskOnly,

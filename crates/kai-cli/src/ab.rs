@@ -19,6 +19,11 @@ pub struct Ab {
     /// Expose the experimental shared computer tools to local models.
     #[arg(long)]
     pub computer_tools_v1: bool,
+    /// Open models read and write OpenAI's computer-tool contract, with
+    /// coordinates in this frame: marks, pixels, norm1000 or smart-resize
+    /// (`docs/RESEARCH_2026_10_OPENAI_PARITY.md` §5b). Implies the tools.
+    #[arg(long, value_name = "FRAME", value_parser = frame)]
+    pub oai_contract: Option<kai_core::oai_contract::CoordFrame>,
     /// Disable multi-action steps (one action per model call).
     #[arg(long)]
     pub no_batch: bool,
@@ -87,6 +92,9 @@ impl Ab {
         if self.computer_tools_v1 {
             v.push("--computer-tools-v1");
         }
+        if self.oai_contract.is_some() {
+            v.push("--oai-contract");
+        }
         if self.executor {
             v.push("--executor");
         }
@@ -134,7 +142,8 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.recover = ab.recover;
     config.memo = ab.memo;
     config.task_checks = ab.task_checks;
-    config.computer_tools_v1 = ab.computer_tools_v1;
+    config.computer_tools_v1 = ab.computer_tools_v1 || ab.oai_contract.is_some();
+    config.oai_contract = ab.oai_contract;
     Ok(true)
 }
 
@@ -143,6 +152,12 @@ impl Ab {
     pub fn plan_cache(&self) -> bool {
         !self.no_plan_cache
     }
+}
+
+fn frame(name: &str) -> Result<kai_core::oai_contract::CoordFrame, String> {
+    kai_core::oai_contract::CoordFrame::parse(name).ok_or_else(|| {
+        format!("unknown frame {name:?}: use marks, pixels, norm1000 or smart-resize")
+    })
 }
 
 #[cfg(test)]

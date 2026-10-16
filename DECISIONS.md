@@ -966,3 +966,33 @@ Still no model key and no GPU in this session, so there are no live numbers.
   only for grids. Batched provider actions continue while the layout holds.
   Long text is typed, not pasted, under an execution context: the
   clipboard is not overwritten and a stop lands between keys.
+
+## OpenAI parity: protocol fixes and the contract for open models (2026-10-16)
+
+Research: `docs/RESEARCH_2026_10_OPENAI_PARITY.md` (sources dated 2026-10-16).
+
+- **Accept what OpenAI really sends.** Real GA responses carry
+  `"action": null` and `"pending_safety_checks": null`; both stopped every run.
+  Absent, `null` and `[]` now mean the same. `wheel` is the middle button;
+  OpenAI's uppercase key aliases, modifier `keys` on mouse actions, `wait.ms`
+  and batches up to 16 are accepted; unknown names are still refused before
+  OS input. Fixture-tested only: no OpenAI key was used.
+- **Safety checks are the user's call, then acknowledged.** A flagged call
+  asks the person; approval runs it and echoes `acknowledged_safety_checks`,
+  declining runs nothing, the unattended bench always stops. Rejected:
+  auto-acknowledging in the bench (it would accept `malicious_instructions`).
+- **Pixel scroll on the desktop uses OpenAI's own conversion** (100 px per
+  notch, at least one). The audit refused approximation; a documented,
+  deterministic conversion that the vendor specifies is its reference
+  semantics, not a guess.
+- **OpenAI's model sees an unmarked, larger frame** (up to 1600 px) at
+  `detail: "original"`; OpenAI attributes about 9 OSWorld points to resolution.
+  Kai's own models keep the marked 280-token frame.
+- **Open models can speak OpenAI's contract (`--oai-contract <frame>`, off).**
+  Their action goes through the OpenAI parser, so an A/B compares models,
+  not harnesses. Coordinate frames are data per model family; Gemma keeps
+  marks (no GUI-grounding training). Rejected: making it the default before
+  a two-runs-per-side bench, and pixel grounding for Gemma.
+- **Browser lane offers click, type and keys through the shared contract**,
+  reusing the lane's live-tested paths. Drag and held modifiers stay off in
+  the browser until they have fixtures.

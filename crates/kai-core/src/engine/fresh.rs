@@ -85,7 +85,7 @@ pub(crate) fn same_tool_target(
     };
     match action {
         ComputerAction::Click { target, .. }
-        | ComputerAction::Move { target }
+        | ComputerAction::Move { target, .. }
         | ComputerAction::Type { target, .. }
         | ComputerAction::Scroll { target, .. } => point(target),
         ComputerAction::Drag { points, .. } => points.iter().all(point),
@@ -188,6 +188,7 @@ mod tests {
         let before = page("10:01");
         let after = page("10:02");
         let at = |x| ComputerAction::Click {
+            modifiers: vec![],
             target: Target::Point {
                 observation: 1,
                 x,

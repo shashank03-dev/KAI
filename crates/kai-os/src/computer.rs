@@ -5,7 +5,8 @@ use kai_core::{Actuator, Grounding};
 
 pub fn capabilities() -> Capabilities {
     let mut c = Capabilities::all();
-    c.scroll_units = vec![ScrollUnit::WheelNotches];
+    // Pixel deltas (OpenAI's) become notches by OpenAI's own recipe.
+    c.scroll_units = vec![ScrollUnit::WheelNotches, ScrollUnit::Pixels];
     // macOS back/forward buttons have platform-specific behavior; do not
     // advertise them until the native fixture verifies their semantics.
     c.buttons = vec![MouseButton::Left, MouseButton::Middle, MouseButton::Right];
@@ -56,11 +57,15 @@ pub async fn act(
     };
     request.validate(&capabilities(), space)?;
     ctx.check()?;
-    let input = hands.input.with_context(ctx);
+    let input = hands
+        .input
+        .with_context(ctx)
+        .holding(action.modifiers())
+        .map_err(|_| ToolError::InvalidArguments)?;
     let at = |target| point(target, space, grounding);
     let result = match action {
         ComputerAction::Observe => Ok(()),
-        ComputerAction::Move { target } => {
+        ComputerAction::Move { target, .. } => {
             let (x, y) = at(target)?;
             input.move_to(x, y).await
         }
@@ -68,6 +73,7 @@ pub async fn act(
             target,
             button,
             count,
+            ..
         } => {
             let (x, y) = at(target)?;
             input.click_button(x, y, *button, *count).await
@@ -76,6 +82,7 @@ pub async fn act(
             points,
             button,
             duration_ms,
+            ..
         } => {
             let points = points.iter().map(at).collect::<Result<Vec<_>, _>>()?;
             input.drag(points, *button, *duration_ms).await
@@ -104,9 +111,19 @@ pub async fn act(
             input.type_text(text).await
         }
         ComputerAction::Keypress { keys } => input.keys(keys).await,
-        ComputerAction::Scroll { target, dx, dy, .. } => {
+        ComputerAction::Scroll {
+            target,
+            dx,
+            dy,
+            unit,
+            ..
+        } => {
             let (x, y) = at(target)?;
-            input.wheel(x, y, *dx, *dy).await
+            let (dx, dy) = match unit {
+                ScrollUnit::WheelNotches => (*dx, *dy),
+                ScrollUnit::Pixels => (pixels_to_notches(*dx), pixels_to_notches(*dy)),
+            };
+            input.wheel(x, y, dx, dy).await
         }
         ComputerAction::Wait { duration_ms } => {
             tokio::time::sleep(std::time::Duration::from_millis(*duration_ms as u64)).await;

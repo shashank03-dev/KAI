@@ -73,7 +73,7 @@ fn policy(action: &ComputerAction, original: &Decision, g: &Grounding) -> Decisi
     d.target = None;
     let target = match action {
         ComputerAction::Click { target, .. }
-        | ComputerAction::Move { target }
+        | ComputerAction::Move { target, .. }
         | ComputerAction::Type { target, .. }
         | ComputerAction::Scroll { target, .. } => Some(target),
         ComputerAction::Drag { points, .. } => points.first(),

@@ -32,14 +32,23 @@ pub enum ComputerAction {
         target: Target,
         button: MouseButton,
         count: u8,
+        /// Keys held for the action (`shift` for Shift+click), released after.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        modifiers: Vec<String>,
     },
     Move {
         target: Target,
+        /// Keys held for the action (`shift` for Shift+click), released after.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        modifiers: Vec<String>,
     },
     Drag {
         points: Vec<Target>,
         button: MouseButton,
         duration_ms: u32,
+        /// Keys held for the action (`shift` for Shift+click), released after.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        modifiers: Vec<String>,
     },
     Type {
         target: Target,
@@ -53,6 +62,9 @@ pub enum ComputerAction {
         dx: i32,
         dy: i32,
         unit: ScrollUnit,
+        /// Keys held for the action (`shift` for Shift+click), released after.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        modifiers: Vec<String>,
     },
     Wait {
         duration_ms: u32,
@@ -80,11 +92,32 @@ pub enum ActionKind {
     OpenUrl,
 }
 
+/// OpenAI's documented pixel-to-wheel conversion: one notch per 100 px,
+/// at least one, rounded half away from zero, clamped to the 20-notch bound.
+pub fn pixels_to_notches(px: i32) -> i32 {
+    if px == 0 {
+        return 0;
+    }
+    let notches = ((px.unsigned_abs() as f64 / 100.).round() as i32).clamp(1, 20);
+    notches * px.signum()
+}
+
 impl ComputerAction {
+    /// Modifier keys held during a mouse action; none for the rest.
+    pub fn modifiers(&self) -> &[String] {
+        match self {
+            Self::Click { modifiers, .. }
+            | Self::Move { modifiers, .. }
+            | Self::Drag { modifiers, .. }
+            | Self::Scroll { modifiers, .. } => modifiers,
+            _ => &[],
+        }
+    }
+
     pub fn targets(&self) -> Vec<&Target> {
         match self {
             Self::Click { target, .. }
-            | Self::Move { target }
+            | Self::Move { target, .. }
             | Self::Type { target, .. }
             | Self::Scroll { target, .. } => vec![target],
             Self::Drag { points, .. } => points.iter().collect(),

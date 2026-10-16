@@ -36,6 +36,7 @@ mod gate;
 mod human;
 mod memory;
 mod model_step;
+mod oai;
 mod observe;
 mod privacy;
 mod procedure;

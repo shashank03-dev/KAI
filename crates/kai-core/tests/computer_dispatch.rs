@@ -66,6 +66,7 @@ fn request(id: u64) -> ToolRequest {
                 x: 10.,
                 y: 10.,
             },
+            modifiers: vec![],
         },
     }
 }

@@ -22,6 +22,7 @@ pub mod mcp;
 pub mod memo;
 pub mod memory;
 pub mod models;
+pub mod oai_contract;
 pub mod orchestrator;
 pub mod plan;
 pub mod plan_cache;
@@ -48,7 +49,7 @@ pub use client::{
 pub use element::{Element, Grounding, Rect, Role};
 pub use engine::{
     Actuator, ApprovalChoice, Approver, Config, Engine, EngineEvent, EventSink, Interrupt,
-    Observation, ObserveTiming, Perceptor, Probe, RunOptions,
+    NativeFrame, Observation, ObserveTiming, Perceptor, Probe, RunOptions,
 };
 pub use failure::{Category, Failure};
 pub use human::{CheckKind, HumanCheck, HumanHelper, HumanReply, OneTimeCode};

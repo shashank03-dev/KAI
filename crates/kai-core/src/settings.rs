@@ -85,6 +85,9 @@ pub enum BackendChoice {
 #[serde(default)]
 pub struct Settings {
     pub computer_tools_v1: bool,
+    /// Open models on OpenAI's computer-tool contract, in this coordinate
+    /// frame (`crate::oai_contract`). Off (`None`) by default.
+    pub oai_contract: Option<crate::oai_contract::CoordFrame>,
     pub backend: BackendChoice,
     /// e.g. `https://1-2-3-4.sslip.io/v1`
     pub vllm_endpoint: String,
@@ -161,6 +164,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             computer_tools_v1: false,
+            oai_contract: None,
             backend: BackendChoice::Both,
             vllm_endpoint: String::new(),
             fast_model: MODELS[0].id.to_string(),
@@ -324,7 +328,8 @@ impl Settings {
     pub fn engine_config(&self) -> crate::Config {
         let (max_steps, max_time) = self.limits();
         crate::Config {
-            computer_tools_v1: self.computer_tools_v1,
+            computer_tools_v1: self.computer_tools_v1 || self.oai_contract.is_some(),
+            oai_contract: self.oai_contract,
             max_steps,
             max_time,
             approval: self.approval,

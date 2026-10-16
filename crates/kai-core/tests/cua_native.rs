@@ -202,7 +202,7 @@ async fn safety_checks_stop_and_ask() {
         200,
         call(
             "1",
-            json!({"type":"click","x":1,"y":1}),
+            json!({"type":"click","x":1,"y":1,"button":"left"}),
             json!([{"id":"sc","code":"malicious_instructions","message":"Suspicious page text."}]),
         ),
     )])
@@ -415,12 +415,66 @@ impl Perceptor for ChangedScreen<'_> {
 }
 #[tokio::test]
 async fn queued_provider_coordinates_cannot_be_rebound_to_a_changed_layout() {
-    let (_,base)=Server::start(vec![Reply::Json(200,json!({"id":"r","output":[{"type":"computer_call","call_id":"c","actions":[{"type":"move","x":10,"y":20},{"type":"click","x":20,"y":30,"button":"left"}]}]}))]).await;
+    let (srv, base) = Server::start(vec![
+        Reply::Json(200,json!({"id":"r","output":[{"type":"computer_call","call_id":"c","actions":[{"type":"move","x":10,"y":20},{"type":"click","x":20,"y":30,"button":"left"}]}]})),
+        Reply::Json(200,json!({"id":"r2","output":[{"type":"message","phase":"final_answer","content":[{"type":"output_text","text":"Stopped."}]}]})),
+    ]).await;
     let hands = Hands::default();
     let screen = ChangedScreen(&hands);
     let mut r = runner(&base, Some("fixture"), &hands);
     r.perceptor = &screen;
     let run = r.run_with_approver("batch", Some(&Permit)).await.unwrap();
     assert_eq!(run.trace.outcome, Some(Outcome::AskedUser));
+    assert_eq!(hands.0.lock().unwrap().len(), 1, "the click must not run");
+    // The model hears what ran instead of the run just ending.
+    let next = &srv.bodies()[1].1["input"];
+    assert_eq!(next[0]["call_id"], "c");
+    assert_eq!(
+        next[1]["content"][0]["text"],
+        "Harness note: actions 1 to 1 of 2 ran; the rest did not: the screen layout changed."
+    );
+}
+
+fn flagged() -> serde_json::Value {
+    call(
+        "1",
+        json!({"type":"click","x":1,"y":1,"button":"left"}),
+        json!([{"id":"sc","code":"malicious_instructions","message":"Suspicious page text."}]),
+    )
+}
+
+#[tokio::test]
+async fn an_accepted_safety_check_runs_and_is_acknowledged() {
+    let (srv, base) = Server::start(vec![
+        Reply::Json(200, flagged()),
+        Reply::Json(200, json!({"id":"resp_2","output":[{"type":"message","content":[{"type":"output_text","text":"Done."}]}]})),
+    ])
+    .await;
+    let hands = Hands::default();
+    let run = runner(&base, Some("sk"), &hands)
+        .run_with_approver("t", Some(&Permit))
+        .await
+        .unwrap();
+    assert_eq!(run.message.as_deref(), Some("Done."));
     assert_eq!(hands.0.lock().unwrap().len(), 1);
+    // Without this echo the API answers 400 on the next call.
+    let out = &srv.bodies()[1].1["input"][0];
+    assert_eq!(out["call_id"], "call_1");
+    assert_eq!(
+        out["acknowledged_safety_checks"],
+        json!([{"id":"sc","code":"malicious_instructions","message":"Suspicious page text."}])
+    );
+}
+
+#[tokio::test]
+async fn the_unattended_bench_never_accepts_a_safety_check() {
+    let (srv, base) = Server::start(vec![Reply::Json(200, flagged())]).await;
+    let hands = Hands::default();
+    let run = runner(&base, Some("sk"), &hands)
+        .run_with_approver("t", Some(&kai_core::cua::Unattended))
+        .await
+        .unwrap();
+    assert_eq!(run.trace.outcome, Some(Outcome::AskedUser));
+    assert!(hands.0.lock().unwrap().is_empty());
+    assert_eq!(srv.bodies().len(), 1, "nothing was acknowledged");
 }

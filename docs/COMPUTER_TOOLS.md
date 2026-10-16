@@ -24,6 +24,37 @@ The model catalog has not changed. No runtime or model download is part of this
 feature. Public protocol references are in the
 [approved design](superpowers/specs/2026-10-15-computer-use-foundation-design.md).
 
+## OpenAI's contract for open models (`--oai-contract`)
+
+Off by default. `--oai-contract <frame>` (setting `oai_contract`) makes an open
+model read and write OpenAI's computer-tool contract instead of Kai's Decision
+JSON; it implies the computer tools. Design, sources and per-family evidence:
+[RESEARCH_2026_10_OPENAI_PARITY.md](RESEARCH_2026_10_OPENAI_PARITY.md) §5.
+
+- **Reply:** `{"thought", "actions": [one OpenAI action], "message", "phase"}`,
+  schema-constrained (`oai_contract::schema`). `actions` holds at most one
+  action; the model sees the screen again after it. No actions plus a
+  message: `final_answer` is Kai's `done` (checked like any `done`),
+  `commentary` asks the user.
+- **Same parser:** the action is wrapped as a `computer_call` and decoded by
+  `cua_protocol::parse_response`, the parser the OpenAI path uses; then the
+  normal validation, risk classification, approval and dispatch.
+- **Coordinate frame (data, chosen per model):** `marks` (Gemma: the box
+  number in `mark`, kept as an element target so the accessibility path
+  still applies), `pixels` (OpenAI, Fara), `norm1000` (Qwen3-VL, Holo2,
+  Gemini), `smart-resize` (Qwen2.5-VL family: UI-TARS-1.5, OpenCUA, GTA1).
+  Holo3.1's frame is undocumented: calibrate before use (§5b).
+- **Frame:** pixel frames get the unmarked screen (`Perceptor::native_frame`,
+  up to 1600 px / 1.44 MP) and their points are mapped back onto the frame
+  Kai observed. Never on a step without a screenshot (tree-only steps, the
+  privacy latch): `oai_contract_e2e` fails if that guard is removed.
+- **Prompt:** OpenAI's published loop shape (what changed, did it work, next
+  step), untrusted-content and confirmation rules; byte-stable per frame and
+  screen size.
+
+Not measured yet: whether this beats Kai's own format for any model. Run the
+§7 Phase 2 A/B (two runs per side) before turning it on anywhere.
+
 ## Model envelope
 
 Existing Decision JSON remains valid. With v1 enabled the schema also offers:
@@ -60,21 +91,37 @@ at most 4096 pixels or 20 wheel notches per axis. Zero scroll does nothing.
 ## Current driver boundaries
 
 - Native input reuses Enigo. Move, drag, left/middle/right clicks, keys and
-  two-axis wheel scrolling have recording-injector tests. It advertises wheel
-  notches, not pixel scrolling. Back/forward buttons remain unadvertised.
+  two-axis wheel scrolling have recording-injector tests. Pixel scroll deltas
+  (OpenAI's) become notches by OpenAI's own recipe, one per 100 px, at least
+  one, rounded half away from zero, at most 20. Modifiers on mouse actions
+  (Shift+click) are held around the action and released on every exit path.
+  Back/forward buttons remain unadvertised natively.
 - Native Type requires an enabled, focused editable element in the fresh tree.
   Click/focus the field, observe, then type. A click alone is not focus evidence.
-- CDP v1 currently advertises Observe, Move, pixel Scroll and Wait. Shared
-  click/type/key/drag remain unavailable pending browser acceptance. Legacy
-  browser actions still use the existing lane with cancellation/release guards.
+- CDP advertises Observe, Click (left, middle, right; back/forward navigate
+  history), Move, Type, Keypress, pixel Scroll (scaled to CSS pixels) and
+  Wait. Click, keys and typing reuse the lane's own paths: release guards,
+  page dialogs and the typed-text wait, which the live browser tests cover.
+  Drag and held modifiers are not offered in the browser yet.
 - Legacy and shared desktop mutations use the same ownership boundary. Ordinary
   terminal subagents remain parallel; known Linux GUI shell launches acquire
   desktop ownership. Legacy actions revalidate after approval/ownership waits.
-- Current Responses arrays are bounded to four total actions and fully checked
-  for arguments/capabilities before any input. Later actions require successful
-  predecessor feedback and unchanged original image/tree context. A Skip,
-  failure or layout change discards the remaining queue and hands back to the
-  user. This conservative behavior needs live A/B evaluation before rollout.
+- Responses batches are bounded to 16 actions (OpenAI documents no maximum)
+  and fully checked for arguments/capabilities before any input. Later
+  actions require successful predecessor feedback and an unchanged layout. A
+  Skip, failure or layout change discards the rest and tells the model which
+  actions ran (a "Harness note" next to the screenshot), at most twice per
+  run, then hands back to the user.
+- OpenAI wire details (from real responses): `action`, `pending_safety_checks`
+  and `keys` may be absent, `null` or `[]`; buttons are `left`, `right`,
+  `wheel` (middle), `back`, `forward`; key names are uppercase with aliases
+  (`RETURN`, `ESCAPE`, `OPTION`, `COMMAND`, `INSERT`); `wait` may carry `ms`
+  and defaults to 2000 ms. Screenshots go back as `computer_screenshot` at
+  `detail: "original"`, taken unmarked at up to 1600 px.
+- Safety checks: a flagged call is shown to the user with each check's code
+  and message; only on approval do its actions run, and the next request
+  echoes them as `acknowledged_safety_checks` (the API refuses the call
+  otherwise). Declining runs nothing. `Unattended` (the bench) always stops.
 
 ## Results and privacy
 

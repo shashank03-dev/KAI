@@ -45,6 +45,7 @@ pub fn valid_keys(keys: &[String]) -> bool {
                 | "right"
                 | "home"
                 | "end"
+                | "insert"
                 | "pageup"
                 | "pagedown"
                 | "f1"
@@ -75,6 +76,18 @@ pub fn valid_keys(keys: &[String]) -> bool {
         && (named(last) || printable(last))
 }
 
+/// Most actions one provider response may carry. OpenAI documents no
+/// maximum; a normal batch (click, type, key, wait, screenshot) is five.
+pub const MAX_BATCH: usize = 16;
+
+/// Modifiers held during a mouse action: distinct, at most four.
+pub fn valid_modifiers(keys: &[String]) -> bool {
+    keys.len() <= 4
+        && keys.iter().enumerate().all(|(i, k)| {
+            matches!(k.as_str(), "ctrl" | "alt" | "shift" | "cmd") && !keys[..i].contains(k)
+        })
+}
+
 impl ToolRequest {
     pub fn validate(&self, caps: &Capabilities, space: &ObservationSpace) -> Result<(), ToolError> {
         require(self.version == 1 && self.timeout_ms > 0 && self.timeout_ms <= 30_000)?;
@@ -84,6 +97,7 @@ impl ToolRequest {
         if !caps.actions.contains(&self.action.kind()) {
             return Err(ToolError::Unsupported);
         }
+        require(valid_modifiers(self.action.modifiers()))?;
         let button = |b: &MouseButton| {
             if caps.buttons.contains(b) {
                 Ok(())
@@ -97,16 +111,18 @@ impl ToolRequest {
                 target,
                 button: b,
                 count,
+                ..
             } => {
                 require(matches!(count, 1 | 2))?;
                 button(b)?;
                 target.validate(space)
             }
-            ComputerAction::Move { target } => target.validate(space),
+            ComputerAction::Move { target, .. } => target.validate(space),
             ComputerAction::Drag {
                 points,
                 button: b,
                 duration_ms,
+                ..
             } => {
                 require((2..=256).contains(&points.len()) && *duration_ms <= 5000)?;
                 button(b)?;
@@ -122,6 +138,7 @@ impl ToolRequest {
                 dx,
                 dy,
                 unit,
+                ..
             } => {
                 if !caps.scroll_units.contains(unit) {
                     return Err(ToolError::Unsupported);
@@ -152,7 +169,7 @@ pub fn validate_batch(
     caps: &Capabilities,
     space: &ObservationSpace,
 ) -> Result<(), ToolError> {
-    require(!requests.is_empty() && requests.len() <= 4)?;
+    require(!requests.is_empty() && requests.len() <= MAX_BATCH)?;
     for (i, r) in requests.iter().enumerate() {
         require(!requests[..i].iter().any(|prior| prior.id == r.id))?;
         r.validate(caps, space)?;

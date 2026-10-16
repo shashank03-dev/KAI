@@ -230,6 +230,24 @@ impl Perceptor for DesktopPerceptor {
         self.full(None).await
     }
 
+    async fn native_frame(&self) -> Option<kai_core::NativeFrame> {
+        let excluded = self.excluded();
+        tokio::task::spawn_blocking(move || {
+            let (mut img, at) = grab_view().ok()?;
+            frame::mask(&mut img, &local(&excluded, at));
+            let f = frame::downscale_with(&img, &frame::NATIVE);
+            Some(kai_core::NativeFrame {
+                width: f.image.width(),
+                height: f.image.height(),
+                image: frame::encode_jpeg_q(&f.image, frame::NATIVE.quality),
+                mime: "image/jpeg",
+            })
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     fn mac(&self) -> bool {
         cfg!(target_os = "macos")
     }

@@ -64,6 +64,19 @@ pub(super) fn run(
             }
         }
         Cmd::Type(t) => e.text(&t)?,
+        Cmd::Held { keys, inner } => {
+            let mut held = Vec::new();
+            let result = (|| -> anyhow::Result<(i32, i32)> {
+                for k in keys {
+                    check(context)?;
+                    held.push(k);
+                    e.key(k, Press::Press)?;
+                }
+                run(e, *inner, context)
+            })();
+            release(e, &held)?;
+            return result;
+        }
         Cmd::Keys(keys) => {
             let mut held = Vec::new();
             let result = (|| -> anyhow::Result<()> {
@@ -74,13 +87,7 @@ pub(super) fn run(
                 }
                 Ok(())
             })();
-            let mut cleanup = Ok(());
-            for k in held.iter().rev() {
-                if let Err(error) = e.key(*k, Press::Release) {
-                    cleanup = Err(error);
-                }
-            }
-            cleanup.map_err(|_| anyhow::anyhow!(CleanupFailed))?;
+            release(e, &held)?;
             result?;
         }
         Cmd::Scroll { x, y, dir, amount } => {
@@ -97,6 +104,17 @@ pub(super) fn run(
         Cmd::Cursor => return Ok(e.location()?),
     }
     Ok((0, 0))
+}
+
+/// Release `held` in reverse; a key left down makes further input unsafe.
+fn release(e: &mut impl Keyboard, held: &[Key]) -> anyhow::Result<()> {
+    let mut cleanup = Ok(());
+    for k in held.iter().rev() {
+        if let Err(error) = e.key(*k, Press::Release) {
+            cleanup = Err(error);
+        }
+    }
+    cleanup.map_err(|_| anyhow::anyhow!(CleanupFailed))
 }
 
 fn check(context: Option<&ExecutionContext>) -> anyhow::Result<()> {

@@ -8,8 +8,8 @@ mod validate;
 pub use action::*;
 pub use dispatch::*;
 pub use schema::with_schema;
-pub use validate::valid_keys;
 pub use validate::validate_batch;
+pub use validate::{MAX_BATCH, valid_keys, valid_modifiers};
 
 use crate::Rect;
 use serde::{Deserialize, Serialize};
