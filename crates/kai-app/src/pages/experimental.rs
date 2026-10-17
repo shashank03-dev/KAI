@@ -22,24 +22,12 @@ struct Flag {
 /// The switches by purpose, in the order the page shows them.
 const GROUPS: &[(&str, &[Flag])] = &[
     (
-        "Checking the result",
-        &[
-            Flag {
-                id: "verify-outcomes",
-                label: "Before \"done\", probe the outcomes Gemma named (files, window title, address bar)",
-                field: |s| &mut s.verify_outcomes,
-            },
-            Flag {
-                id: "task-checks",
-                label: "Before \"done\", check the file or folder the task asks for",
-                field: |s| &mut s.task_checks,
-            },
-            Flag {
-                id: "recover",
-                label: "When nothing changes, work out why and try another way once before asking",
-                field: |s| &mut s.recover,
-            },
-        ],
+        "Recovering when blocked",
+        &[Flag {
+            id: "recover",
+            label: "When nothing changes, work out why and try another way once before asking",
+            field: |s| &mut s.recover,
+        }],
     ),
     (
         "Memory within and across runs",

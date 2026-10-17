@@ -59,6 +59,14 @@ signature changes with every build, so after a rebuild the switches can show
 "on" while macOS denies access. Turn Kai off and on again, or remove it with
 "−" and add it again.
 
+If Kai cannot click or type, open **Settings › Permissions** in Kai. This page
+checks the permissions granted to the **running app**, and shows the actual
+input-backend error. If Kai reports **Missing** despite an enabled macOS
+switch, quit Kai, remove its old entry from the corresponding macOS Privacy &
+Security list, add `/Applications/Kai.app` again, grant access, then reopen
+Kai. Refresh the checks in Kai after reopening. Screen capture and input are
+checked separately; both must be available for a GUI run.
+
 Once you allow it, Kai picks up mouse and keyboard control without a
 restart: the app tries again every 2 seconds while it has no control.
 

@@ -18,6 +18,32 @@
 
 use crate::probe::ProbeSpec;
 
+/// Conservative goal-coverage test for autonomous completion. A single
+/// task-derived file or folder check can never prove an additional request
+/// joined by "and", "then", a newline, or a semicolon was completed.
+pub fn single_goal(task: &str) -> bool {
+    let task = task.trim().strip_suffix("\nUse visible GUI controls only. Never open a terminal or execute shell commands, scripts, or code. Ask the user if blocked.").unwrap_or(task);
+    let lower = task.to_ascii_lowercase();
+    !lower.contains(['\n', '\r', ';', ',', '&'])
+        && !lower.contains(". ")
+        && !lower.contains("! ")
+        && !lower.contains("? ")
+        && ![
+            " and ",
+            " then ",
+            " also ",
+            " after ",
+            " before ",
+            " plus ",
+            " as well as ",
+            " along with ",
+            " while ",
+            " followed by ",
+        ]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
 /// Words right before a path that make it the task's output.
 const OUTPUT_WORDS: &[&str] = &["into", "as", "to", "called", "named"];
 /// File types a task asks Kai to produce. Web pages are left out: "go to

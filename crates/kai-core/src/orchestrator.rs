@@ -371,6 +371,10 @@ impl Orchestrator<'_> {
             // docs/VERIFICATION.md).
             config: Config {
                 outcomes: false,
+                // Team workers have no OS probe port. File checks would
+                // otherwise reject valid work as unverifiable.
+                task_checks: false,
+                auto_complete_verified: false,
                 ..self.config
             },
         }

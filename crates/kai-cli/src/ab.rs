@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Args, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ab {
+    /// Stop a named YouTube song/video task when read-only playback evidence
+    /// confirms it is playing (experimental, opt-in).
+    #[arg(long)]
+    pub auto_complete_media: bool,
     /// Expose the experimental shared computer tools to local models.
     #[arg(long)]
     pub computer_tools_v1: bool,
@@ -112,6 +116,9 @@ impl Ab {
         if self.computer_tools_v1 {
             v.push("--computer-tools-v1");
         }
+        if self.auto_complete_media {
+            v.push("--auto-complete-media");
+        }
         if self.oai_contract.is_some() {
             v.push("--oai-contract");
         }
@@ -162,6 +169,7 @@ impl Ab {
 /// maps to a real `Config` field (the plan cache is chosen by the caller, see
 /// [`Ab::plan_cache`]).
 pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
+    config.auto_complete_media = ab.auto_complete_media;
     config.max_batch = if ab.no_batch {
         0
     } else {
@@ -257,6 +265,16 @@ mod tests {
     fn switches_map_onto_config() {
         let mut c = Config::default();
         assert!(apply_ab(&mut c, &Ab::default()).unwrap());
+        assert!(!c.auto_complete_media);
+        let media = Ab {
+            auto_complete_media: true,
+            ..Default::default()
+        };
+        assert_eq!(media.changed(), vec!["--auto-complete-media"]);
+        apply_ab(&mut c, &media).unwrap();
+        assert!(c.auto_complete_media);
+        apply_ab(&mut c, &Ab::default()).unwrap();
+        assert!(!c.auto_complete_media);
         assert!(c.tree_only && c.a11y_actions && c.max_batch > 0);
         let ab = Ab {
             no_batch: true,

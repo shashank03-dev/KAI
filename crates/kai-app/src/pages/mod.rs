@@ -16,6 +16,7 @@ pub mod models;
 pub mod models_card;
 pub mod models_store;
 pub mod panes;
+pub mod permissions;
 pub mod running;
 pub mod sessions;
 pub mod settings;
@@ -56,6 +57,9 @@ pub struct PageState {
     pub confirm_delete_skill: bool,
     pub drafting: bool,
     pub settings_section: String,
+    /// Live macOS/desktop access checks; refreshed on entering Permissions.
+    pub permission_checks: Option<Vec<kai_os::permissions::Check>>,
+    pub permission_checking: bool,
     pub history: Vec<history::Entry>,
     /// Runs kept as training data (Settings › Privacy), counted with history.
     pub training_runs: usize,
@@ -123,6 +127,8 @@ impl PageState {
             confirm_delete_skill: false,
             drafting: false,
             settings_section: "connections".into(),
+            permission_checks: None,
+            permission_checking: false,
             history: history::load(),
             training_runs: history::training_runs(),
             open_trace: None,

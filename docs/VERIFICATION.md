@@ -13,10 +13,13 @@ StructAgent itself is much larger: two verifiers, recovery diagnosis and
 milestones. Kai keeps three parts of it: the ledger, the deterministic probes
 and the DONE gate. Stage 2 adds a cheap per-action effect label.
 
-**Off by default.** `Config::outcomes` is false, and `kai run --outcomes`,
-`kai bench --outcomes` and *Settings › Safety › Check the result before
-"done"* turn it on. It stays off until a live-model benchmark shows it helps.
-See [Measured](#measured) for why that benchmark has not been run yet.
+**On by default in the desktop app**, including GUI-only mode. The desktop
+app automatically enables `outcomes`, `task_checks` and verified completion;
+there is no Safety switch to toggle. Low-level `Config::default()` and CLI
+runs retain their disabled defaults so benchmarks can compare both paths;
+`kai run --outcomes` and `kai bench --outcomes` enable their outcome ledger.
+The desktop agent supplies file-read probes in GUI-only mode, while
+subprocess-backed `shell_ro` probes are disabled to preserve GUI-only limits.
 
 ```mermaid
 flowchart TD
@@ -151,8 +154,8 @@ code Kai typed for the user never appears.
 
 ## Task checks: outcomes from the task's own words (2026-10-13)
 
-`--task-checks`, Settings › *Check the file or folder a task asks for
-before accepting done*. **Off by default** until measured.
+`--task-checks` for the CLI; **on by default in desktop KAI**, including
+GUI-only mode. A desktop setting is not required.
 
 **Why.** Gemma's main live failure is a false `done`
 (`DECISIONS.md`, real-world review). The gate above only works when the
@@ -284,7 +287,7 @@ Run them: `cargo test -p kai-core --test verify_e2e`,
 
 | | Default | Where |
 |---|---|---|
-| Feature switch | off | `Config::outcomes`, `--outcomes`, Settings › Safety |
+| Feature switch | desktop app: on; low-level/CLI: off | `Config::outcomes`, `--outcomes`, `Settings::engine_config` |
 | Outcomes per run | 1–4 | `ledger::MAX_OUTCOMES` |
 | Probe timeout | 2 s each, run one after another (≤ 8 s per `done` claim) | `Config::probe_timeout` |
 | Gate refusals before Kai asks | 3 | `engine/gate.rs` `MAX_GATE_REJECTIONS` |

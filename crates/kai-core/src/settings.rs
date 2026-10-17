@@ -126,9 +126,6 @@ pub struct Settings {
     /// Let a fast local decision model (jevos) carry out Gemma's plan
     /// (docs/EXECUTOR.md). Off until measured.
     pub use_executor: bool,
-    /// Check the result before accepting "done": the outcome ledger and
-    /// DONE gate (docs/VERIFICATION.md). Off until measured.
-    pub verify_outcomes: bool,
     /// Summarise older steps for the model instead of dropping them
     /// (macro-action history). Off until measured.
     pub macro_history: bool,
@@ -145,9 +142,6 @@ pub struct Settings {
     /// so long runs keep what they read (docs/LONG_RUNS.md). Off until
     /// measured.
     pub memo: bool,
-    /// Check the task's named output (a file, a folder in the file manager)
-    /// before accepting "done" (docs/VERIFICATION.md). Off until measured.
-    pub task_checks: bool,
     /// Do tasks in Kai's own browser over the DevTools Protocol instead of
     /// on the desktop (docs/BROWSER.md): background input, the page's own
     /// tree. Off by default; Linux and macOS for now.
@@ -195,13 +189,11 @@ impl Default for Settings {
             record_traces: false,
             executor_endpoint: crate::client::jev::LOCAL_BASE.to_string(),
             use_executor: false,
-            verify_outcomes: false,
             macro_history: false,
             use_procedures: false,
             best_of_plans: false,
             recover: false,
             memo: false,
-            task_checks: false,
             use_browser: false,
             local_model: String::new(),
             local_port: crate::models::DEFAULT_PORT,
@@ -317,11 +309,13 @@ impl Settings {
         )
     }
 
-    /// The engine config these settings ask for: limits, approvals, memory
-    /// and the experimental switches (each off unless turned on).
+    /// The engine config these settings ask for. Completion verification is a
+    /// built-in run invariant; old JSON opt-in fields are safely ignored.
     pub fn engine_config(&self) -> crate::Config {
         let (max_steps, max_time) = self.limits();
         crate::Config {
+            auto_complete_media: true,
+            auto_complete_verified: true,
             computer_tools_v1: self.computer_tools_v1
                 || self.oai_contract.is_some()
                 || self.native_model.is_some(),
@@ -335,13 +329,13 @@ impl Settings {
             max_time,
             approval: self.approval,
             executor: self.use_executor,
-            outcomes: self.verify_outcomes,
+            outcomes: true,
             macro_history: self.macro_history,
             procedures: self.use_procedures,
             best_of: if self.best_of_plans { 3 } else { 0 },
             recover: self.recover,
             memo: self.memo,
-            task_checks: self.task_checks,
+            task_checks: true,
             learn: self.learn,
             reflect: self.reflect,
             ..crate::Config::default()

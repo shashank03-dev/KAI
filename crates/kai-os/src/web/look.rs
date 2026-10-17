@@ -8,6 +8,7 @@ use super::snapshot::{self, PageInfo};
 use super::{dialog, dropdown};
 use crate::{a11y, frame, marks, zoom};
 use async_trait::async_trait;
+use kai_core::ports::MediaPlayback;
 use kai_core::{Grounding, Images, Observation, ObserveTiming, Perceptor, Rect};
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -205,8 +206,94 @@ fn scaled(g: &Grounding, k: f32, img: (u32, u32)) -> Grounding {
     }
 }
 
+/// Only the focused top-level YouTube watch player can satisfy stop-on-play;
+/// embedded videos, audio elements, background tabs and ads are not evidence.
+const MEDIA_PLAYBACK_EXPRESSION: &str = r#"(() => {
+    if (window.top !== window || document.visibilityState !== 'visible' ||
+        !document.hasFocus() ||
+        !['http:', 'https:'].includes(location.protocol) ||
+        !['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(location.hostname) ||
+        location.pathname !== '/watch') return null;
+
+    const match = /(?:^\?|&)v=([A-Za-z0-9_-]{11})(?:&|$)/.exec(location.search);
+    if (!match || (location.search.match(/(?:^\?|&)v=/g) || []).length !== 1) return null;
+
+    const player = document.querySelector('#movie_player.html5-video-player');
+    const video = player?.querySelector('video.html5-main-video');
+    if (!(video instanceof HTMLVideoElement) || !video.isConnected ||
+        !video.currentSrc || video.videoWidth <= 0 || video.videoHeight <= 0 ||
+        video.readyState < 2 || !Number.isFinite(video.currentTime) ||
+        video.currentTime < 0) return null;
+
+    // During SPA navigation the URL and document title can advance before the
+    // video has switched. Bind evidence to the player's actual loaded ID.
+    const data = typeof player.getVideoData === 'function' && player.getVideoData();
+    if (!data || data.video_id !== match[1]) return null;
+
+    const advertisement = player.classList.contains('ad-showing') ||
+        player.classList.contains('ad-interrupting');
+    return {
+        title: document.title,
+        url: location.href,
+        current_time: video.currentTime,
+        playing: !advertisement && !video.paused && !video.ended && !video.seeking &&
+            !video.muted && video.volume > 0 &&
+            !(typeof player.isMuted === 'function' && player.isMuted()) &&
+            !(typeof player.getVolume === 'function' && player.getVolume() <= 0),
+        advertisement
+    };
+})()"#;
+
+/// Reject a closed/replaced tab or navigation racing the media read. A child
+/// tab is not evidence that the opener lost focus: the page probe checks focus.
+fn playback_target_current(targets: &serde_json::Value, target: &str, url: &str) -> bool {
+    let Some(infos) = targets["targetInfos"].as_array() else {
+        return false;
+    };
+    infos
+        .iter()
+        .any(|t| t["targetId"] == target && t["type"] == "page" && t["url"] == url)
+}
+
 #[async_trait]
 impl Perceptor for BrowserLane {
+    /// Inspect HTML media state without pressing controls or mutating the page.
+    /// The engine samples it twice and requires the playback clock to advance.
+    async fn media_playback(&self) -> Option<MediaPlayback> {
+        let tab = self.current();
+        let r = self
+            .page(
+                "Runtime.evaluate",
+                json!({
+                    "expression": MEDIA_PLAYBACK_EXPRESSION,
+                    "returnByValue": true,
+                }),
+            )
+            .await
+            .ok()?;
+        let v = &r["result"]["value"];
+        let media = MediaPlayback {
+            title: v["title"].as_str()?.to_owned(),
+            url: v["url"].as_str()?.to_owned(),
+            current_time: v["current_time"].as_f64()?,
+            playing: v["playing"].as_bool()?,
+            advertisement: v["advertisement"].as_bool()?,
+        };
+        // Checking target metadata is read-only; sync_tabs() could activate
+        // or reload a tab, which a completion probe must never do.
+        let targets = self
+            .cdp
+            .call("Target.getTargets", json!({}), None)
+            .await
+            .ok()?;
+        if self.current().session != tab.session
+            || !playback_target_current(&targets, &tab.target, &media.url)
+        {
+            return None;
+        }
+        Some(media)
+    }
+
     async fn observe(&self) -> anyhow::Result<Observation> {
         let t = Instant::now();
         let (grounding, info, view, tree_ms, frozen) = self.read().await?;
@@ -335,6 +422,242 @@ fn tidy(raw: &str, max: usize) -> (String, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Exercise the exact expression sent to CDP against a minimal DOM fixture.
+    fn evaluated_media(overrides: &str) -> serde_json::Value {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            ctx.eval::<(), _>(
+                r#"
+                globalThis.window = {};
+                window.top = window;
+                globalThis.documentHasFocus = true;
+                globalThis.location = {
+                    protocol: 'https:', hostname: 'www.youtube.com', pathname: '/watch',
+                    search: '?v=abcdefghijk', href: 'https://www.youtube.com/watch?v=abcdefghijk'
+                };
+                globalThis.HTMLVideoElement = class {};
+                globalThis.video = new HTMLVideoElement();
+                Object.assign(video, {
+                    isConnected: true, currentSrc: 'blob:video', videoWidth: 1280,
+                    videoHeight: 720, readyState: 4, currentTime: 12,
+                    paused: false, ended: false, seeking: false,
+                    muted: false, volume: 1
+                });
+                globalThis.player = {
+                    ad: '',
+                    videoId: 'abcdefghijk',
+                    getVideoData() { return { video_id: this.videoId }; },
+                    muted: false,
+                    volume: 100,
+                    isMuted() { return this.muted; },
+                    getVolume() { return this.volume; },
+                    classList: { contains(name) { return player.ad === name; } },
+                    querySelector(selector) {
+                        return selector === 'video.html5-main-video' ? video : null;
+                    }
+                };
+                globalThis.document = {
+                    title: 'Song - YouTube', visibilityState: 'visible',
+                    hasFocus() { return documentHasFocus; },
+                    querySelector(selector) {
+                        if (selector === '#movie_player.html5-video-player') return player;
+                        if (selector === 'video.html5-main-video, video, audio') return video;
+                        return null;
+                    }
+                };
+                "#,
+            )
+            .unwrap();
+            ctx.eval::<(), _>(overrides).unwrap();
+            let json: String = ctx
+                .eval(format!("JSON.stringify({MEDIA_PLAYBACK_EXPRESSION})"))
+                .unwrap();
+            serde_json::from_str(&json).unwrap()
+        })
+    }
+
+    #[test]
+    fn media_inspection_requires_visible_top_level_youtube_watch_player() {
+        assert_eq!(evaluated_media("")["playing"], true);
+        for change in [
+            "window.top = {};",
+            "document.visibilityState = 'hidden';",
+            "documentHasFocus = false;",
+            "location.hostname = 'music.youtube.com';",
+            "location.protocol = 'file:';",
+            "location.pathname = '/results';",
+            "location.search = '?q=abcdefghijk';",
+            "location.search = '?v=too-short';",
+            "location.search = '?v=lmnopqrstuv&v=abcdefghijk';",
+            "player.querySelector = () => null;",
+            "video.isConnected = false;",
+            "video.videoWidth = 0;",
+            "video.currentSrc = '';",
+            "video.readyState = 1;",
+            "video.currentTime = NaN;",
+            "player.getVideoData = undefined;",
+            "player.videoId = 'differentid';",
+            "location.search = '?v=differentid'; document.title = 'Other song - YouTube';",
+        ] {
+            assert!(evaluated_media(change).is_null(), "{change}");
+        }
+    }
+
+    #[test]
+    fn media_inspection_rejects_muted_and_ad_playback() {
+        for change in [
+            "video.muted = true;",
+            "video.volume = 0;",
+            "player.muted = true;",
+            "player.volume = 0;",
+            "video.paused = true;",
+            "video.ended = true;",
+            "video.seeking = true;",
+        ] {
+            assert_eq!(evaluated_media(change)["playing"], false, "{change}");
+        }
+        for ad in ["ad-showing", "ad-interrupting"] {
+            let media = evaluated_media(&format!("player.ad = '{ad}';"));
+            assert_eq!(media["advertisement"], true);
+            assert_eq!(media["playing"], false);
+        }
+    }
+
+    #[test]
+    fn media_inspection_requires_loaded_video_id_after_spa_navigation() {
+        assert_eq!(evaluated_media("")["playing"], true);
+        assert!(
+            evaluated_media(
+                "location.search = '?v=lmnopqrstuv'; document.title = 'Next song - YouTube';"
+            )
+            .is_null()
+        );
+        let switched =
+            evaluated_media("location.search = '?v=lmnopqrstuv'; player.videoId = 'lmnopqrstuv';");
+        assert_eq!(switched["playing"], true);
+        assert!(evaluated_media("player.videoId = ''; ").is_null());
+        assert_eq!(
+            evaluated_media("location.search = '?t=20&v=abcdefghijk&list=playlist';")["playing"],
+            true
+        );
+    }
+
+    #[test]
+    fn media_inspection_rejects_stale_target_or_pending_child_tab() {
+        let watch = "https://www.youtube.com/watch?v=abcdefghijk";
+        let current = json!({"targetInfos": [
+            {"targetId": "active", "type": "page", "url": watch}
+        ]});
+        assert!(playback_target_current(&current, "active", watch));
+        assert!(!playback_target_current(&current, "closed", watch));
+        assert!(!playback_target_current(
+            &current,
+            "active",
+            "https://www.youtube.com/"
+        ));
+        let switched = json!({"targetInfos": [
+            {"targetId": "active", "type": "page", "url": watch},
+            {"targetId": "child", "type": "page", "openerId": "active", "url": "about:blank"}
+        ]});
+        assert!(playback_target_current(&switched, "active", watch));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn media_inspection_real_cdp_is_read_only_and_tracks_target() {
+        use super::super::lane::{LaneOptions, find_browser};
+
+        let Some(browser) = find_browser() else {
+            assert!(
+                std::env::var_os("KAI_REQUIRE_BROWSER").is_none(),
+                "KAI_REQUIRE_BROWSER requires Chromium for this test"
+            );
+            eprintln!("no Chromium-family browser found; skipping real CDP probe");
+            return;
+        };
+        let profile = tempfile::tempdir().unwrap();
+        let lane = BrowserLane::launch(
+            &LaneOptions {
+                browser,
+                profile: profile.path().to_path_buf(),
+                headless: true,
+                size: (800, 600),
+                downloads: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        let tab = lane.current();
+        lane.cdp
+            .call(
+                "Target.activateTarget",
+                json!({"targetId": tab.target}),
+                None,
+            )
+            .await
+            .unwrap();
+        lane.page(
+            "Runtime.evaluate",
+            json!({"expression": "document.title = 'Song - YouTube'; window.probeSentinel = 17"}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            lane.media_playback().await.is_none(),
+            "about:blank is not YouTube"
+        );
+        let inspect = |expression| json!({"expression": expression, "returnByValue": true});
+        let before = lane
+            .page(
+                "Runtime.evaluate",
+                inspect("[document.title, window.probeSentinel, document.hasFocus()]"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(before["result"]["value"][0], "Song - YouTube");
+        assert_eq!(before["result"]["value"][1], 17);
+        assert_eq!(before["result"]["value"][2], true);
+
+        let child = lane
+            .cdp
+            .call("Target.createTarget", json!({"url": "about:blank"}), None)
+            .await
+            .unwrap();
+        lane.cdp
+            .call(
+                "Target.activateTarget",
+                json!({"targetId": child["targetId"]}),
+                None,
+            )
+            .await
+            .unwrap();
+        let focus = lane
+            .page(
+                "Runtime.evaluate",
+                inspect("[document.hasFocus(), document.visibilityState]"),
+            )
+            .await
+            .unwrap();
+        let targets = lane
+            .cdp
+            .call("Target.getTargets", json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(lane.current().session, tab.session);
+        assert!(playback_target_current(
+            &targets,
+            &tab.target,
+            "about:blank"
+        ));
+        // Headless Chromium can report `hasFocus() == true` and `visible` for
+        // both pages. This signal is best-effort, not a browser-tab mute or
+        // definitive foreground oracle in headless mode.
+        assert!(focus["result"]["value"][0].as_bool().is_some());
+        assert!(focus["result"]["value"][1].as_str().is_some());
+    }
 
     #[test]
     fn page_text_is_tidied_and_cut() {

@@ -11,6 +11,10 @@ fn defaults_are_safe() {
     assert_eq!(s.executor_endpoint, "http://127.0.0.1:8017");
     assert_eq!(s.executor_client().base(), "http://127.0.0.1:8017");
     assert!(!s.use_browser, "the browser lane is opt-in");
+    assert!(s.engine_config().auto_complete_media);
+    assert!(s.engine_config().auto_complete_verified);
+    assert!(s.engine_config().outcomes);
+    assert!(s.engine_config().task_checks);
 }
 
 #[test]
@@ -18,6 +22,23 @@ fn unknown_fields_and_missing_fields_load() {
     let s: Settings = serde_json::from_str(r#"{"max_steps": 7, "future_field": true}"#).unwrap();
     assert_eq!(s.max_steps, 7);
     assert_eq!(s.parallelism, 4);
+    assert!(s.engine_config().auto_complete_media);
+}
+
+#[test]
+fn legacy_disabled_completion_settings_do_not_disable_safety() {
+    let loaded: Settings = serde_json::from_value(serde_json::json!({
+        "auto_complete_media": false,
+        "verify_outcomes": false,
+        "task_checks": false
+    }))
+    .unwrap();
+    let c = loaded.engine_config();
+    assert!(c.auto_complete_media && c.auto_complete_verified && c.outcomes && c.task_checks);
+    let saved = serde_json::to_value(loaded).unwrap();
+    assert!(saved.get("auto_complete_media").is_none());
+    assert!(saved.get("verify_outcomes").is_none());
+    assert!(saved.get("task_checks").is_none());
 }
 
 #[test]
@@ -169,17 +190,15 @@ fn limits_are_clamped() {
 fn experimental_switches_are_off_until_turned_on() {
     let s = Settings::default();
     let c = s.engine_config();
-    assert!(!c.outcomes && !c.macro_history && !c.procedures && !c.recover && !c.executor);
-    assert!(!c.memo && !c.task_checks);
+    assert!(c.outcomes && c.task_checks && c.auto_complete_verified && c.auto_complete_media);
+    assert!(!c.macro_history && !c.procedures && !c.recover && !c.executor && !c.memo);
     assert_eq!(c.best_of, 0);
     let s = Settings {
-        verify_outcomes: true,
         macro_history: true,
         use_procedures: true,
         best_of_plans: true,
         recover: true,
         memo: true,
-        task_checks: true,
         ..Settings::default()
     };
     let c = s.engine_config();

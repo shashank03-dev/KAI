@@ -41,6 +41,9 @@ impl Engine<'_> {
             if self.interrupt.stopped() {
                 return Some(Outcome::Stopped);
             }
+            if r.out_of_time() {
+                return Some(Outcome::TimeLimit);
+            }
             if r.step >= self.config.max_steps {
                 break;
             }
@@ -85,6 +88,10 @@ impl Engine<'_> {
             {
                 log::info!("batch stopped: {:?} is the user's to do", d.action);
                 break;
+            }
+
+            if r.out_of_time() {
+                return Some(Outcome::TimeLimit);
             }
 
             let step = r.step;
@@ -144,6 +151,9 @@ impl Engine<'_> {
             r.grid_click = observe::grid_click(d, &grounding);
             if !ok {
                 break;
+            }
+            if let Some(outcome) = self.completion_fresh(r).await {
+                return Some(outcome);
             }
         }
         None

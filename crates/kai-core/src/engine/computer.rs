@@ -360,6 +360,9 @@ impl Engine<'_> {
         // and the process-wide mutation lock (`MUTATION_OWNER`) is what
         // orders input across steps and runs (review CORE-ENG-10).
         let dispatcher = Dispatcher::new(&executor, &Authorized, self.interrupt);
+        if r.out_of_time() {
+            return Some(Outcome::TimeLimit);
+        }
         let t = Instant::now();
         let result = dispatcher.dispatch(&request, &space).await;
         if result.error.is_none()
@@ -401,6 +404,14 @@ impl Engine<'_> {
         r.push(rec);
         r.force_full = true;
         self.perceptor.settle(Duration::from_secs(3)).await;
+        // Native and provider-shaped computer tools bypass the legacy act
+        // path. Confirm completion here, including on the final allowed step,
+        // before any queued action or another model turn can run.
+        if result.error.is_none()
+            && let Some(outcome) = self.completion_fresh(r).await
+        {
+            return Some(outcome);
+        }
         match result.error {
             None => {
                 r.rejected = 0;

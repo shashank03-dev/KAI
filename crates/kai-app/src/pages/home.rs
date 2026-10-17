@@ -216,8 +216,25 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         }
         _ => None,
     };
-    let no_hands = (!cx.global::<crate::AgentHandle>().0.can_act())
-        .then(|| Banner::new("no-hands", Severity::Danger, "Kai needs mouse/keyboard access. On macOS, enable Kai in System Settings › Privacy & Security › Accessibility and Screen Recording. On Linux, use an Xorg session."));
+    let agent = &cx.global::<crate::AgentHandle>().0;
+    let permissions_page = cx.entity();
+    let no_hands = (!agent.can_act()).then(|| {
+        let why = agent
+            .input_error()
+            .unwrap_or_else(|| "input is initializing".into());
+        Banner::new(
+            "no-hands",
+            Severity::Danger,
+            format!("Kai cannot move the mouse or type: {why}"),
+        )
+        .action("Check permissions", move |_, cx| {
+            permissions_page.update(cx, |a, cx| {
+                a.pages.settings_section = "permissions".into();
+                a.go(Page::Settings, cx);
+                crate::pages::permissions::refresh(a, cx);
+            });
+        })
+    });
     let gui_mode = app.settings.gui_only.then(|| Banner::new("gui-mode", Severity::Info, "GUI testing is prepared. Press Run when ready. Watch Steps and screenshots; use Pause, Stop or a steering message if needed. No shell tasks or cached procedures run in this mode."));
     let busy = app.active.map(|_| {
         div()

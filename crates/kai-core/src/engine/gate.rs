@@ -34,6 +34,12 @@ pub(super) struct LedgerState {
     ledger: Ledger,
     /// The first call's reply was read (outcomes are named only then).
     asked: bool,
+    /// At least one task-derived condition failed before the first action.
+    /// An already-present file/window must not justify ending an unrelated
+    /// subsequent action as success.
+    baseline_unsatisfied: bool,
+    /// A pre-action sample is attempted only once, including when unreadable.
+    baseline_attempted: bool,
     rejections: u32,
     /// The user said the task is done although a probe failed.
     waived: bool,
@@ -41,7 +47,91 @@ pub(super) struct LedgerState {
     pub(super) last_effect: Option<Effect>,
 }
 
+impl LedgerState {
+    pub(super) fn has_task_checks(&self) -> bool {
+        self.ledger.has_task_checks()
+    }
+
+    pub(super) fn mark_baseline_unavailable(&mut self) {
+        self.baseline_attempted = true;
+    }
+
+    pub(super) fn media_outcomes_checkable(&self) -> bool {
+        self.ledger.is_empty() || self.ledger.fully_probed()
+    }
+
+    pub(super) fn eligible_for_auto_stop(&self) -> bool {
+        self.baseline_unsatisfied && self.ledger.has_task_checks() && self.ledger.fully_probed()
+    }
+}
+
 impl Engine<'_> {
+    /// The first model reply describes how to recognize success for this
+    /// particular task. The harness can stop a subsequent action sequence
+    /// only when all checks are independently verified, even without `done`.
+    pub(super) async fn verified_goal_complete(
+        &self,
+        r: &mut Run<'_>,
+        obs: &Observation,
+    ) -> Option<Outcome> {
+        if !self.config.auto_complete_verified
+            || !r.ledger.eligible_for_auto_stop()
+            || r.trace.steps.is_empty()
+            || !crate::task_checks::single_goal(r.task)
+            // A title or visible play button alone cannot establish
+            // playback. Media tasks use the stronger playback verifier.
+            || super::completion::media_goal(r.task).is_some()
+            || r.ledger.waived
+            || !r.trace.steered.is_empty()
+            || r.privacy.active()
+            || self.interrupt.stopped()
+            || r.out_of_time()
+        {
+            return None;
+        }
+        let step = r.step;
+        let failed = self.run_probes(r, step, obs).await;
+        self.emit_outcomes(r, step);
+        if !failed.is_empty()
+            || self.drain_steering(r, step)
+            || self.interrupt.stopped()
+            || r.out_of_time()
+        {
+            return None;
+        }
+        r.trace.completion = Some("All task-derived outcome probes passed".into());
+        r.queued.clear();
+        log::info!("completion barrier: all task-derived outcome probes passed");
+        Some(Outcome::Success)
+    }
+
+    /// Record a pre-action failure once, while only task-derived probes are
+    /// present. The later successful transition is independently observable.
+    pub(super) async fn completion_baseline(&self, r: &mut Run<'_>, obs: &Observation) {
+        if !self.config.auto_complete_verified
+            || !r.trace.steps.is_empty()
+            || r.ledger.baseline_attempted
+            || !r.ledger.has_task_checks()
+            || !crate::task_checks::single_goal(r.task)
+        {
+            return;
+        }
+        r.ledger.baseline_attempted = true;
+        let failures = self.run_probes(r, r.step, obs).await;
+        r.ledger.baseline_unsatisfied = !failures.is_empty();
+    }
+    /// Allow media auto-completion only when all independently required
+    /// outcomes are currently satisfied (including live OS probes).
+    pub(super) async fn media_outcomes_ready(&self, r: &mut Run<'_>, obs: &Observation) -> bool {
+        if !r.ledger.media_outcomes_checkable() {
+            return false;
+        }
+        let step = r.step;
+        let failed = self.run_probes(r, step, obs).await;
+        self.emit_outcomes(r, step);
+        failed.is_empty()
+    }
+
     /// On the run's first model call with the ledger on: add the request
     /// to the turn's notes and return the schema that allows `outcomes`,
     /// plus the extra reply tokens. `None` otherwise (nothing changes).
@@ -122,6 +212,37 @@ impl Engine<'_> {
         obs: &Observation,
     ) -> Option<Outcome> {
         let step = rec.index;
+        if self.config.auto_complete_media
+            && super::completion::media_goal(r.task).is_some()
+            && (self.media_evidence(r, obs).await.is_none() || !r.ledger.media_outcomes_checkable())
+        {
+            rec.path = Some("gate".into());
+            rec.verified = false;
+            r.push(rec);
+            r.ledger.rejections += 1;
+            if r.ledger.rejections >= MAX_GATE_REJECTIONS {
+                r.ledger.rejections = 0;
+                let before = r.trace.human.len();
+                let check = HumanCheck::question(
+                    "Kai could not independently confirm playback and all required outcomes. Press 'I did it' if the task is complete, or tell Kai what is missing.",
+                );
+                if let Some(outcome) = self.pause_for_human(r, check, None, "").await {
+                    return Some(outcome);
+                }
+                if r.trace
+                    .human
+                    .get(before)
+                    .is_some_and(|h| h.result == "resolved")
+                {
+                    return Some(Outcome::Success);
+                }
+            }
+            r.force_full = true;
+            r.notes.push(
+                "Playback or a required outcome was not independently confirmed. Verify the requested task before saying done.".into(),
+            );
+            return None;
+        }
         if !r.ledger.ledger.gated() || r.ledger.waived {
             rec.path = Some("none".into());
             r.push(rec);

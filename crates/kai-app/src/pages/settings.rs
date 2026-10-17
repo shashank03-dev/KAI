@@ -231,6 +231,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
         "safety" => safety(app, cx).into_any_element(),
         "appearance" => appearance(app, cx).into_any_element(),
         "privacy" => privacy(app, cx).into_any_element(),
+        "permissions" => crate::pages::permissions::section(app, cx).into_any_element(),
         "memory" => crate::pages::memory::section(app, cx).into_any_element(),
         "experimental" => crate::pages::experimental::render(app, cx).into_any_element(),
         "shortcuts" => SettingsSection::new("Shortcuts")
@@ -310,6 +311,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                             ("safety", "Safety", IconName::Shield),
                             ("appearance", "Appearance", IconName::Sun),
                             ("privacy", "Privacy", IconName::Lock),
+                            ("permissions", "Permissions", IconName::MousePointer2),
                             ("memory", "Memory", IconName::BookOpen),
                             ("experimental", "Experimental", IconName::Wrench),
                             ("shortcuts", "Shortcuts", IconName::Keyboard),
@@ -320,6 +322,9 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                             picker.update(cx, |a, cx| {
                                 if key == "memory" {
                                     a.pages.reload_memory();
+                                }
+                                if key == "permissions" {
+                                    crate::pages::permissions::refresh(a, cx);
                                 }
                                 a.pages.settings_section = key.to_string();
                                 cx.notify();

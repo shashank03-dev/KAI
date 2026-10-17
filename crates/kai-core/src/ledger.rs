@@ -122,6 +122,9 @@ impl Required {
 #[derive(Debug, Clone, Default)]
 pub struct Ledger {
     items: Vec<Required>,
+    /// Checks derived directly from the user's task, rather than proposed by
+    /// the model. Only these can anchor an automatic generic completion.
+    seeded: usize,
     /// Confirmed steps not yet credited to an outcome.
     confirmed: Vec<u32>,
 }
@@ -181,6 +184,7 @@ impl Ledger {
                 None,
             ));
         }
+        self.seeded = self.items.len();
     }
 
     /// Add the first reply's raw `outcomes` after any seeded ones, up to
@@ -221,6 +225,16 @@ impl Ledger {
     /// At least one outcome has a probe: `done` is gated.
     pub fn gated(&self) -> bool {
         self.items.iter().any(|i| i.probe.is_some())
+    }
+
+    /// An autonomous stop needs proof for *every* requested outcome. A
+    /// missing/refused probe cannot silently authorize completion.
+    pub fn fully_probed(&self) -> bool {
+        !self.items.is_empty() && self.items.iter().all(|i| i.probe.is_some())
+    }
+
+    pub fn has_task_checks(&self) -> bool {
+        self.seeded > 0
     }
 
     fn set(&mut self, i: usize, v: &ProbeVerdict, step: u32, at_done: bool) -> bool {

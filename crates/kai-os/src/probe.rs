@@ -20,6 +20,22 @@ pub const MAX_READ: u64 = 4 * 1024 * 1024;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DesktopProbe;
 
+/// GUI-only verification can read files, but cannot spawn commands.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FileOnlyProbe;
+
+#[async_trait]
+impl kai_core::Probe for FileOnlyProbe {
+    async fn check(&self, probe: &ProbeSpec) -> anyhow::Result<ProbeVerdict> {
+        if matches!(probe, ProbeSpec::ShellRo { .. }) {
+            return Ok(ProbeVerdict::fail(
+                "subprocess probes disabled in GUI-only mode",
+            ));
+        }
+        DesktopProbe.check(probe).await
+    }
+}
+
 fn home() -> PathBuf {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(Into::into)

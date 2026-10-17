@@ -28,6 +28,17 @@ pub struct Observation {
     pub url: Option<String>,
 }
 
+/// A read-only report of the active page's media element. `None` when the
+/// backend cannot inspect playback (e.g. another desktop application).
+#[derive(Debug, Clone)]
+pub struct MediaPlayback {
+    pub title: String,
+    pub url: String,
+    pub current_time: f64,
+    pub playing: bool,
+    pub advertisement: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ObserveTiming {
     pub capture_ms: u64,
@@ -48,6 +59,10 @@ pub struct NativeFrame {
 #[async_trait]
 pub trait Perceptor: Send + Sync {
     async fn observe(&self) -> anyhow::Result<Observation>;
+    /// Read the active media player without changing playback or page state.
+    async fn media_playback(&self) -> Option<MediaPlayback> {
+        None
+    }
     /// Wait for the screen to settle after an action, up to a limit.
     async fn settle(&self, _max: Duration) {}
     /// Observe without encoding a screenshot: tree only (cheap). Backends
@@ -370,6 +385,13 @@ pub enum EngineEvent {
 /// Run limits and policy.
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
+    /// End an active task as soon as every model/task-derived outcome has a
+    /// valid, currently passing read-only probe. An outcome without a probe
+    /// cannot authorize early completion.
+    pub auto_complete_verified: bool,
+    /// Stop when a narrowly scoped media request is independently verified.
+    /// Disabled by default until measured on real browsers.
+    pub auto_complete_media: bool,
     /// Versioned shared computer tools, experimental until measured.
     pub computer_tools_v1: bool,
     /// Open models read and write OpenAI's computer-tool contract in this
@@ -452,6 +474,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            auto_complete_verified: false,
+            auto_complete_media: false,
             computer_tools_v1: false,
             oai_contract: None,
             native_model: None,

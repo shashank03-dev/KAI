@@ -32,6 +32,18 @@ impl Engine<'_> {
         }
         let elements = obs.grounding.as_text();
         self.ledger_observe(r, step, obs);
+        if r.trace.steps.is_empty() {
+            self.completion_baseline(r, obs).await;
+        }
+
+        // Proven success is a hard stop: do not even dequeue the next native
+        // computer action or ask the model to invent a follow-up click.
+        if let Some(outcome) = self.media_complete(r, obs).await {
+            return Some(outcome);
+        }
+        if let Some(outcome) = self.verified_goal_complete(r, obs).await {
+            return Some(outcome);
+        }
 
         // ---- Something only the user can get past (CAPTCHA, code, approval) ----
         if let Some(check) = self.unhandled_check(r, &obs.grounding) {
@@ -100,6 +112,11 @@ impl Engine<'_> {
         };
         if self.interrupt.cancelled() {
             return Some(Outcome::Stopped);
+        }
+        // Model inference may outlast the run deadline; never act on a late
+        // reply, even if the action was queued by the provider.
+        if r.out_of_time() {
+            return Some(Outcome::TimeLimit);
         }
         r.step += 1;
         let mut decided = match decided {
@@ -203,6 +220,9 @@ impl Engine<'_> {
         if self.interrupt.cancelled() {
             return Some(Outcome::Stopped);
         }
+        if r.out_of_time() {
+            return Some(Outcome::TimeLimit);
+        }
         r.protect(&decision, &obs.grounding, false);
         let t_act = Instant::now();
         let guarded = act::reopen_guard(&mut r.opened, &decision)
@@ -266,6 +286,12 @@ impl Engine<'_> {
         }
         r.history.push(item);
         r.grid_click = observe::grid_click(&decision, &obs.grounding);
+
+        // A reply may contain a 'then' batch or an executor plan. Check the
+        // just-settled screen before either path can act again.
+        if acted_ok && let Some(outcome) = self.completion_fresh(r).await {
+            return Some(outcome);
+        }
 
         // ---- Follow-ups the model was certain about ----
         if acted_ok

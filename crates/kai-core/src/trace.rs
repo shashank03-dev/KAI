@@ -224,6 +224,9 @@ pub struct Trace {
     pub started: String,
     pub steps: Vec<StepRecord>,
     pub outcome: Option<Outcome>,
+    /// Read-only evidence that triggered automatic completion, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion: Option<String>,
     pub total_ms: u64,
     /// Model-call and observation errors that produced no step, e.g.
     /// `malformed reply: ...` or `model error: ...`. Feeds the failure
@@ -273,6 +276,7 @@ impl Trace {
             started: jiff::Zoned::now().to_string(),
             steps: Vec::new(),
             outcome: None,
+            completion: None,
             total_ms: 0,
             errors: Vec::new(),
             executor: None,

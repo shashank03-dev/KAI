@@ -326,6 +326,9 @@ impl Engine<'_> {
                 self.escalate(r, note, true);
                 return None;
             }
+            if let Some(outcome) = self.completion_fresh(r).await {
+                return Some(outcome);
+            }
             prev = Some((sg.clone(), idx));
         }
         // The plan ran out: check the last subgoal, then the model re-plans.

@@ -132,6 +132,9 @@ impl Engine<'_> {
             r.history.push(item);
             r.step += 1;
             done += 1;
+            if let Some(outcome) = self.completion_fresh(r).await {
+                return Some(outcome);
+            }
         }
         r.procedure = Some(b.shape.clone());
         r.notes

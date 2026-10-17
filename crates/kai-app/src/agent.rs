@@ -76,6 +76,8 @@ struct Hands {
     tried: Instant,
     /// A retry is running on the blocking pool.
     trying: bool,
+    /// The actual failure from the input backend, retained for the UI.
+    error: Option<String>,
 }
 
 type HandsSlot = Arc<std::sync::Mutex<Hands>>;
@@ -109,9 +111,12 @@ impl Agent {
             .enable_all()
             .build()?;
         let kill = KillSwitch::new();
-        let actuator = hands(&kill)
-            .map_err(|e| log::error!("agent: no mouse/keyboard control: {e}"))
-            .ok();
+        let first = hands(&kill);
+        if let Err(e) = &first {
+            log::error!("agent: no mouse/keyboard control: {e:#}");
+        }
+        let error = first.as_ref().err().map(|e| format!("{e:#}"));
+        let actuator = first.ok();
         Ok(Self {
             runtime,
             kill,
@@ -120,6 +125,7 @@ impl Agent {
                 now: actuator,
                 tried: Instant::now(),
                 trying: false,
+                error,
             })),
             running: Arc::new(AtomicBool::new(false)),
             lanes: Arc::default(),
@@ -139,6 +145,43 @@ impl Agent {
             });
         }
         h.now.is_some()
+    }
+
+    /// Why the current input backend could not start, if it is unavailable.
+    pub fn input_error(&self) -> Option<String> {
+        let h = lock(&self.actuator);
+        h.now.is_none().then(|| h.error.clone()).flatten()
+    }
+
+    /// Explicit Permissions refresh: await the input-backend retry before
+    /// repainting the status. The UI never blocks on OS initialization.
+    pub fn refresh_input(&self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        let (slot, kill) = (self.actuator.clone(), self.kill.clone());
+        self.runtime.spawn(async move {
+            let retry = {
+                let mut h = lock(&slot);
+                if h.now.is_none() && !h.trying {
+                    h.trying = true;
+                    true
+                } else {
+                    false
+                }
+            };
+            if retry {
+                let _ = tokio::task::spawn_blocking(move || retry_hands(&slot, &kill)).await;
+            } else {
+                // Another retry may already be running in can_act().
+                for _ in 0..50 {
+                    if !lock(&slot).trying {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            let _ = tx.send(());
+        });
+        rx
     }
 
     pub fn stop(&self) {
@@ -188,10 +231,12 @@ impl Agent {
             let Some(actuator) = actuator else {
                 running.store(false, Ordering::SeqCst);
                 control.detach_reporter();
-                let _ = tx.unbounded_send(Ui::Failed(
-                    "Kai can't move the mouse or type on this desktop. Open Settings › Permissions."
-                        .into(),
-                ));
+                let detail = lock(&slot).error.clone().unwrap_or_else(|| {
+                    "input initialization did not complete".into()
+                });
+                let _ = tx.unbounded_send(Ui::Failed(format!(
+                    "Kai can't move the mouse or type: {detail}. Open Settings › Permissions to diagnose it."
+                )));
                 return;
             };
             tokio::spawn(kai_os::kill::watch_corner(
@@ -341,8 +386,6 @@ async fn drive(
         config.best_of = 0;
         config.reflect = false;
         config.learn = false;
-        config.outcomes = false;
-        config.task_checks = false;
     }
     std::fs::create_dir_all(dir)?;
     let sink = Sink {
@@ -472,11 +515,13 @@ async fn drive(
                         memory.as_ref()
                     },
                     learn_later: false,
-                    probe: if settings.gui_only {
-                        None
+                    // GUI-only also forbids verifier-launched subprocesses.
+                    // File probes remain available through FileOnlyProbe.
+                    probe: Some(if settings.gui_only {
+                        &kai_os::probe::FileOnlyProbe as &dyn kai_core::Probe
                     } else {
-                        Some(&kai_os::DesktopProbe)
-                    },
+                        &kai_os::DesktopProbe as &dyn kai_core::Probe
+                    }),
                     procedures: if settings.gui_only {
                         None
                     } else {
@@ -494,13 +539,17 @@ async fn drive(
 /// Build the hands now (blocking: it waits for the OS input backend) and
 /// keep them for later runs.
 fn retry_hands(slot: &HandsSlot, kill: &KillSwitch) -> Option<Arc<DesktopActuator>> {
-    let made = hands(kill)
-        .map_err(|e| log::debug!("agent: still no mouse/keyboard control: {e}"))
-        .ok();
+    let attempt = hands(kill);
+    if let Err(e) = &attempt {
+        log::debug!("agent: still no mouse/keyboard control: {e:#}");
+    }
+    let error = attempt.as_ref().err().map(|e| format!("{e:#}"));
+    let made = attempt.ok();
     let mut h = lock(slot);
     h.tried = Instant::now();
     h.trying = false;
     if h.now.is_none() {
+        h.error = error;
         h.now = made;
     }
     h.now.clone()

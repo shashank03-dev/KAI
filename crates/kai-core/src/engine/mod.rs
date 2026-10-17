@@ -28,6 +28,7 @@
 mod act;
 mod batch;
 mod best_of;
+mod completion;
 mod computer;
 mod effect;
 mod execute;
@@ -192,6 +193,22 @@ impl Engine<'_> {
         }
         let deadline = Instant::now() + self.config.max_time;
         r.deadline = deadline;
+        // Replay paths can execute before the first model turn. Capture the
+        // task-derived baseline before any cached action can satisfy it.
+        if self.config.auto_complete_verified
+            && r.ledger.has_task_checks()
+            && crate::task_checks::single_goal(r.task)
+        {
+            if let Ok(Ok(obs)) =
+                tokio::time::timeout(Duration::from_secs(2), self.perceptor.observe_tree_only())
+                    .await
+            {
+                self.completion_baseline(r, &obs).await;
+            } else {
+                // Never infer a pre-action transition if the initial sample failed.
+                r.ledger.mark_baseline_unavailable();
+            }
+        }
         // Native/contract clients construct a different prompt per frame.
         // Record their actual prompt only after the model has answered.
         r.system_hash = if self.config.native_model.is_none() && self.config.oai_contract.is_none()
