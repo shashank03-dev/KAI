@@ -254,3 +254,7 @@ optional deterministic steps in `metadata.kai`. Validate with
 Kai: MIT. Gemma 4 by Google DeepMind (Apache 2.0, per Google's Gemma 4 announcement, March 2026). Ely GPUI Components
 (MIT) on Zed's GPUI. Lucide icons (ISC). Inter, JetBrains Mono, IBM Plex Sans
 (OFL). vLLM (Apache-2.0).
+
+### GUI account connections and Mac testing handoff
+
+Settings → Accounts & models connects provider-owned ChatGPT/Codex or Claude Code sign-in, refreshes supported model catalogs, and prepares a desktop-only run without starting it. Compatible cloud/local endpoints and exact model IDs are supported. See [the Mac GUI handoff](docs/MAC_GUI_TESTING.md) and [the architecture review](docs/ARCHITECTURE_REVIEW_2026_10_17.md). This build has not undergone the deferred live testing session.

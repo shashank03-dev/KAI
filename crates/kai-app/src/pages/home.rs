@@ -154,7 +154,7 @@ fn hint(caps: Vec<AnyElement>, what: &str, g: &Glass) -> AnyElement {
 fn status_line(app: &KaiApp, g: &Glass, cx: &App) -> AnyElement {
     let colors = &cx.theme().colors;
     let (color, live, word) = match &app.conn {
-        Conn::Unknown => (g.faint, false, "connecting"),
+        Conn::Unknown => (g.faint, false, "not checked"),
         Conn::Online(_) => (colors.success, true, "ready"),
         Conn::Fallback(_) => (colors.warning, true, "on fallback"),
         Conn::Offline(_) => (colors.danger, false, "offline"),
@@ -185,13 +185,18 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
     let hour = jiff::Zoned::now().hour() as u8;
     let g = Glass::of(cx);
 
-    let starters = starters(&app.skills, &app.pages.disabled);
+    let starters = if app.settings.gui_only {
+        Vec::new()
+    } else {
+        starters(&app.skills, &app.pages.disabled)
+    };
 
     let send = cx.entity();
     let model = crate::switcher::switcher("composer-model", app, cx);
     let team_pick = cx.entity();
     let team = Switch::new("team", app.team)
         .label(t(cx, "home.team", &[]))
+        .disabled(app.settings.gui_only)
         .on_change(move |on, _, cx| {
             team_pick.update(cx, |a, cx| {
                 a.team = on;
@@ -212,7 +217,8 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         _ => None,
     };
     let no_hands = (!cx.global::<crate::AgentHandle>().0.can_act())
-        .then(|| Banner::new("no-hands", Severity::Danger, "Kai can't control the mouse and keyboard on this desktop. On Linux, log in with an Xorg session."));
+        .then(|| Banner::new("no-hands", Severity::Danger, "Kai needs mouse/keyboard access. On macOS, enable Kai in System Settings › Privacy & Security › Accessibility and Screen Recording. On Linux, use an Xorg session."));
+    let gui_mode = app.settings.gui_only.then(|| Banner::new("gui-mode", Severity::Info, "GUI testing is prepared. Press Run when ready. Watch Steps and screenshots; use Pause, Stop or a steering message if needed. No shell tasks or cached procedures run in this mode."));
     let busy = app.active.map(|_| {
         div()
             .flex()
@@ -463,6 +469,7 @@ pub fn render(app: &mut KaiApp, window: &mut Window, cx: &mut Context<KaiApp>) -
         .flex()
         .flex_col()
         .child(ui::aurora(360., &g))
+        .children(gui_mode)
         .children(offline)
         .children(no_hands)
         .child(

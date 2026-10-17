@@ -14,7 +14,7 @@ use ely_gpui_component::{
     settings::SettingsSection,
 };
 use gpui::{AnyElement, Context, Entity, IntoElement, ParentElement, Styled, div};
-use kai_core::settings::{BackendChoice, MODELS};
+use kai_core::settings::BackendChoice;
 
 /// Store any keys typed into the fields, and the endpoint. False when a key
 /// couldn't be stored (a toast already says why).
@@ -30,7 +30,14 @@ pub fn save_keys(app: &mut KaiApp, cx: &mut Context<KaiApp>) -> bool {
         let v = field.read(cx).text().trim().to_string();
         if !v.is_empty() {
             match kai_os::secrets::set(name, &v) {
-                Ok(()) => field.update(cx, |f, cx| f.set_text("", cx)),
+                Ok(()) => {
+                    if name == kai_os::secrets::VLLM {
+                        app.settings.compatible_key_origin =
+                            kai_core::connections::endpoint_origin(&app.settings.vllm_endpoint)
+                                .unwrap_or_default();
+                    }
+                    field.update(cx, |f, cx| f.set_text("", cx));
+                }
                 Err(e) => {
                     ok = false;
                     app.toast(
@@ -173,7 +180,11 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         cx.entity(),
         cx.entity(),
     );
-    let models = || MODELS.iter().map(|m| Choice::new(m.id, m.label));
+    let models = || {
+        crate::pages::connections::models(app)
+            .into_iter()
+            .map(|(id, label)| Choice::new(id, label))
+    };
     let choices = [
         BackendChoice::Both,
         BackendChoice::Vllm,
@@ -181,6 +192,8 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         BackendChoice::Gateway,
         BackendChoice::OpenAi,
         BackendChoice::Local,
+        BackendChoice::Codex,
+        BackendChoice::Claude,
     ]
     .into_iter()
     .map(|b| Choice::new(backend_key(b), backend_label(b)));
@@ -203,8 +216,8 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         ))
         .row(local_row(app, cx))
         .row(row(
-            "DigitalOcean server",
-            "The address deploy/digitalocean/up.sh printed, ending in /v1.",
+            "Compatible server / DigitalOcean",
+            "OpenAI-compatible API URL ending in /v1. Use HTTPS for cloud providers or HTTP for a loopback server.",
             UrlInput::new(&app.pages.endpoint),
             cx,
         ))

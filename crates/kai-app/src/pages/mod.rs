@@ -3,6 +3,7 @@
 pub mod bench;
 pub mod capture;
 pub mod capture_models;
+pub mod connections;
 pub mod done;
 pub mod experimental;
 pub mod history;
@@ -37,6 +38,8 @@ pub struct PageState {
     pub history_search: Entity<TextInput>,
     pub shortcut_search: Entity<TextInput>,
     pub endpoint: Entity<TextInput>,
+    pub model_id: Entity<TextInput>,
+    pub connections: connections::ConnectionState,
     pub vllm_key: Entity<TextInput>,
     pub gemini_key: Entity<TextInput>,
     pub gateway_key: Entity<TextInput>,
@@ -100,6 +103,8 @@ impl PageState {
             history_search: field("Search past runs", window, cx),
             shortcut_search: field("Search shortcuts", window, cx),
             endpoint,
+            model_id: field("Exact model ID, e.g. gpt-5.6-luna", window, cx),
+            connections: Default::default(),
             vllm_key: masked("vLLM API key (stored in the OS keychain)", window, cx),
             gemini_key: masked("Gemini API key (stored in the OS keychain)", window, cx),
             gateway_key: masked(

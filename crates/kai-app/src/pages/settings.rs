@@ -63,6 +63,7 @@ fn stop_row(cx: &Context<KaiApp>) -> impl IntoElement {
 pub(crate) const MINUTES: [u32; 4] = [5, 10, 20, 30];
 
 fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
+    let gui = cx.entity();
     let (level, steps, minutes, team) = (cx.entity(), cx.entity(), cx.entity(), cx.entity());
     let sel = match app.settings.approval {
         ApprovalLevel::Every => "every",
@@ -83,6 +84,7 @@ fn safety(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         .row(row("Time limit", "A task stops when it runs longer than this.", MINUTES.iter().fold(SegmentedControl::new("minutes", app.settings.max_minutes.to_string()), |c, m| c.segment(m.to_string(), format!("{m} min"), None))
             .on_change(move |v, _, cx| minutes.update(cx, |a, cx| { a.settings.max_minutes = v.parse().unwrap_or(10); a.save_settings(cx); })), cx))
         .row(stop_row(cx))
+        .row(Switch::new("gui-only", app.settings.gui_only).label("GUI-only runs: disable shell tasks, team mode and procedure shortcuts").on_change(move |v,_,cx| gui.update(cx, |a,cx| { a.settings.gui_only = v; a.save_settings(cx); })))
         .row(Switch::new("team-default", app.settings.team_mode).label("Use sub-agents by default").on_change(move |v, _, cx| team.update(cx, |a, cx| { a.settings.team_mode = v; a.team = v; a.save_settings(cx); })))
 }
 
@@ -225,6 +227,7 @@ fn about(cx: &mut Context<KaiApp>) -> SettingsSection {
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
     let section = app.pages.settings_section.clone();
     let page = match section.as_str() {
+        "connections" => crate::pages::connections::section(app, cx).into_any_element(),
         "safety" => safety(app, cx).into_any_element(),
         "appearance" => appearance(app, cx).into_any_element(),
         "privacy" => privacy(app, cx).into_any_element(),
@@ -302,6 +305,7 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
                     SettingsLayout::new(
                         "settings",
                         [
+                            ("connections", "Accounts & models", IconName::Cpu),
                             ("model", "Model & server", IconName::Server),
                             ("safety", "Safety", IconName::Shield),
                             ("appearance", "Appearance", IconName::Sun),

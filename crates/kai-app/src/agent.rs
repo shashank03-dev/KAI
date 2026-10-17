@@ -199,9 +199,17 @@ impl Agent {
                 actuator.input.clone(),
                 running.clone(),
             ));
-            let keys = crate::keys::resolve(Keys::default()).await;
+            let keys = if matches!(
+                settings.backend,
+                kai_core::settings::BackendChoice::Codex
+                    | kai_core::settings::BackendChoice::Claude
+            ) {
+                Keys::default()
+            } else {
+                crate::keys::resolve(Keys::default()).await
+            };
             // Kai's own browser (Settings): its eyes and hands for this run.
-            let lane = match settings.use_browser {
+            let lane = match settings.use_browser && !settings.gui_only {
                 true => Some(lanes.get(actuator.clone()).await),
                 false => None,
             };
@@ -266,7 +274,15 @@ impl Agent {
     ) -> oneshot::Receiver<Result<(Duration, String), String>> {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let keys = crate::keys::resolve(typed).await;
+            let keys = if matches!(
+                settings.backend,
+                kai_core::settings::BackendChoice::Codex
+                    | kai_core::settings::BackendChoice::Claude
+            ) {
+                typed
+            } else {
+                crate::keys::resolve(typed).await
+            };
             let r = async {
                 let (client, _) = settings.clients(&keys)?;
                 let images = Images {
@@ -298,8 +314,36 @@ async fn drive(
     perceptor: &dyn kai_core::Perceptor,
     actuator: &dyn kai_core::Actuator,
 ) -> anyhow::Result<()> {
+    let gui_hands = crate::gui_hands::GuiHands(actuator);
+    let actuator: &dyn kai_core::Actuator = if settings.gui_only {
+        &gui_hands
+    } else {
+        actuator
+    };
+    let team = team && !settings.gui_only;
+    let skills = if settings.gui_only {
+        Vec::new()
+    } else {
+        skills
+    };
+    let task = if settings.gui_only {
+        format!(
+            "{task}\nUse visible GUI controls only. Never open a terminal or execute shell commands, scripts, or code. Ask the user if blocked."
+        )
+    } else {
+        task
+    };
     let (fast, careful) = settings.clients(&keys)?;
-    let config = settings.engine_config();
+    let mut config = settings.engine_config();
+    if settings.gui_only {
+        config.executor = false;
+        config.procedures = false;
+        config.best_of = 0;
+        config.reflect = false;
+        config.learn = false;
+        config.outcomes = false;
+        config.task_checks = false;
+    }
     std::fs::create_dir_all(dir)?;
     let sink = Sink {
         tx: tx.clone(),
@@ -410,13 +454,34 @@ async fn drive(
             .run_with(
                 &task,
                 kai_core::RunOptions {
-                    plan_cache: cache.as_ref(),
+                    injection_monitor: None,
+                    plan_cache: if settings.gui_only {
+                        None
+                    } else {
+                        cache.as_ref()
+                    },
                     recorder: recorder.as_ref(),
-                    executor: executor.as_ref().map(|c| c as _),
-                    memory: memory.as_ref(),
+                    executor: if settings.gui_only {
+                        None
+                    } else {
+                        executor.as_ref().map(|c| c as _)
+                    },
+                    memory: if settings.gui_only {
+                        None
+                    } else {
+                        memory.as_ref()
+                    },
                     learn_later: false,
-                    probe: Some(&kai_os::DesktopProbe),
-                    procedures: procs.as_ref(),
+                    probe: if settings.gui_only {
+                        None
+                    } else {
+                        Some(&kai_os::DesktopProbe)
+                    },
+                    procedures: if settings.gui_only {
+                        None
+                    } else {
+                        procs.as_ref()
+                    },
                 },
             )
             .await;

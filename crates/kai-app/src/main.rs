@@ -13,6 +13,7 @@ mod chrome;
 mod control;
 mod errors;
 mod follow;
+mod gui_hands;
 mod human_dialog;
 mod i18n;
 mod keys;

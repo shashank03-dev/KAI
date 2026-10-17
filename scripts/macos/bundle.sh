@@ -20,12 +20,25 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 dist=dist
 app="$dist/Kai.app"
 
+# --skip-checks prepares a build for a later GUI testing session without
+# executing the bundled CLI or any validation task.
+skip_checks=false
+install=false
+for arg in "$@"; do
+    case "$arg" in
+        --skip-checks) skip_checks=true ;;
+        --install) install=true ;;
+        *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
 cargo build --release -p kai-app -p kai-cli
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp target/release/kai-app target/release/kai "$app/Contents/MacOS/"
-cp -R skills bench LICENSE README.md "$app/Contents/Resources/"
+cp -R skills LICENSE README.md "$app/Contents/Resources/"
+# Package repository fixtures/reports only. Raw local runs and captures are private.
+git ls-files -z --cached --others --exclude-standard -- bench |     tar --null -T - -cf - | tar -xf - -C "$app/Contents/Resources/"
 
 # The finished app icon: the cobalt orbit. `assets/icons/Kai.icns` is rebuilt
 # from the master render by `scripts/icons/build.sh`; the same ribbon is the
@@ -54,6 +67,19 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Codex is Apache-2.0. Bundle an already-installed native helper when
+# available so the GUI subscription connection needs no terminal setup.
+# Credentials/configuration are never copied. Claude Code is not redistributed.
+if command -v codex >/dev/null 2>&1; then
+    helper=$(command -v codex)
+    if file -L "$helper" | grep -q 'Mach-O'; then
+        mkdir -p "$app/Contents/Resources/providers"
+        cp -L "$helper" "$app/Contents/Resources/providers/codex"
+        cp assets/licenses/codex-LICENSE.txt "$app/Contents/Resources/providers/LICENSE-codex.txt"
+        codesign --force --sign - --timestamp=none "$app/Contents/Resources/providers/codex"
+    fi
+fi
+
 # Inner binaries first, then the bundle (a plain --deep is deprecated).
 codesign --force --sign - --timestamp=none "$app/Contents/MacOS/kai"
 codesign --force --sign - --timestamp=none "$app/Contents/MacOS/kai-app"
@@ -61,8 +87,10 @@ codesign --force --sign - --timestamp=none "$app"
 codesign --verify --strict "$app"
 
 # Smoke test the bundled CLI the way the release workflow does.
-"$app/Contents/MacOS/kai" skill validate "$app/Contents/Resources/skills"
-"$app/Contents/MacOS/kai" models list >/dev/null
+if ! "$skip_checks"; then
+    "$app/Contents/MacOS/kai" skill validate "$app/Contents/Resources/skills"
+    "$app/Contents/MacOS/kai" models list >/dev/null
+fi
 
 zip="$dist/kai-macos-aarch64.zip"
 rm -f "$zip"
@@ -70,7 +98,7 @@ ditto -c -k --keepParent "$app" "$zip"
 (cd "$dist" && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
 echo "built $app and $zip"
 
-if [[ "${1:-}" == "--install" ]]; then
+if "$install"; then
     rm -rf /Applications/Kai.app
     cp -R "$app" /Applications/
     echo "installed /Applications/Kai.app"

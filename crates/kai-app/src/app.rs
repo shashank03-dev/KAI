@@ -149,6 +149,18 @@ impl KaiApp {
     }
 
     pub fn recheck_connection(&mut self, cx: &mut Context<Self>) {
+        if self.settings.gui_only
+            || matches!(
+                self.settings.backend,
+                kai_core::settings::BackendChoice::Codex
+                    | kai_core::settings::BackendChoice::Claude
+            )
+        {
+            // Catalog/account inspection must not silently consume inference.
+            self.conn = Conn::Unknown;
+            cx.notify();
+            return;
+        }
         let rx = cx
             .global::<AgentHandle>()
             .0

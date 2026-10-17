@@ -55,11 +55,12 @@ pub fn backend_label(b: kai_core::settings::BackendChoice) -> &'static str {
     use kai_core::settings::BackendChoice::*;
     match b {
         Both => "DigitalOcean + Gemini",
-        Vllm => "DigitalOcean",
+        Vllm => "Compatible server",
         Gemini => "Gemini API",
         Gateway => "AI Gateway",
         OpenAi => "OpenAI",
         Local => "This computer",
+        Claude => "Claude Code",
         Codex => "Codex (ChatGPT)",
         Mock => "Mock",
     }

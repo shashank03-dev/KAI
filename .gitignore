@@ -19,3 +19,8 @@ screenshots/*.local.png
 .DS_Store
 Thumbs.db
 /bench/runs/
+
+# Separate local Cargo build directories and raw evaluation runs
+/target-app/
+/target-os/
+/bench/results/oai-contract-ab/

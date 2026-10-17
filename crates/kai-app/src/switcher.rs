@@ -21,6 +21,8 @@ pub const BACKENDS: &[BackendChoice] = &[
     BackendChoice::Gateway,
     BackendChoice::OpenAi,
     BackendChoice::Local,
+    BackendChoice::Codex,
+    BackendChoice::Claude,
 ];
 
 pub fn backend_key(b: BackendChoice) -> &'static str {
@@ -31,6 +33,7 @@ pub fn backend_key(b: BackendChoice) -> &'static str {
         BackendChoice::Gateway => "gateway",
         BackendChoice::OpenAi => "openai",
         BackendChoice::Local => "local",
+        BackendChoice::Claude => "claude",
         BackendChoice::Codex => "codex",
         BackendChoice::Mock => "mock",
     }
@@ -64,6 +67,17 @@ pub fn set_model(app: &mut KaiApp, id: &str, cx: &mut Context<KaiApp>) {
 }
 
 pub fn set_backend(app: &mut KaiApp, b: BackendChoice, cx: &mut Context<KaiApp>) {
+    if app.settings.backend != b {
+        if let Some(task) = app.pages.connections.abort.take() {
+            task.abort();
+        }
+        app.pages.connections.generation = app.pages.connections.generation.wrapping_add(1);
+        app.pages.connections.busy = false;
+        app.pages.connections.models.clear();
+        app.pages.connections.message.clear();
+        app.pages.connections.source.clear();
+        app.pages.connections.error = false;
+    }
     app.settings.backend = b;
     app.save_settings(cx);
     app.conn = crate::app::Conn::Unknown;
@@ -92,10 +106,15 @@ fn menu(app: &KaiApp, local: Vec<(String, String)>, me: Entity<KaiApp>) -> Menu 
         MenuItem::new("Get a model for this computer…")
             .on_click(move |_, cx| me.update(cx, |a, cx| a.go(crate::app::Page::Models, cx)))
     });
-    let models = MODELS.iter().map(|m| {
+    let catalog = crate::pages::connections::models(app);
+    let models = catalog.into_iter().map(|(id, label)| {
         let me = me.clone();
-        MenuItem::radio(m.label, app.settings.fast_model == m.id)
-            .on_click(move |_, cx| me.update(cx, |a, cx| set_model(a, m.id, cx)))
+        MenuItem::radio(label, app.settings.fast_model == id).on_click(move |_, cx| {
+            me.update(cx, |a, cx| {
+                a.settings.careful_model = id.clone();
+                set_model(a, &id, cx);
+            })
+        })
     });
     let backends = BACKENDS.iter().map(|b| {
         let (me, b) = (me.clone(), *b);
