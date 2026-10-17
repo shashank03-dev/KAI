@@ -51,6 +51,7 @@ fn shots() -> Vec<&'static str> {
     SHOTS
         .iter()
         .chain(super::capture_models::SHOTS)
+        .chain(super::capture_accounts::SHOTS)
         .copied()
         .filter(|s| words.is_empty() || words.iter().any(|w| s.contains(w)))
         .collect()
@@ -68,7 +69,9 @@ pub fn start(dir: PathBuf, window: &mut Window, cx: &mut Context<KaiApp>) {
             for name in shots() {
                 let ok = this.update_in(cx, |app, window, cx| {
                     Theme::set_mode_now(mode, cx);
-                    if !super::capture_models::stage(app, name, window, cx) {
+                    if !super::capture_models::stage(app, name, window, cx)
+                        && !super::capture_accounts::stage(app, name, cx)
+                    {
                         let i = SHOTS.iter().position(|s| *s == name).unwrap_or(0);
                         stage(app, i, window, cx);
                     }

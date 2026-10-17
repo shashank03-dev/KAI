@@ -1035,3 +1035,33 @@ Research: `docs/RESEARCH_2026_10_OPENAI_PARITY.md` (sources dated 2026-10-16).
   light and dark, shows the mark. The Windows-only build-script calls are
   type-checked against the locked `winresource` crate, since a non-Windows
   host never compiles that branch; `windows.yml` covers it natively too.
+
+## Mac crash, account connections and the DMG (2026-10-17)
+
+- **Root cause of the macOS crash:** Settings rendered Ely `Select`s for the
+  fast and careful models with zero choices when Codex or Claude Code was the
+  backend and no catalog had been fetched; `Select::render` asserts on that
+  (`select Name("fast") has no choices`). Reproduced with the 18:44 build and
+  the owner's saved settings (`backend: codex`, a Gemma model) in capture
+  mode; fixed by disabling empty pickers. Details in `docs/ACCOUNTS.md`.
+- **Connections rebuilt as a state machine** keyed by generation and
+  provider/endpoint; provider switches cancel and clear. Provider/model
+  pairs are checked in kai-core (`catalog::check`) at pick, run start and
+  client construction.
+- **Opening Kai sends no model request.** The startup and backend-switch
+  connection tests (one image request each) are gone; testing is explicit.
+- **Settings has one place for provider and model** (Accounts & models);
+  Model & server keeps endpoints, keys and per-backend tests. The Models
+  page no longer repeats the accounts section.
+- **Packaging:** `scripts/macos/package_dmg.sh` builds `dist/Kai.dmg`
+  (Kai.app + Applications link) and checks structure, arm64, signatures,
+  private files and the mounted image. The bundled Codex keeps OpenAI's
+  Developer ID signature (the old script re-signed it ad hoc). Third-party
+  licenses are generated from `cargo metadata`. Without
+  `KAI_SIGN_IDENTITY`/`KAI_NOTARY_PROFILE` the image is ad hoc signed and
+  not notarized, and the script says so. Benchmark result files (raw runs)
+  are no longer shipped.
+- **Pre-existing, not fixed:** four `window not found` log lines when the
+  splash window is removed at start (the 18:44 build logs them too).
+- **Not run:** live Codex/Claude sign-in, catalog fetches against real
+  accounts, and the GPT-5.6 Luna computer-use evaluation (deferred).

@@ -1,7 +1,6 @@
 //! Provider-owned authentication and catalog discovery. No inference or token reads.
 use crate::settings::{BackendChoice, Keys, Settings};
 use anyhow::{Context, bail, ensure};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::PathBuf, process::Stdio, time::Duration};
 use tokio::{
@@ -9,11 +8,8 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout, Command},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RemoteModel {
-    pub id: String,
-    pub label: String,
-}
+use crate::catalog::ModelOrigin;
+pub use crate::catalog::RemoteModel;
 
 /// Finder-launched apps do not inherit an interactive shell's PATH.
 pub fn provider_binary(name: &str) -> PathBuf {
@@ -54,6 +50,22 @@ pub fn provider_binary(name: &str) -> PathBuf {
         .map(|d| d.join(&file))
         .find(|p| p.is_file())
         .unwrap_or_else(|| file.into())
+}
+
+/// Why a subscription backend cannot start on this computer, if it cannot.
+/// Only looks at the file system: no process is started.
+pub fn missing_dependency(backend: BackendChoice) -> Option<String> {
+    let (name, product) = match backend {
+        BackendChoice::Codex => ("codex", "Codex"),
+        BackendChoice::Claude => ("claude", "Claude Code"),
+        _ => return None,
+    };
+    let bin = provider_binary(name);
+    (!bin.is_file()).then(|| {
+        format!(
+            "{product} is not installed on this computer (looked for `{name}` in the app bundle, PATH, Homebrew and ~/.local/bin). Install it with its setup guide, then refresh."
+        )
+    })
 }
 
 struct Rpc {
@@ -210,13 +222,12 @@ pub async fn codex_account(
             .call("model/list", json!({"cursor":cursor,"limit":100}))
             .await?;
         for m in result["data"].as_array().into_iter().flatten() {
-            if let Some(id) = m["model"].as_str().or_else(|| m["id"].as_str()) {
-                if !models.iter().any(|m: &RemoteModel| m.id == id) {
-                    models.push(RemoteModel {
-                        id: id.into(),
-                        label: m["displayName"].as_str().unwrap_or(id).into(),
-                    });
-                }
+            if let Some(model) = codex_model(m)
+                && !models
+                    .iter()
+                    .any(|known: &RemoteModel| known.id == model.id)
+            {
+                models.push(model);
             }
         }
         let next = result.get("nextCursor").cloned().unwrap_or(Value::Null);
@@ -227,6 +238,24 @@ pub async fn codex_account(
         cursor = next;
     }
     bail!("Codex catalog exceeded 100 pages")
+}
+
+/// One `model/list` entry: the exact slug Codex accepts as `--model`.
+/// Hidden models are left out, as Codex's own picker does.
+pub fn codex_model(m: &Value) -> Option<RemoteModel> {
+    if m["hidden"] == true {
+        return None;
+    }
+    let id = m["model"].as_str().or_else(|| m["id"].as_str())?;
+    let image_input = m["inputModalities"]
+        .as_array()
+        .map(|all| all.iter().any(|x| x == "image"));
+    Some(RemoteModel {
+        id: id.into(),
+        label: m["displayName"].as_str().unwrap_or(id).into(),
+        origin: ModelOrigin::Discovered,
+        image_input,
+    })
 }
 
 pub async fn discover(settings: &Settings, keys: &Keys) -> anyhow::Result<Vec<RemoteModel>> {
@@ -284,6 +313,8 @@ pub async fn discover(settings: &Settings, keys: &Keys) -> anyhow::Result<Vec<Re
             Some(RemoteModel {
                 id: id.into(),
                 label: m["name"].as_str().unwrap_or(id).into(),
+                origin: ModelOrigin::Discovered,
+                image_input: None,
             })
         })
         .collect();
@@ -337,8 +368,10 @@ pub async fn claude_account(action: AccountAction) -> anyhow::Result<(String, Ve
     let status: Value = serde_json::from_slice(&output.stdout)
         .context("Update Claude Code to a version supporting JSON account status")?;
     ensure!(status["loggedIn"] == true, "Claude Code is not signed in");
-    Ok(("Claude Code connected · documented model aliases below; account access and vision not tested".into(),
-        ["sonnet","opus","haiku"].into_iter().map(|id| RemoteModel {id:id.into(),label:format!("Claude {id} · provider alias (not a fetched entitlement)")}).collect()))
+    Ok((
+        "Claude Code connected · Claude Code has no model catalog, so these are its documented aliases; account access and vision not tested".into(),
+        crate::catalog::documented(BackendChoice::Claude),
+    ))
 }
 
 /// Never reuse a stored server key after a GUI endpoint-origin change.

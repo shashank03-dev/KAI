@@ -6,7 +6,7 @@
 
 1. Open `dist/Kai.app` (or the installed Kai application). If macOS requires it, use Finder's Control-click → Open.
 2. Enable Kai in System Settings → Privacy & Security → Accessibility and Screen Recording. Restart Kai if macOS requests it. A changed ad-hoc signature may require toggling permissions again.
-3. Open Settings → Accounts & models, or Models. Press **Connect ChatGPT / Codex** and complete the provider's browser sign-in. The Mac package includes the native Codex helper when it was installed on the build machine; Kai does not copy credentials.
+3. Open Settings → Accounts & models. Press **Connect ChatGPT / Codex** and complete the provider's browser sign-in. The Mac package includes the native Codex helper when it was installed on the build machine; Kai does not copy credentials.
 4. Refresh account and models. Choose the exact **gpt-5.6-luna** entry if your provider offers it. If absent, do not assume GPT-6 Luna is equivalent: model access must be settled before that requested evaluation. The exact-ID field also supports provider IDs outside a listed catalog, but the subscription testing preset requires a listed selection.
 5. Press **Prepare Mac GUI testing with selected model**. This prepares the safe Calculator task without starting it. Review the selected model and task, then press Run when testing is authorized.
 6. Watch **Steps**, **Kai's view** and **Earlier frames**. In a narrow window, use the Screen tab. Inspect the requested action, screenshot and timing rather than relying on the model's final statement. The first task's independently visible expected result is **391**.
@@ -18,7 +18,7 @@ The preset uses native desktop control, blocks shell actions and recognized term
 ## Other providers
 
 - **Claude Code:** press Connect Claude Code, complete its browser flow, refresh, and choose a Claude alias or exact model ID. Its helper must be installed; the setup button opens official installation guidance. Restricted decision mode requires Claude Code 2.1.259 or newer. Aliases are documented defaults rather than discovered account entitlements.
-- **OpenAI / AI Gateway:** choose the provider; enter its API key in Model & server, then refresh its catalog in Accounts & models. These use API billing, not a ChatGPT subscription.
+- **OpenAI / AI Gateway:** choose the provider; enter its API key in Accounts & models and refresh its catalog there. These use API billing, not a ChatGPT subscription.
 - **Compatible server (DeepSeek, OpenRouter or another OpenAI-compatible endpoint):** enter its HTTPS `/v1` base URL and API key, select Compatible server and refresh. Local HTTP servers on loopback may omit a key. A changed cloud origin requires its own key to be entered again. Choose a model that accepts screenshot images; text-only discovery entries cannot perform this task.
 - **Local models:** use the existing local model catalog/download/start controls. A running compatible local server can also be discovered through the compatible endpoint field.
 

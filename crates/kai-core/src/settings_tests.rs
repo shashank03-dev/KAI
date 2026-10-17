@@ -64,6 +64,8 @@ fn both_with_only_gemini_uses_gemini() {
 fn both_with_both_fails_over() {
     let s = Settings {
         vllm_endpoint: "https://x/v1".into(),
+        // The stored server key was saved for this origin.
+        compatible_key_origin: "https://x".into(),
         ..Default::default()
     };
     let (fast, _) = s

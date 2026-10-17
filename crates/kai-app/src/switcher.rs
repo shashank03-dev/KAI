@@ -57,30 +57,43 @@ pub fn short_label(s: &Settings) -> String {
         .iter()
         .find(|m| m.id == s.fast_model)
         .map(|m| m.label.split(" · ").next().unwrap_or(m.label).to_string())
-        .unwrap_or_else(|| s.fast_model.clone());
+        .unwrap_or_else(|| match s.fast_model.as_str() {
+            "" => "No model".to_string(),
+            id => id.to_string(),
+        });
     format!("{model} · {}", backend_label(s.backend))
 }
 
 pub fn set_model(app: &mut KaiApp, id: &str, cx: &mut Context<KaiApp>) {
-    app.settings.fast_model = id.to_string();
-    app.save_settings(cx);
+    if let Err(why) = crate::pages::connections::select_model(app, id, cx) {
+        app.toast(
+            ely_gpui_component::feedback::Toast::new("Model not used")
+                .body(why)
+                .severity(ely_gpui_component::primitives::Severity::Warning),
+            cx,
+        );
+    }
 }
 
+/// Switch provider: cancel the old one's request, forget its catalog, and
+/// replace any model slot that does not belong to the new provider (never
+/// Claude Code with a Gemma model). Sends no request.
 pub fn set_backend(app: &mut KaiApp, b: BackendChoice, cx: &mut Context<KaiApp>) {
     if app.settings.backend != b {
-        if let Some(task) = app.pages.connections.abort.take() {
-            task.abort();
-        }
-        app.pages.connections.generation = app.pages.connections.generation.wrapping_add(1);
-        app.pages.connections.busy = false;
-        app.pages.connections.models.clear();
-        app.pages.connections.message.clear();
-        app.pages.connections.source.clear();
-        app.pages.connections.error = false;
+        app.pages.connections.switch_to(b);
     }
     app.settings.backend = b;
+    for slot in [
+        &mut app.settings.fast_model,
+        &mut app.settings.careful_model,
+    ] {
+        if kai_core::catalog::check(b, slot).is_err() {
+            *slot = kai_core::catalog::default_model(b).to_string();
+        }
+    }
     app.save_settings(cx);
     app.conn = crate::app::Conn::Unknown;
+    cx.notify();
 }
 
 /// Downloaded local models as (id, label).
@@ -106,31 +119,32 @@ fn menu(app: &KaiApp, local: Vec<(String, String)>, me: Entity<KaiApp>) -> Menu 
         MenuItem::new("Get a model for this computer…")
             .on_click(move |_, cx| me.update(cx, |a, cx| a.go(crate::app::Page::Models, cx)))
     });
-    let catalog = crate::pages::connections::models(app);
-    let models = catalog.into_iter().map(|(id, label)| {
+    let catalog = crate::pages::connections::choices(app, &app.settings.fast_model);
+    let none_listed = catalog.is_empty().then(|| {
         let me = me.clone();
-        MenuItem::radio(label, app.settings.fast_model == id).on_click(move |_, cx| {
+        MenuItem::new("No models listed: connect in Accounts & models…").on_click(move |_, cx| {
             me.update(cx, |a, cx| {
-                a.settings.careful_model = id.clone();
-                set_model(a, &id, cx);
+                a.pages.settings_section = "connections".into();
+                a.go(crate::app::Page::Settings, cx)
             })
         })
+    });
+    let models = catalog.into_iter().map(|m| {
+        let me = me.clone();
+        MenuItem::radio(m.describe(), app.settings.fast_model == m.id)
+            .on_click(move |_, cx| me.update(cx, |a, cx| set_model(a, &m.id, cx)))
     });
     let backends = BACKENDS.iter().map(|b| {
         let (me, b) = (me.clone(), *b);
-        MenuItem::radio(backend_label(b), app.settings.backend == b).on_click(move |window, cx| {
-            me.update(cx, |a, cx| {
-                set_backend(a, b, cx);
-                a.check_connection(window, cx);
-            })
-        })
+        MenuItem::radio(backend_label(b), app.settings.backend == b)
+            .on_click(move |_, cx| me.update(cx, |a, cx| set_backend(a, b, cx)))
     });
     Menu::new()
-        .group("Model for every step", models)
+        .group("Model for every step", models.chain(none_listed))
         .group("On this computer", locals.chain(get))
         .group("Backend", backends)
         .item(
-            MenuItem::new("Gemma runs on all backends; GPT models need AI Gateway or OpenAI")
+            MenuItem::new("Each model is checked against the provider before it is used")
                 .disabled(true),
         )
 }

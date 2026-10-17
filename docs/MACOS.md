@@ -12,9 +12,20 @@ Line Tools (`xcode-select --install`). You do not need the full Xcode (see
 "Metal shaders" below).
 
 ```sh
-scripts/macos/bundle.sh --install   # builds dist/Kai.app, zips it, copies it to /Applications
+scripts/macos/package_dmg.sh        # builds dist/Kai.app and dist/Kai.dmg, checks both
+scripts/macos/bundle.sh --install   # or: build dist/Kai.app and copy it to /Applications
 open /Applications/Kai.app
 ```
+
+To install from the image: open `Kai.dmg` and drag Kai to the Applications
+shortcut beside it. The script checks the bundle (arm64 only, signatures,
+licenses, no settings, traces, benchmark runs or key-shaped text), verifies
+the image checksum, then mounts it read-only and checks it again. Set
+`KAI_SIGN_IDENTITY` (a Developer ID Application identity) and
+`KAI_NOTARY_PROFILE` (a `notarytool store-credentials` profile) to sign and
+notarize; without them the image is ad hoc signed and not notarized, and the
+script prints so. Licenses of everything inside are in
+`Kai.app/Contents/Resources/licenses/`.
 
 The same script builds `dist/kai-macos-aarch64.zip` for a release, and the
 release workflow runs it on a `macos-15` runner. To run without bundling:

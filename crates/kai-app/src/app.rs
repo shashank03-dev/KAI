@@ -134,12 +134,13 @@ impl KaiApp {
         }
     }
 
-    /// Runs once the window is up: warm the connection and report it.
+    /// Runs once the window is up. Opening Kai sends no model request: a
+    /// connection test spends credits, so it waits for the person to ask
+    /// (the status bar or Settings › Model & server).
     pub fn after_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(dir) = self.capture.clone() {
             crate::pages::capture::start(dir, window, cx);
         } else {
-            self.check_connection(window, cx);
             self.detect_local(cx);
         }
     }

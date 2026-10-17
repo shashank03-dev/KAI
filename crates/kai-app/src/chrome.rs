@@ -19,7 +19,7 @@ impl KaiApp {
         let (state, label) = match &self.conn {
             Conn::Unknown => (
                 Connectivity::Reconnecting,
-                "Connecting to Gemma…".to_string(),
+                "Model not checked · click to test".to_string(),
             ),
             Conn::Online(s) => (Connectivity::Online, s.clone()),
             Conn::Fallback(s) => (Connectivity::Reconnecting, format!("Gemini fallback · {s}")),
@@ -29,6 +29,10 @@ impl KaiApp {
         let tip = match &self.conn {
             Conn::Offline(reason) => {
                 format!("{}. Click to test again.", reason.trim_end_matches('.'))
+            }
+            Conn::Unknown => {
+                "Click to test the model: sends one image request, which may use credits."
+                    .to_string()
             }
             _ => "Model connection. Click to test again.".to_string(),
         };
@@ -231,7 +235,7 @@ impl KaiApp {
                 })
                 .collect::<Vec<_>>(),
         )
-        .on_run(move |value, window, cx| {
+        .on_run(move |value, _, cx| {
             runner.update(cx, |app, cx| {
                 app.palette = false;
                 match value.as_ref() {
@@ -246,7 +250,6 @@ impl KaiApp {
                     v if v.starts_with("backend:") => {
                         let b = crate::switcher::backend_from_key(&v[8..]);
                         crate::switcher::set_backend(app, b, cx);
-                        app.check_connection(window, cx);
                     }
                     "stop" => app.stop(cx),
                     "theme" => app.toggle_theme(cx),

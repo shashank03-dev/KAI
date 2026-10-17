@@ -399,6 +399,10 @@ impl Settings {
             );
             Ok(OpenAiClient::openai(key).with_model(model.trim_start_matches("openai/")))
         };
+        // A model from another provider never reaches a subscription CLI.
+        if matches!(self.backend, BackendChoice::Claude | BackendChoice::Codex) {
+            crate::catalog::check(self.backend, model).map_err(anyhow::Error::msg)?;
+        }
         Ok(match self.backend {
             BackendChoice::Vllm => Box::new(vllm()?),
             BackendChoice::Gemini => Box::new(gemini()?),
@@ -406,10 +410,7 @@ impl Settings {
             BackendChoice::OpenAi => Box::new(openai()?),
             BackendChoice::Local => Box::new(crate::models::local_client(self)?),
             BackendChoice::Claude => Box::new(crate::client::ClaudeClient::new(model)),
-            BackendChoice::Codex => {
-                anyhow::ensure!(!model.is_empty(), "the Codex backend needs --model");
-                Box::new(crate::client::CodexClient::new(model))
-            }
+            BackendChoice::Codex => Box::new(crate::client::CodexClient::new(model)),
             BackendChoice::Mock => Box::new(MockClient::always(
                 r#"{"thought":"mock backend","action":"done","risk":"none"}"#,
             )),

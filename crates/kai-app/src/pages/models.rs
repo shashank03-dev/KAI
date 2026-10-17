@@ -212,7 +212,6 @@ pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> imp
             None,
             cx,
         )
-            .child(crate::pages::connections::section(app, cx))
             .child(hardware(l, cx))
             .children(ready(l, cx))
             .children(none_fit.then(|| {

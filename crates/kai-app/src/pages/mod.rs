@@ -1,7 +1,9 @@
 //! The pages behind the activity bar, and the state their fields keep.
 
+pub mod accounts;
 pub mod bench;
 pub mod capture;
+pub mod capture_accounts;
 pub mod capture_models;
 pub mod connections;
 pub mod done;
@@ -104,7 +106,7 @@ impl PageState {
             shortcut_search: field("Search shortcuts", window, cx),
             endpoint,
             model_id: field("Exact model ID, e.g. gpt-5.6-luna", window, cx),
-            connections: Default::default(),
+            connections: connections::ConnectionState::new(settings.backend),
             vllm_key: masked("vLLM API key (stored in the OS keychain)", window, cx),
             gemini_key: masked("Gemini API key (stored in the OS keychain)", window, cx),
             gateway_key: masked(
@@ -120,7 +122,7 @@ impl PageState {
             skill_detail: None,
             confirm_delete_skill: false,
             drafting: false,
-            settings_section: "model".into(),
+            settings_section: "connections".into(),
             history: history::load(),
             training_runs: history::training_runs(),
             open_trace: None,

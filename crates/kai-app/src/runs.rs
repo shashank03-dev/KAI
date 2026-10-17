@@ -39,7 +39,10 @@ pub fn model_label(s: &kai_core::settings::Settings) -> String {
         .iter()
         .find(|m| m.id == s.fast_model)
         .map(|m| m.label.to_string())
-        .unwrap_or_else(|| s.fast_model.clone());
+        .unwrap_or_else(|| match s.fast_model.as_str() {
+            "" => "no model selected".to_string(),
+            id => id.to_string(),
+        });
     format!("{model} · {}", backend_label(s.backend))
 }
 
@@ -90,6 +93,15 @@ impl KaiApp {
     pub fn start_run(&mut self, task: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         let task = task.unwrap_or_else(|| self.draft.read(cx).text().trim().to_string());
         if task.is_empty() {
+            return;
+        }
+        if let Err(why) = kai_core::catalog::check_settings(&self.settings) {
+            self.toast(
+                Toast::new("Choose a model first")
+                    .body(format!("{why} Settings › Accounts & models."))
+                    .severity(Severity::Warning),
+                cx,
+            );
             return;
         }
         self.draft.update(cx, |d, cx| d.set_text("", cx));

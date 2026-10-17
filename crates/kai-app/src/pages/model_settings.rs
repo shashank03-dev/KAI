@@ -5,11 +5,11 @@ use crate::AgentHandle;
 use crate::app::KaiApp;
 use crate::pages::settings::row;
 use crate::runs::backend_label;
-use crate::switcher::{backend_from_key, backend_key};
+use crate::switcher::backend_key;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     feedback::{ErrorView, InlineMessage, Toast},
-    forms::{Choice, PasswordInput, Select, TextInput, UrlInput},
+    forms::{PasswordInput, TextInput, UrlInput},
     primitives::{IconName, Severity},
     settings::SettingsSection,
 };
@@ -173,45 +173,34 @@ fn local_row(app: &KaiApp, cx: &Context<KaiApp>) -> AnyElement {
 }
 
 pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
-    let (backend, fast, careful, saver, tester) = (
-        cx.entity(),
-        cx.entity(),
-        cx.entity(),
-        cx.entity(),
-        cx.entity(),
-    );
-    let models = || {
-        crate::pages::connections::models(app)
-            .into_iter()
-            .map(|(id, label)| Choice::new(id, label))
-    };
-    let choices = [
-        BackendChoice::Both,
-        BackendChoice::Vllm,
-        BackendChoice::Gemini,
-        BackendChoice::Gateway,
-        BackendChoice::OpenAi,
-        BackendChoice::Local,
-        BackendChoice::Codex,
-        BackendChoice::Claude,
-    ]
-    .into_iter()
-    .map(|b| Choice::new(backend_key(b), backend_label(b)));
-    let backend_picker = Select::new("backend", choices)
-        .selected(backend_key(app.settings.backend))
-        .on_change(move |v, window, cx| {
-            backend.update(cx, |a, cx| {
-                crate::switcher::set_backend(a, backend_from_key(v.as_ref()), cx);
-                a.check_connection(window, cx);
-            })
-        });
+    let (open, saver, tester) = (cx.entity(), cx.entity(), cx.entity());
+    let selection = div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(InlineMessage::new(
+            Severity::Info,
+            format!("Kai uses {}.", crate::runs::model_label(&app.settings)),
+        ))
+        .child(
+            div().flex().child(
+                Button::new("open-accounts", "Change provider or model")
+                    .variant(ButtonVariant::Secondary)
+                    .on_click(move |_, _, cx| {
+                        open.update(cx, |a, cx| {
+                            a.pages.settings_section = "connections".into();
+                            cx.notify();
+                        })
+                    }),
+            ),
+        );
     let tested = backend_key(app.settings.backend);
     SettingsSection::new("Model & server")
-        .description("Where the model runs. Screenshots go only to these endpoints.")
+        .description("Endpoints and keys, each with a Test that sends one real image request. Screenshots go only to these endpoints.")
         .row(row(
-            "Backend",
-            "Both tries your DigitalOcean server first and falls back to Gemini for a step. AI Gateway (Vercel) and OpenAI run Gemma 4 or GPT models for comparison.",
-            backend_picker,
+            "Provider and model",
+            "Chosen in Settings › Accounts & models.",
+            selection,
             cx,
         ))
         .row(local_row(app, cx))
@@ -225,29 +214,6 @@ pub fn model(app: &KaiApp, cx: &mut Context<KaiApp>) -> SettingsSection {
         .row(key_row(app, "Gemini API key", &app.pages.gemini_key, BackendChoice::Gemini, cx))
         .row(key_row(app, "Vercel AI Gateway key", &app.pages.gateway_key, BackendChoice::Gateway, cx))
         .row(key_row(app, "OpenAI API key", &app.pages.openai_key, BackendChoice::OpenAi, cx))
-        .row(row(
-            "Fast model",
-            "Used for every step. Gemma runs on every backend; GPT models need AI Gateway or OpenAI.",
-            Select::new("fast", models())
-                .selected(app.settings.fast_model.clone())
-                .on_change(move |v, _, cx| {
-                    fast.update(cx, |a, cx| crate::switcher::set_model(a, v.as_ref(), cx))
-                }),
-            cx,
-        ))
-        .row(row(
-            "Careful model",
-            "Used for one step after a failed one, then Kai drops back.",
-            Select::new("careful", models())
-                .selected(app.settings.careful_model.clone())
-                .on_change(move |v, _, cx| {
-                    careful.update(cx, |a, cx| {
-                        a.settings.careful_model = v.to_string();
-                        a.save_settings(cx);
-                    })
-                }),
-            cx,
-        ))
         .row(
             div()
                 .flex()

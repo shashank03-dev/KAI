@@ -7,6 +7,7 @@
 //! backends. See `docs/HARNESS.md`.
 
 pub mod best_of;
+pub mod catalog;
 pub mod client;
 pub mod computer;
 pub mod cua;

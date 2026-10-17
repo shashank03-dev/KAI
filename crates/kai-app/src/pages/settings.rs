@@ -227,7 +227,7 @@ fn about(cx: &mut Context<KaiApp>) -> SettingsSection {
 pub fn render(app: &mut KaiApp, _: &mut Window, cx: &mut Context<KaiApp>) -> impl IntoElement {
     let section = app.pages.settings_section.clone();
     let page = match section.as_str() {
-        "connections" => crate::pages::connections::section(app, cx).into_any_element(),
+        "connections" => crate::pages::accounts::section(app, cx).into_any_element(),
         "safety" => safety(app, cx).into_any_element(),
         "appearance" => appearance(app, cx).into_any_element(),
         "privacy" => privacy(app, cx).into_any_element(),
