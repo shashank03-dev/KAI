@@ -22,6 +22,7 @@ pub mod mcp;
 pub mod memo;
 pub mod memory;
 pub mod models;
+pub mod native_models;
 pub mod oai_contract;
 pub mod orchestrator;
 pub mod plan;
@@ -65,3 +66,5 @@ pub use risk::ApprovalLevel;
 pub use schema::{Action, Decision, Direction, Risk};
 pub use skill::{DeterministicStep, Skill};
 pub use trace::{Outcome, Trace};
+
+pub mod connections;

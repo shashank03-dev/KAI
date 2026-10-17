@@ -149,3 +149,38 @@ async fn export_formats_and_stats() {
     assert!(stats::text(&s).contains("loop"));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[tokio::test]
+async fn export_uses_each_step_system_prompt_instead_of_the_first_prompt() {
+    let root = tmp("changing-system");
+    record(&root).await;
+    let dir = root.join("2026-10-10-mock-recorded/good");
+    let original = std::fs::read_to_string(dir.join("system.txt")).unwrap();
+    let updated = "native prompt for screenshot size 1440 x 900";
+    let hash = kai_core::recorder::fnv1a_hex(updated);
+    std::fs::write(dir.join(format!("systems/{hash}.txt")), updated).unwrap();
+    let function = serde_json::json!({"type":"function", "function":{"name":"computer_use"}});
+
+    let trace_path = dir.join("trace.json");
+    let mut trace: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&trace_path).unwrap()).unwrap();
+    trace["steps"][1]["prompt_system_hash"] = hash.clone().into();
+    trace["steps"][1]["tool_spec"] = function.clone();
+    std::fs::write(&trace_path, serde_json::to_string_pretty(&trace).unwrap()).unwrap();
+
+    let out = root.join("all.jsonl");
+    export::export(&root, &out, Format::All, Filter::default(), &[]).unwrap();
+    let rows = lines(&out);
+    assert_eq!(rows[0]["system"], original);
+    assert_eq!(rows[1]["system"], updated);
+    assert_eq!(rows[1]["tool_spec"], function);
+    assert!(rows[0].get("tool_spec").is_none());
+
+    // A missing hashed prompt must not silently corrupt an SFT training row.
+    std::fs::remove_file(dir.join(format!("systems/{hash}.txt"))).unwrap();
+    let error = export::export(&root, &out, Format::Sft, Filter::default(), &[])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains(&hash), "{error}");
+    let _ = std::fs::remove_dir_all(&root);
+}

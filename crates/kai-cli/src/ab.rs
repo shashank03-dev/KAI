@@ -25,6 +25,9 @@ pub struct Ab {
     /// (`docs/RESEARCH_2026_10_OPENAI_PARITY.md` §5b). Implies the tools.
     #[arg(long, value_name = "FRAME", value_parser = frame)]
     pub oai_contract: Option<OaiFrame>,
+    /// Decode native GUI actions: Fara 1.5, UI-TARS 1.5, or Holo3.1 function calls.
+    #[arg(long, value_name = "MODEL", value_parser = native_model)]
+    pub native_model: Option<kai_core::native_models::NativeModel>,
     /// Kai's own OpenAI-shaped safety checks: ask before acting on a site
     /// the task does not name, or on a sensitive one (mail, money, identity).
     #[arg(long)]
@@ -37,6 +40,10 @@ pub struct Ab {
     /// of agreeing replies wins and only its action runs. Costs K model calls.
     #[arg(long, value_name = "K", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=8))]
     pub step_candidates: u8,
+    /// Resolve ties between equally sized candidate clusters: deterministic
+    /// first cluster (default), or ask the model to judge the tied actions.
+    #[arg(long, value_enum, default_value_t = StepJudge::Cluster)]
+    pub step_judge: StepJudge,
     /// Disable multi-action steps (one action per model call).
     #[arg(long)]
     pub no_batch: bool,
@@ -108,6 +115,9 @@ impl Ab {
         if self.oai_contract.is_some() {
             v.push("--oai-contract");
         }
+        if self.native_model.is_some() {
+            v.push("--native-model");
+        }
         if self.local_safety_checks {
             v.push("--local-safety-checks");
         }
@@ -116,6 +126,9 @@ impl Ab {
         }
         if self.step_candidates > 1 {
             v.push("--step-candidates");
+        }
+        if self.step_judge == StepJudge::Model {
+            v.push("--step-judge");
         }
         if self.executor {
             v.push("--executor");
@@ -164,7 +177,13 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.recover = ab.recover;
     config.memo = ab.memo;
     config.task_checks = ab.task_checks;
-    config.computer_tools_v1 = ab.computer_tools_v1 || ab.oai_contract.is_some();
+    anyhow::ensure!(
+        ab.oai_contract.is_none() || ab.native_model.is_none(),
+        "--native-model and --oai-contract cannot be combined"
+    );
+    config.computer_tools_v1 =
+        ab.computer_tools_v1 || ab.oai_contract.is_some() || ab.native_model.is_some();
+    config.native_model = ab.native_model;
     config.oai_contract = match ab.oai_contract {
         Some(OaiFrame::Frame(f)) => Some(f),
         _ => None,
@@ -172,6 +191,7 @@ pub fn apply_ab(config: &mut Config, ab: &Ab) -> anyhow::Result<bool> {
     config.local_safety_checks = ab.local_safety_checks;
     config.oai_batch = ab.oai_batch.max(1);
     config.step_candidates = ab.step_candidates.max(1);
+    config.step_judge_model = ab.step_judge == StepJudge::Model;
     Ok(true)
 }
 
@@ -182,11 +202,24 @@ impl Ab {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepJudge {
+    #[default]
+    Cluster,
+    Model,
+}
+
 /// `--oai-contract`: a coordinate frame, or the model's own from the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OaiFrame {
     Auto,
     Frame(kai_core::oai_contract::CoordFrame),
+}
+
+fn native_model(s: &str) -> Result<kai_core::native_models::NativeModel, String> {
+    serde_json::from_value(serde_json::Value::String(s.to_ascii_lowercase()))
+        .map_err(|_| "expected fara15, ui-tars15 or holo31".to_string())
 }
 
 fn frame(name: &str) -> Result<OaiFrame, String> {
@@ -266,5 +299,19 @@ mod tests {
         apply_ab(&mut c, &ab).unwrap();
         assert!(c.task_checks);
         assert_eq!(ab.changed(), vec!["--task-checks"]);
+    }
+
+    #[test]
+    fn step_judge_mode_preserves_candidate_count() {
+        let mut c = Config::default();
+        let ab = Ab {
+            step_candidates: 4,
+            step_judge: StepJudge::Model,
+            ..Ab::default()
+        };
+        apply_ab(&mut c, &ab).unwrap();
+        assert_eq!(c.step_candidates, 4);
+        assert!(c.step_judge_model);
+        assert!(ab.changed().contains(&"--step-judge"));
     }
 }

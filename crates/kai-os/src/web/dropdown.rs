@@ -16,6 +16,23 @@ pub const MAX_OPTIONS: usize = 30;
 /// Height of one listed option, in CSS pixels.
 const ROW: f32 = 22.0;
 
+impl BrowserLane {
+    /// Whether the focused element is a native `<select>`.
+    pub(super) async fn focused_select(&self) -> Option<bool> {
+        let r = self
+            .page(
+                "Runtime.evaluate",
+                json!({
+                    "expression": "document.activeElement && document.activeElement.tagName === 'SELECT'",
+                    "returnByValue": true,
+                }),
+            )
+            .await
+            .ok()?;
+        r["result"]["value"].as_bool()
+    }
+}
+
 /// Picks a `<select>` option by index (when its label still matches) or by
 /// label (exact, then prefix, then contains; case-insensitive) or value, and
 /// fires `input` and `change` as a person's choice would. Runs on the element

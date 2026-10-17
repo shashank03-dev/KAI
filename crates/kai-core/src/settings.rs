@@ -80,6 +80,7 @@ pub enum BackendChoice {
     Local,
     /// Through the Codex CLI and the user's ChatGPT sign-in (comparisons).
     Codex,
+    Claude,
     Mock,
 }
 
@@ -87,14 +88,19 @@ pub enum BackendChoice {
 #[serde(default)]
 pub struct Settings {
     pub computer_tools_v1: bool,
+    /// Desktop acceptance runs: refuse shell execution and bypass shortcuts.
+    pub gui_only: bool,
     /// Open models on OpenAI's computer-tool contract, in this coordinate
     /// frame (`crate::oai_contract`). Off (`None`) by default.
     pub oai_contract: Option<crate::oai_contract::CoordFrame>,
+    pub native_model: Option<crate::native_models::NativeModel>,
     /// Kai's own off-task and sensitive-site checks (`crate::safety_checks`).
     pub local_safety_checks: bool,
     pub backend: BackendChoice,
     /// e.g. `https://1-2-3-4.sslip.io/v1`
     pub vllm_endpoint: String,
+    /// Origin authorized to receive the stored compatible-server API key.
+    pub compatible_key_origin: String,
     pub fast_model: String,
     pub careful_model: String,
     pub approval: ApprovalLevel,
@@ -168,10 +174,13 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             computer_tools_v1: false,
+            gui_only: false,
             oai_contract: None,
+            native_model: None,
             local_safety_checks: false,
             backend: BackendChoice::Both,
             vllm_endpoint: String::new(),
+            compatible_key_origin: String::new(),
             fast_model: MODELS[0].id.to_string(),
             careful_model: MODELS[1].id.to_string(),
             approval: ApprovalLevel::HighRiskOnly,
@@ -313,11 +322,15 @@ impl Settings {
     pub fn engine_config(&self) -> crate::Config {
         let (max_steps, max_time) = self.limits();
         crate::Config {
-            computer_tools_v1: self.computer_tools_v1 || self.oai_contract.is_some(),
+            computer_tools_v1: self.computer_tools_v1
+                || self.oai_contract.is_some()
+                || self.native_model.is_some(),
             oai_contract: self.oai_contract,
+            native_model: self.native_model,
             local_safety_checks: self.local_safety_checks,
             oai_batch: 1,
             step_candidates: 1,
+            step_judge_model: false,
             max_steps,
             max_time,
             approval: self.approval,
@@ -343,10 +356,22 @@ impl Settings {
                 !self.vllm_endpoint.is_empty(),
                 "no DigitalOcean endpoint set"
             );
-            let key = keys
-                .vllm
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("no DigitalOcean API key set"))?;
+            let endpoint = url::Url::parse(&self.vllm_endpoint)?;
+            let loopback = matches!(
+                endpoint.host_str(),
+                Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+            );
+            anyhow::ensure!(
+                endpoint.scheme() == "https" || (endpoint.scheme() == "http" && loopback),
+                "Cloud model endpoints require HTTPS"
+            );
+            anyhow::ensure!(
+                endpoint.username().is_empty() && endpoint.password().is_none(),
+                "Put credentials in the API key field, not the URL"
+            );
+            let key = crate::connections::compatible_key(self, keys)?
+                .unwrap_or_default()
+                .to_owned();
             Ok(VllmClient::new(&self.vllm_endpoint, key).with_model(model))
         };
         let gemini = || -> anyhow::Result<GeminiClient> {
@@ -380,6 +405,7 @@ impl Settings {
             BackendChoice::Gateway => Box::new(gateway()?),
             BackendChoice::OpenAi => Box::new(openai()?),
             BackendChoice::Local => Box::new(crate::models::local_client(self)?),
+            BackendChoice::Claude => Box::new(crate::client::ClaudeClient::new(model)),
             BackendChoice::Codex => {
                 anyhow::ensure!(!model.is_empty(), "the Codex backend needs --model");
                 Box::new(crate::client::CodexClient::new(model))

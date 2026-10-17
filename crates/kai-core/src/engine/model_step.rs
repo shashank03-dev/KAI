@@ -90,6 +90,7 @@ impl Engine<'_> {
                         obs,
                         id: step as u64 + 1,
                         result: r.computer_result.as_ref(),
+                        recording: r.recorder.is_some(),
                     },
                     schema,
                     max_tokens,

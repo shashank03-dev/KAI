@@ -20,11 +20,41 @@ pub struct CuaConfig {
     pub model: String,
     /// Current Responses computer protocol; legacy preview remains default.
     pub computer_tools_v1: bool,
+    /// Optional Responses reasoning effort for GA computer models. Never
+    /// sent to the legacy computer-use-preview API.
+    pub reasoning_effort: Option<ReasoningEffort>,
+    /// Opt-in local Phase 5 safety checks for native computer actions.
+    pub local_safety_checks: bool,
     /// `linux` or `windows`.
     pub environment: String,
     pub max_steps: u32,
     pub max_time: Duration,
     pub timeout: Duration,
+}
+
+/// Explicit reasoning levels. Model support varies; callers opt in only
+/// after selecting a compatible GA model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningEffort {
+    None,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
 }
 
 /// The computer-use tool's `environment`: `windows`, `mac` or `linux`.
@@ -45,6 +75,8 @@ impl Default for CuaConfig {
             api_key: None,
             model: "computer-use-preview".to_string(),
             computer_tools_v1: false,
+            reasoning_effort: None,
+            local_safety_checks: false,
             environment: cua_environment().to_string(),
             max_steps: 40,
             max_time: Duration::from_secs(600),
@@ -81,6 +113,19 @@ impl CuaRunner<'_> {
         task: &str,
         approver: Option<&dyn Approver>,
     ) -> Result<CuaRun, ClientError> {
+        self.run_with_monitor(task, approver, None).await
+    }
+
+    /// An independent screenshot classifier, selected explicitly by the
+    /// caller. No classifier is constructed or called unless supplied.
+    /// Its flags and errors use the shared engine's present-person safety
+    /// approval path before the native computer action can run.
+    pub async fn run_with_monitor(
+        &self,
+        task: &str,
+        approver: Option<&dyn Approver>,
+        monitor: Option<&dyn crate::client::ModelClient>,
+    ) -> Result<CuaRun, ClientError> {
         let approver = approver.unwrap_or(&NoApproval);
         let client = provider::Provider::new(
             &self.config,
@@ -110,7 +155,15 @@ impl CuaRunner<'_> {
                 ..Default::default()
             },
         };
-        let mut trace = engine.run(task).await;
+        let mut trace = engine
+            .run_with(
+                task,
+                crate::RunOptions {
+                    injection_monitor: monitor,
+                    ..Default::default()
+                },
+            )
+            .await;
         if trace.errors.iter().any(|e| e.starts_with("model error")) {
             trace.finish(crate::Outcome::Failed);
         }

@@ -1,7 +1,7 @@
 //! Best-of-K for one step (`--step-candidates K`): K sampled replies, grouped
 //! by what they would do, the largest group wins and only its first reply's
-//! action runs (GTA1's step-level scaling with a non-model judge,
-//! `docs/RESEARCH_2026_10_OPENAI_PARITY.md` §5d). Ties go to the earliest.
+//! action runs (`docs/RESEARCH_2026_10_OPENAI_PARITY.md` §5d).
+//! Exposes all tied groups so an optional model can judge between them.
 use super::Turn;
 use crate::computer::{ComputerAction, Target};
 
@@ -81,14 +81,57 @@ fn agrees(a: &Turn, b: &Turn) -> bool {
     }
 }
 
-/// The index of the winning reply among `turns`; `None` when empty.
-pub fn vote<'a>(turns: impl IntoIterator<Item = &'a Turn>) -> Option<usize> {
+/// Each group contains distinct candidate indices agreeing with one another.
+/// The first group wins deterministic ties; a model may choose another group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Vote {
+    pub groups: Vec<Vec<usize>>,
+}
+
+impl Vote {
+    pub fn winner(&self) -> usize {
+        self.groups[0][0]
+    }
+}
+
+/// The largest non-overlapping agreeing group(s). Evaluate every subset of up
+/// to eight candidates: greedy first-fit can miss the actual majority when a
+/// candidate agrees with several partially overlapping groups. Pairwise
+/// agreement prevents chains of nearby points joining distant endpoints.
+pub fn vote<'a>(turns: impl IntoIterator<Item = &'a Turn>) -> Option<Vote> {
     let turns: Vec<&Turn> = turns.into_iter().collect();
-    (0..turns.len()).max_by_key(|&i| {
-        let votes = turns.iter().filter(|t| agrees(turns[i], t)).count();
-        // More votes first; among equals, the earliest reply.
-        (votes, std::cmp::Reverse(i))
-    })
+    if turns.is_empty() || turns.len() > 8 {
+        return None;
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut remaining = (1usize << turns.len()) - 1;
+    while remaining != 0 {
+        let mut best: Vec<usize> = Vec::new();
+        for subset in 1..(1usize << turns.len()) {
+            if subset & !remaining != 0 || (subset.count_ones() as usize) < best.len() {
+                continue;
+            }
+            let indices = (0..turns.len())
+                .filter(|&i| subset & (1 << i) != 0)
+                .collect::<Vec<_>>();
+            if (indices.len() > best.len() || indices < best)
+                && indices
+                    .iter()
+                    .enumerate()
+                    .all(|(a, &i)| indices[a + 1..].iter().all(|&j| agrees(turns[i], turns[j])))
+            {
+                best = indices;
+            }
+        }
+        debug_assert!(!best.is_empty());
+        for &i in &best {
+            remaining &= !(1 << i);
+        }
+        groups.push(best);
+    }
+    let largest = groups.iter().map(Vec::len).max().unwrap_or(0);
+    let tied = groups.into_iter().filter(|g| g.len() == largest).collect();
+    Some(Vote { groups: tied })
 }
 
 #[cfg(test)]
@@ -123,7 +166,7 @@ mod tests {
             click(point(503., 302.)),
             click(point(506., 298.)),
         ];
-        assert_eq!(vote(&turns), Some(0));
+        assert_eq!(vote(&turns).unwrap().winner(), 0);
     }
 
     #[test]
@@ -137,8 +180,8 @@ mod tests {
         let done = Turn::Done {
             message: "ok".into(),
         };
-        assert_eq!(vote(&[m(3), m(7), m(7)]), Some(1));
-        assert_eq!(vote(&[done, m(3)]), Some(0));
+        assert_eq!(vote(&[m(3), m(7), m(7)]).unwrap().winner(), 1);
+        assert_eq!(vote(&[done, m(3)]).unwrap().winner(), 0);
         assert_eq!(vote(&[]), None);
     }
 
@@ -149,7 +192,7 @@ mod tests {
             click(point(503., 300.)),
             click(point(504., 300.)),
         ];
-        assert_eq!(vote(&turns), Some(1));
+        assert_eq!(vote(&turns).unwrap().winner(), 1);
     }
 
     #[test]
@@ -164,7 +207,69 @@ mod tests {
                 url("https://b.example"),
                 url("https://b.example")
             ]),
-            Some(1)
+            Some(Vote {
+                groups: vec![vec![1, 2]]
+            })
         );
+    }
+
+    #[test]
+    fn tie_exposes_distinct_clusters_and_all_risky_members() {
+        let t = [
+            click(point(10., 10.)),
+            click(point(90., 90.)),
+            click(point(12., 11.)),
+            click(point(91., 89.)),
+        ];
+        assert_eq!(
+            vote(&t),
+            Some(Vote {
+                groups: vec![vec![0, 2], vec![1, 3]]
+            })
+        );
+    }
+
+    #[test]
+    fn overlapping_neighborhoods_do_not_double_count_a_candidate() {
+        // 0 and 22 are too far apart even though each agrees with 11.
+        let turns = [
+            click(point(0., 5.)),
+            click(point(11., 5.)),
+            click(point(22., 5.)),
+        ];
+        let result = vote(&turns).unwrap();
+        assert_eq!(result.groups, vec![vec![0, 1]]);
+        assert_eq!(result.winner(), 0);
+    }
+
+    #[test]
+    fn every_candidate_in_a_cluster_is_within_the_radius_of_every_other() {
+        let turns = [
+            click(point(0., 0.)),
+            click(point(10., 0.)),
+            click(point(20., 0.)),
+            click(point(30., 0.)),
+        ];
+        let result = vote(&turns).unwrap();
+        assert_eq!(result.groups, vec![vec![0, 1], vec![2, 3]]);
+    }
+
+    #[test]
+    fn largest_pairwise_cluster_wins_regardless_of_initial_order() {
+        // First-fit produces [0, 11] and [22, 21] (a false tie). The true
+        // majority [11, 22, 21] must win without counting candidates twice.
+        let turns = [
+            click(point(0., 5.)),
+            click(point(11., 5.)),
+            click(point(22., 5.)),
+            click(point(21., 5.)),
+        ];
+        assert_eq!(vote(&turns).unwrap().groups, vec![vec![1, 2, 3]]);
+    }
+
+    #[test]
+    fn excessive_candidates_fail_closed() {
+        let turns = (0..9).map(|_| click(point(1., 1.))).collect::<Vec<_>>();
+        assert_eq!(vote(&turns), None);
     }
 }

@@ -35,7 +35,7 @@ enum Cmd {
         /// Split the task across parallel sub-agents.
         #[arg(long)]
         team: bool,
-        /// Approve everything except passwords and payments.
+        /// Auto-approve ordinary actions (not computer actions, passwords, or payments).
         #[arg(long)]
         yes: bool,
         /// Record this run as training data under this folder
@@ -199,7 +199,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             })
         }
         Cmd::Models { cmd } => models::run(cmd).await,
-        Cmd::Smoke { backend, n } => smoke(&backend, n).await,
+        Cmd::Smoke { backend, n } => runs::smoke(&backend, n).await,
         Cmd::Run {
             task,
             backend,
@@ -291,34 +291,6 @@ fn live_settings(
     Ok((b, s, keys))
 }
 
-async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
-    let (b, mut s, keys) = live_settings(o)?;
-    let _local = runs::local_server(b, &mut s).await?;
-    let (client, _) = s.clients(&keys)?;
-    let screen = kai_os::DesktopPerceptor::new();
-    let obs = kai_core::Perceptor::observe(&screen).await?;
-    let mut times = Vec::new();
-    for i in 0..n.max(1) {
-        let r = client.warm_up(&obs.images).await?;
-        eprintln!(
-            "  call {}: {} ms via {}",
-            i + 1,
-            r.total.as_millis(),
-            r.backend.label()
-        );
-        times.push(r.total.as_millis() as u64);
-    }
-    times.sort_unstable();
-    let p = |q: f64| times[((times.len() - 1) as f64 * q).round() as usize];
-    println!(
-        "p50 {} ms · p95 {} ms over {} calls",
-        p(0.5),
-        p(0.95),
-        times.len()
-    );
-    Ok(ExitCode::SUCCESS)
-}
-
 async fn run_task(
     o: &BackendOpts,
     task: &str,
@@ -340,10 +312,17 @@ async fn run_task(
         None => None,
     };
     let (config, _) = backend::config(&s, &o.ab)?;
+    anyhow::ensure!(
+        o.injection_monitor.is_none() || !team,
+        "--injection-monitor requires a single-agent run"
+    );
     let native = match b {
-        BackendArg::OpenaiNative => {
-            Some(backend::native_config(&keys, o.model.as_deref(), &config)?)
-        }
+        BackendArg::OpenaiNative => Some(backend::native_config(
+            &keys,
+            o.model.as_deref(),
+            &config,
+            o.cua_reasoning_effort,
+        )?),
         _ => None,
     };
     let (fast, careful) = if native.is_some() {
@@ -351,6 +330,11 @@ async fn run_task(
     } else {
         s.clients(&keys)?
     };
+    let injection_monitor = o
+        .injection_monitor
+        .as_deref()
+        .map(|model| s.client(&keys, model))
+        .transpose()?;
     let grounder = backend::grounder(&s, &keys, o)?;
     let skills = all_skills();
     let kill = kai_os::KillSwitch::new();
@@ -402,7 +386,9 @@ async fn run_task(
             interrupt: &kill,
             sink: &Printer,
         };
-        let run = runner.run_with_approver(task, Some(&approver)).await?;
+        let run = runner
+            .run_with_monitor(task, Some(&approver), injection_monitor.as_deref())
+            .await?;
         if let Some(e) = &run.error {
             eprintln!("native loop error: {e}");
         }
@@ -474,6 +460,7 @@ async fn run_task(
             .run_with(
                 task,
                 kai_core::RunOptions {
+                    injection_monitor: injection_monitor.as_deref(),
                     plan_cache: cache.as_ref(),
                     recorder: recorder.as_ref(),
                     executor: jevos

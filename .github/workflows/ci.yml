@@ -55,4 +55,4 @@ jobs:
       - name: Live browser lane
         env:
           KAI_REQUIRE_BROWSER: "1"
-        run: cargo test -p kai-os --test browser_lane --test browser_edges
+        run: cargo test -p kai-os --test browser_lane --test browser_edges --test browser_computer

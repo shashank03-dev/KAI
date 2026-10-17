@@ -11,9 +11,11 @@
 mod executor_tests;
 pub mod lane;
 pub mod machine;
+pub mod meter;
 pub mod record;
 pub mod repeat;
 pub mod report;
+pub mod rollouts;
 pub mod runner;
 pub mod stats;
 pub mod tasks;
@@ -78,6 +80,13 @@ pub struct BenchArgs {
     /// runs can use the first run's lessons); prints first vs repeat.
     #[arg(long, default_value = "1")]
     pub repeat: u32,
+    /// Bench-only trajectory best-of-N; each rollout restarts task setup on a
+    /// disposable desktop or fresh headless browser.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=8))]
+    pub rollouts: u8,
+    /// Evaluate rollout behavior narratives, with automated checks taking precedence.
+    #[arg(long, value_parser = ["narratives"])]
+    pub judge: Option<String>,
     /// For the memory exam: run with a copy of your own lessons, either
     /// `current` (live ones) or `candidate` (live plus pending). Never
     /// written back. See `kai memory exam`.
@@ -163,6 +172,7 @@ fn exit_status(
 
 pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<ExitCode> {
     let b = args.backend.backend.unwrap_or(BackendArg::Mock);
+    rollouts::validate(b, &args)?;
     let mut list = tasks::load_tasks(&args.tasks)?;
     if !args.only.is_empty() {
         for id in &args.only {
@@ -201,6 +211,17 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
     } else {
         kai_os::secrets::keys()
     };
+    anyhow::ensure!(
+        args.backend.injection_monitor.is_none()
+            || !matches!(b, BackendArg::Mock | BackendArg::Replay),
+        "--injection-monitor requires a live backend"
+    );
+    let injection_monitor = args
+        .backend
+        .injection_monitor
+        .as_deref()
+        .map(|model| s.client(&keys, model))
+        .transpose()?;
     let prices = match (args.usd_per_mtok_in, args.usd_per_mtok_out) {
         (None, None) => None,
         (i, o) => Some(Prices {
@@ -266,7 +287,12 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
     let mem = runner::MemoryOpts {
         store: store.as_ref(),
         procedures: procs.as_ref(),
-        repeat: args.repeat.clamp(1, 5),
+        repeat: if args.rollouts > 1 {
+            args.rollouts as u32
+        } else {
+            args.repeat.clamp(1, 5)
+        },
+        rollouts: args.rollouts > 1,
     };
     let runs = match b {
         BackendArg::Mock => runner::run_mock_with(&list, skills, config, rec, executor, mem).await,
@@ -274,6 +300,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
             let live = runner::Live {
                 client: None,
                 careful: None,
+                injection_monitor: None,
                 grounder: None,
                 skills,
                 config,
@@ -289,10 +316,16 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
             runner::run_live(&list, &live).await?
         }
         BackendArg::OpenaiNative => {
-            let cfg = backend::native_config(&keys, args.backend.model.as_deref(), &config)?;
+            let cfg = backend::native_config(
+                &keys,
+                args.backend.model.as_deref(),
+                &config,
+                args.backend.cua_reasoning_effort,
+            )?;
             let live = runner::Live {
                 client: None,
                 careful: None,
+                injection_monitor: injection_monitor.as_deref(),
                 grounder: None,
                 skills,
                 config,
@@ -314,6 +347,7 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
             let live = runner::Live {
                 client: Some(fast.as_ref()),
                 careful: careful.as_deref(),
+                injection_monitor: injection_monitor.as_deref(),
                 grounder: grounder.as_ref().map(|(c, frame)| kai_core::Grounder {
                     client: c.as_ref(),
                     frame: *frame,
@@ -329,13 +363,24 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
                 memory: mem,
                 browser,
             };
-            runner::run_live(&list, &live).await?
+            let attempts = runner::run_live(&list, &live).await?;
+            if args.rollouts > 1 {
+                rollouts::choose(
+                    attempts,
+                    args.rollouts as usize,
+                    fast.as_ref(),
+                    &recording.as_ref().unwrap().batch_dir,
+                )
+                .await?
+            } else {
+                attempts
+            }
         }
     };
 
-    let repeat_md = (mem.repeat > 1 || args.memory)
+    let repeat_md = (!mem.rollouts && (mem.repeat > 1 || args.memory))
         .then(|| repeat::table(&runs, store.as_ref().map_or(0, |s| s.len())));
-    // The head-to-head numbers are first runs only.
+    // Normal repeats report first runs; rollouts have already selected winners.
     let runs: Vec<runner::Run> = runs.into_iter().filter(|r| r.pass == 0).collect();
     let mut bench_note = note(b);
     if let Some(headless) = browser {
@@ -347,6 +392,9 @@ pub async fn run(args: BenchArgs, skills: &[kai_core::Skill]) -> anyhow::Result<
     }
     if args.memory {
         bench_note.push_str(" Experience memory ON (--memory): a fresh lesson store shared by the tasks of this bench run.");
+    }
+    if args.rollouts > 1 {
+        bench_note.push_str(&format!(" Bench-only trajectory best-of-{} with sanitized behavior narratives; each attempt starts from task setup and the chosen verified outcome is reported.", args.rollouts));
     }
     let meta = Meta {
         backend: backend_name,

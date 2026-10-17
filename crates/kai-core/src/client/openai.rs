@@ -50,7 +50,7 @@ fn is_o_series(m: &str) -> bool {
 /// OpenAI reasoning models: no temperature, `max_completion_tokens`.
 fn is_reasoning(model: &str) -> bool {
     let m = model.rsplit('/').next().unwrap_or(model);
-    m.starts_with("gpt-5") || is_o_series(m)
+    m.starts_with("gpt-5") || m.starts_with("gpt-6") || is_o_series(m)
 }
 
 pub struct OpenAiClient {
@@ -346,7 +346,8 @@ impl ModelClient for OpenAiClient {
                 return Err(ClientError::from_status(status.as_u16(), &txt));
             }
             let out = if self.stream {
-                stream::read_chat_stream(resp, started, self.early_stop).await?
+                stream::read_chat_stream(resp, started, self.early_stop && !req.schema.is_null())
+                    .await?
             } else {
                 let v: serde_json::Value = resp
                     .json()
@@ -370,6 +371,33 @@ impl ModelClient for OpenAiClient {
                 cost_usd: out.cost_usd,
             });
         }
+    }
+    async fn decide_with_tool(
+        &self,
+        req: &ModelRequest<'_>,
+        tool: &serde_json::Value,
+    ) -> Result<ModelReply, ClientError> {
+        if self.api_key.is_empty() && !self.local {
+            return Err(ClientError::MissingKey(
+                "AI_GATEWAY_API_KEY or OPENAI_API_KEY",
+            ));
+        }
+        let started = Instant::now();
+        let body = super::tool_call::request_body(
+            self.body(req, SCHEMA_OFF, self.effort.load(Ordering::Relaxed)),
+            tool,
+        );
+        let response = self.send(&body).await?;
+        if !response.status().is_success() {
+            let code = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ClientError::from_status(code, &body));
+        }
+        let payload: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| ClientError::Transport(e.to_string()))?;
+        super::tool_call::parse_reply(&payload, self.backend(), started.elapsed())
     }
 }
 

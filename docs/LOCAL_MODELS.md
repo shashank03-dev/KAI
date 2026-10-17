@@ -237,6 +237,26 @@ screenshot (~950 prompt tokens), RSS read from `ps`:
   `crates/kai-os/src/local/server.rs`); a server already running with older
   flags is reused until it is stopped (`kai models stop`).
 
+### Coordinate calibration and OpenAI-contract benchmarks (2026-10-16)
+
+The earlier `{"target":63}` result above shows Holo3.1 selecting a Set-of-Marks
+target on one screenshot; it does **not** establish a native pixel coordinate
+frame. Holo3.1's suggested `norm1000` frame remains an inference, and Gemma 4
+continues to use marks by default. An attempted real Gemma 4 baseline vs
+OpenAI-contract experiment produced two baseline completions but both contract
+trials stopped at the required human-approval gate; that comparison is
+**invalid** (see [CALIBRATION.md](CALIBRATION.md)). No real coordinate-frame
+calibration or valid paired comparison has been recorded for Holo3.1.
+
+The local calibration page, scoring script, and guarded four-run benchmark
+scaffold are documented in [CALIBRATION.md](CALIBRATION.md). Calibrate each
+pixel-mode model against both screenshot resolutions and collect ten raw
+predictions per resolution before interpreting a pixel-mode A/B run. Store the
+input, model/processor details, and JSON report under `bench/results/`; do not
+update the catalog's `coord_frame` from an inferred convention or from
+synthetic tests. The benchmark requires two measured runs per side and reports
+missing metrics explicitly as unavailable.
+
 ## Recommendation rules
 
 `rank(&Catalog, &HardwareSummary)` gives every model a place to run, a speed

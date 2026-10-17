@@ -2,6 +2,10 @@
 //! (no OpenAI key is available, so it cannot run live).
 
 mod client_support;
+#[path = "client_support/native_navigation.rs"]
+mod native_navigation;
+#[path = "client_support/native_retries.rs"]
+mod native_retries;
 
 use async_trait::async_trait;
 use client_support::{Reply, Server};
@@ -49,11 +53,13 @@ impl Perceptor for Screen {
 type Acted = (Action, Option<(f32, f32)>, Option<String>);
 
 #[derive(Default)]
-struct Hands(Mutex<Vec<Acted>>);
+struct Hands(Mutex<Vec<Acted>>, Option<kai_core::computer::Capabilities>);
 #[async_trait]
 impl Actuator for Hands {
     fn computer_capabilities(&self) -> kai_core::computer::Capabilities {
-        kai_core::computer::Capabilities::all()
+        self.1
+            .clone()
+            .unwrap_or_else(kai_core::computer::Capabilities::all)
     }
     async fn computer_act(
         &self,
@@ -75,6 +81,9 @@ impl Actuator for Hands {
             ComputerAction::Type { text, .. } => (Action::Type, None, Some(text.clone())),
             ComputerAction::Keypress { .. } => (Action::Key, None, None),
             ComputerAction::Move { .. } => (Action::Computer, None, None),
+            ComputerAction::Scroll { dx, dy, unit, .. } => {
+                (Action::Scroll, None, Some(format!("{dx},{dy},{unit:?}")))
+            }
             _ => return Err(ToolError::Unsupported),
         };
         self.0.lock().unwrap().push(item);

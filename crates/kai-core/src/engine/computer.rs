@@ -124,28 +124,76 @@ impl Engine<'_> {
         obs: &Observation,
         mut rec: StepRecord,
     ) -> Result<StepRecord, Option<Outcome>> {
+        // Consume a link grant only after observing an actual new origin.
+        r.domains.arrived(obs.url.as_deref());
         let url = match &request.action {
-            ComputerAction::Observe | ComputerAction::Wait { .. } | ComputerAction::Move { .. } => {
-                return Ok(rec);
-            }
             ComputerAction::OpenUrl { url } => Some(url.as_str()),
             _ => obs.url.as_deref(),
         };
-        let checks = crate::safety_checks::checks(url, &r.domains);
+        let mut checks =
+            crate::safety_checks::for_action(url, obs, &request.action, r.task, &r.domains);
+        let watching = crate::safety_checks::watch(url, &obs.grounding)
+            || crate::safety_checks::watch(obs.url.as_deref(), &obs.grounding);
+        // Independent monitor only runs when the rule guard is silent and
+        // the page has imperative text; its failure also needs human review.
+        if !watching
+            && !checks
+                .iter()
+                .any(|c| c.code.as_deref() == Some("malicious_instructions"))
+            && let Some(model) = r.injection_monitor
+        {
+            let verdict = tokio::select! {
+                biased;
+                () = crate::ports::wait_cancelled(self.interrupt) => {
+                    rec.approval = Some("safety monitor cancelled".into());
+                    rec.path = Some("none".into());
+                    r.push(rec);
+                    return Err(Some(Outcome::Stopped));
+                }
+                check = super::injection_monitor::inspect(model, self.perceptor, obs, r.task) => check,
+            };
+            // A past approval cannot suppress a fresh flagged verdict.
+            if let Some(check) = verdict {
+                checks.push(check);
+            }
+        }
+        if watching && checks.is_empty() {
+            // Acknowledging a sensitive site is one-time, but every later
+            // action still requires a present person (watch mode).
+            checks.push(crate::safety_checks::watch_check(obs.screen_hash));
+        }
         if checks.is_empty() {
             return Ok(rec);
+        }
+        // An unattended/Autopilot approver can auto-approve ordinary actions.
+        // It must never silently accept provider-shaped safety checks.
+        if self.config.approval == crate::risk::ApprovalLevel::Autopilot {
+            rec.approval = Some("safety check needs a present person".into());
+            rec.output = Some("A person must confirm the safety check before Kai can act.".into());
+            rec.path = Some("none".into());
+            r.push(rec);
+            return Err(Some(Outcome::AskedUser));
         }
         let said: Vec<&str> = checks.iter().filter_map(|c| c.message.as_deref()).collect();
         let mut ask = rec.decision.clone();
         ask.thought = format!("Kai flagged this step: {} Allow it?", said.join(" "));
-        match self
-            .approver
-            .approve_safety_check(&ask, &obs.grounding)
-            .await
-        {
+        self.sink
+            .emit(&EngineEvent::AwaitingApproval { step: rec.index });
+        let start = Instant::now();
+        let choice = tokio::select! {
+            biased;
+            () = crate::ports::wait_cancelled(self.interrupt) => ApprovalChoice::Stop,
+            c = self.approver.approve_safety_check(&ask, &obs.grounding) => c,
+        };
+        r.human.waited += start.elapsed();
+        match choice {
             ApprovalChoice::Approve => {
-                r.domains.accept(&checks);
-                rec.approval = Some("safety check accepted".into());
+                r.domains.accept(url, &checks);
+                let codes = checks
+                    .iter()
+                    .filter_map(|c| c.code.as_deref())
+                    .collect::<Vec<_>>();
+                rec.approval = Some(format!("safety checks accepted: {}", codes.join(", ")));
                 Ok(rec)
             }
             choice => {
@@ -246,7 +294,7 @@ impl Engine<'_> {
                 }
             }
         }
-        if self.config.local_safety_checks {
+        if self.config.local_safety_checks || r.injection_monitor.is_some() {
             rec = match self.local_checks(r, &request, obs, rec).await {
                 Ok(rec) => rec,
                 Err(end) => return end,
@@ -264,7 +312,13 @@ impl Engine<'_> {
                 .emit(&EngineEvent::AwaitingApproval { step: rec.index });
             // Show the exact canonical payload, rather than its policy projection.
             match self.ask_approval(r, &rec.decision, &obs.grounding).await {
-                ApprovalChoice::Approve => rec.approval = Some("approved".into()),
+                ApprovalChoice::Approve => {
+                    let previous = rec.approval.take();
+                    rec.approval = Some(match previous {
+                        Some(checks) => format!("{checks}; action approved"),
+                        None => "approved".into(),
+                    });
+                }
                 ApprovalChoice::Skip => {
                     r.computer_result = Some(ToolResult {
                         id: request.id,
@@ -308,6 +362,20 @@ impl Engine<'_> {
         let dispatcher = Dispatcher::new(&executor, &Authorized, self.interrupt);
         let t = Instant::now();
         let result = dispatcher.dispatch(&request, &space).await;
+        if result.error.is_none()
+            && matches!(request.action, ComputerAction::Click { .. })
+            && request.action.targets().iter().any(|target| match target {
+                Target::Element { mark, .. } => obs
+                    .grounding
+                    .element(*mark)
+                    .is_some_and(|e| e.role == crate::element::Role::Link),
+                _ => false,
+            })
+        {
+            r.domains.link_clicked(obs.url.as_deref());
+        } else {
+            r.domains.abandon_link();
+        }
         r.computer_result = Some(result.clone());
         rec.timings.act_ms = t.elapsed().as_millis() as u64;
         rec.path = Some(

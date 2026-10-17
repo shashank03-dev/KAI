@@ -92,12 +92,50 @@ impl ModelClient for FailoverClient {
             Err(e) => Err(e),
         }
     }
+
+    async fn sample(
+        &self,
+        req: &ModelRequest<'_>,
+        n: usize,
+    ) -> Vec<Result<ModelReply, ClientError>> {
+        if self.in_cooldown()
+            && let Some(secondary) = &self.secondary
+        {
+            return secondary.sample(req, n).await;
+        }
+        // Preserve a vLLM primary's single n=K HTTP request. The wrapper's
+        // default trait method would instead make K independent decide calls.
+        let replies = self.primary.sample(req, n).await;
+        let failover = !replies.is_empty()
+            && replies
+                .iter()
+                .all(|r| r.as_ref().is_err_and(ClientError::is_failover));
+        if failover && let Some(secondary) = &self.secondary {
+            log::warn!("candidate sampling failed over to secondary");
+            if replies
+                .iter()
+                .any(|r| matches!(r, Err(ClientError::Unavailable(_))))
+            {
+                *self.until.lock().unwrap() =
+                    Some(Instant::now() + Duration::from_secs(365 * 24 * 3600));
+            } else {
+                self.start_cooldown();
+            }
+            return secondary.sample(req, n).await;
+        }
+        if replies.iter().any(Result::is_ok) {
+            self.clear_cooldown();
+        }
+        replies
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::client::{Images, MockClient};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn rate_limit_is_a_failover_error() {
@@ -217,5 +255,37 @@ mod tests {
             crop_jpeg: None,
         };
         assert!(f.decide(&req(&schema, &imgs)).await.is_err());
+    }
+
+    struct SamplesOnly(Arc<AtomicUsize>);
+    #[async_trait]
+    impl ModelClient for SamplesOnly {
+        fn backend(&self) -> Backend {
+            Backend::Vllm
+        }
+        async fn decide(&self, _: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
+            panic!("batched sampling must not call decide")
+        }
+        async fn sample(
+            &self,
+            _: &ModelRequest<'_>,
+            n: usize,
+        ) -> Vec<Result<ModelReply, ClientError>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            (0..n).map(|_| Err(ClientError::EmptyBody)).collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn sampling_preserves_primary_multi_choice_call() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let client = FailoverClient::new(Box::new(SamplesOnly(seen.clone())), None);
+        let schema = crate::schema::Decision::json_schema();
+        let imgs = Images {
+            screenshot_jpeg: vec![],
+            crop_jpeg: None,
+        };
+        assert_eq!(client.sample(&req(&schema, &imgs), 4).await.len(), 4);
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
     }
 }

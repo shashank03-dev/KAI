@@ -44,6 +44,9 @@ pub enum Phase {
 pub struct ComputerResponse {
     pub calls: Vec<ComputerCall>,
     pub message: Option<(String, Phase)>,
+    /// Incomplete generations are never eligible to execute, even if their
+    /// output contains a syntactically valid computer call.
+    pub incomplete: Option<String>,
 }
 
 /// A field that is absent, `null` or `[]` means "none" (real GA responses
@@ -116,9 +119,36 @@ pub fn parse_response(
     observation: u64,
     focused: Option<u32>,
 ) -> Result<ComputerResponse, ToolError> {
-    if v.get("status").is_some_and(|s| s != "completed")
-        || v.get("error").is_some_and(|e| !e.is_null())
-    {
+    let decoded = parse_response_for_retry(v, observation, focused)?;
+    if decoded.incomplete.is_some() {
+        return Err(ToolError::Failed);
+    }
+    Ok(decoded)
+}
+
+/// Only the native network adapter needs to distinguish incomplete responses
+/// for a bounded, unchanged-body retry. Ordinary callers must fail closed.
+pub fn parse_response_for_retry(
+    v: &Value,
+    observation: u64,
+    focused: Option<u32>,
+) -> Result<ComputerResponse, ToolError> {
+    if v.get("error").is_some_and(|e| !e.is_null()) {
+        return Err(ToolError::Failed);
+    }
+    if v["status"] == "incomplete" {
+        return Ok(ComputerResponse {
+            calls: Vec::new(),
+            message: None,
+            incomplete: Some(
+                v["incomplete_details"]["reason"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string(),
+            ),
+        });
+    }
+    if v.get("status").is_some_and(|s| s != "completed") {
         return Err(ToolError::Failed);
     }
     let output = v["output"].as_array().ok_or(ToolError::InvalidArguments)?;
@@ -152,5 +182,9 @@ pub fn parse_response(
     if calls.iter().map(|c| c.actions.len()).sum::<usize>() > MAX_BATCH {
         return Err(ToolError::InvalidArguments);
     }
-    Ok(ComputerResponse { calls, message })
+    Ok(ComputerResponse {
+        calls,
+        message,
+        incomplete: None,
+    })
 }

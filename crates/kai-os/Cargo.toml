@@ -10,6 +10,7 @@ description = "Kai's hands and eyes: capture, accessibility trees, input, shell 
 [dependencies]
 kai-core = { path = "../kai-core" }
 anyhow.workspace = true
+thiserror.workspace = true
 log.workspace = true
 async-trait = "0.1"
 tokio.workspace = true
@@ -26,6 +27,7 @@ base64.workspace = true
 keyring.workspace = true
 reqwest.workspace = true
 futures.workspace = true
+rquickjs = "0.14"
 sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"

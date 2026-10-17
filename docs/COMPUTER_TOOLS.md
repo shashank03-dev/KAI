@@ -59,8 +59,10 @@ JSON; it implies the computer tools. Design, sources and per-family evidence:
   action with the most matching candidates. Ties choose the earliest reply.
   This is an optional comparison mode, not a measured accuracy improvement.
 - **Local safety checks:** `--local-safety-checks` adds approvals for a site
-  outside those named in the task and for listed sensitive sites. The
-  screenshot injection monitor proposed in the research is not implemented.
+  outside those named in the task and for listed sensitive sites. The optional
+  `--injection-monitor MODEL` also checks candidate screenshots for suspicious
+  instructions (see [Phase 5](PHASE5_SAFETY_MONITOR.md)). Both remain off by
+  default pending live false-positive and accuracy measurements.
 
 Not measured yet: whether this beats Kai's own format for any model. Run the
 §7 Phase 2 A/B (two runs per side) before turning it on anywhere.
@@ -109,10 +111,13 @@ at most 4096 pixels or 20 wheel notches per axis. Zero scroll does nothing.
 - Native Type requires an enabled, focused editable element in the fresh tree.
   Click/focus the field, observe, then type. A click alone is not focus evidence.
 - CDP advertises Observe, Click (left, middle, right; back/forward navigate
-  history), Move, Type, Keypress, pixel Scroll (scaled to CSS pixels) and
-  Wait. Click, keys and typing reuse the lane's own paths: release guards,
-  page dialogs and the typed-text wait, which the live browser tests cover.
-  Drag and held modifiers are not offered in the browser yet.
+  history), Move, Drag (left, middle and right), Type, Keypress, pixel Scroll
+  (scaled to CSS pixels) and Wait. Click, keys and typing reuse the lane's
+  release guards, page dialogs and typed-text wait. Drag issues ordered
+  pointer events with the button held; modifiers issue key-down events and
+  propagate CDP's modifier mask to every mouse event. Every held key and
+  button has a same-session release guard, including on cancellation.
+  Back/forward are navigation clicks only; a drag with either is refused.
 - Legacy and shared desktop mutations use the same ownership boundary. Ordinary
   terminal subagents remain parallel; known Linux GUI shell launches acquire
   desktop ownership. Legacy actions revalidate after approval/ownership waits.
@@ -155,6 +160,16 @@ and verifier calls stop once the latch is active. This is not general OCR
 redaction, and does not discover secrets the harness has never identified.
 
 ## Release evidence
+
+**Browser shared-tool design (2026-10-16).** Extend the existing CDP input
+path to handle pointer drag and mouse modifiers, with release guards attached
+to the original tab session. A direct JavaScript drag injection was rejected
+because it bypasses browser input and fails on canvases. The acceptance
+fixture in `crates/kai-os/tests/browser_computer.rs` checks an actual Chromium
+pointer listener, Shift+click release, a held-button drag, unsupported buttons,
+and a cancelled drag that poisons the lane until restart. This is browser
+driver acceptance only; cross-platform desktop and live-model accuracy still
+require their separate gates.
 
 See the [audit and remediation appendix](AUDIT_2026_10_15.md). Host fixtures are
 not Windows/Linux desktop acceptance, mixed-DPI validation, live model accuracy,

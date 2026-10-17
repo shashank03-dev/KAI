@@ -12,6 +12,111 @@ use std::time::{Duration, Instant};
 
 const DONE: &str = r#"{"thought":"ok","action":"done","risk":"none"}"#;
 
+#[tokio::test]
+async fn holo_tool_request_uses_native_api_and_refuses_plain_text() {
+    use kai_core::native_models::{NativeModel, NativeTurn};
+    let args = r#"{"action":"left_click","coordinate":[500,500]}"#;
+    let call = json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[
+        {"type":"function","function":{"name":"computer_use","arguments":args}}
+    ]}}],"usage":{"prompt_tokens":20,"completion_tokens":10}});
+    let (srv, base) = Server::start(vec![
+        Reply::Json(200, call),
+        Reply::Json(
+            200,
+            json!({"choices":[{"finish_reason":"stop","message":{"content":"All done"}}]}),
+        ),
+    ])
+    .await;
+    let client = OpenAiClient::local(format!("{base}/v1"), "holo-3.1-4b").with_streaming(true);
+    let images = Images {
+        screenshot_jpeg: vec![0xff, 0xd8, 0xff],
+        crop_jpeg: None,
+    };
+    let schema = json!(null);
+    let model = NativeModel::Holo31;
+    let system = model.system((1280, 800));
+    let req = ModelRequest {
+        observation_id: Some(8),
+        computer_result: None,
+        system: &system,
+        user_text: "Click the center",
+        images: &images,
+        schema: &schema,
+        max_tokens: 128,
+        temperature: 0.0,
+    };
+    let spec = model.tool_spec().unwrap();
+    let response = client.decide_with_tool(&req, &spec).await.unwrap();
+    assert_eq!(response.raw, args);
+    assert_eq!(response.backend, Backend::Local);
+    assert!(matches!(
+        model.decode(&response.raw, 8, None, (1280, 800)).unwrap(),
+        NativeTurn::Act(_)
+    ));
+    let err = client.decide_with_tool(&req, &spec).await.err().unwrap();
+    assert!(matches!(err, ClientError::Incomplete(_)), "{err}");
+    let bodies = srv.bodies();
+    assert_eq!(bodies.len(), 2);
+    let body = &bodies[0].1;
+    assert_eq!(body["tool_choice"], "required");
+    assert_eq!(body["parallel_tool_calls"], false);
+    assert_eq!(body["stream"], false);
+    assert_eq!(body["tools"][0]["function"]["name"], "computer_use");
+    assert!(body.get("response_format").is_none());
+    assert_eq!(body["messages"][1]["content"][1]["type"], "image_url");
+}
+
+#[tokio::test]
+async fn holo_vllm_transport_preserves_arguments_and_rejects_incomplete_calls() {
+    use kai_core::native_models::NativeModel;
+    let args = r#"{"action":"left_click","coordinate":[500,500],"action":"wait"}"#;
+    let call = json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[
+        {"type":"function","function":{"name":"computer_use","arguments":args}}
+    ]}}],"usage":{"prompt_tokens":11,"completion_tokens":7}});
+    let incomplete = json!({"choices":[{"finish_reason":"length","message":{"tool_calls":[
+        {"type":"function","function":{"name":"computer_use","arguments":"{\"action\":\"wait\",\"time\":1}"}}
+    ]}}]});
+    let (srv, base) =
+        Server::start(vec![Reply::Json(200, call), Reply::Json(200, incomplete)]).await;
+    let client =
+        VllmClient::new(format!("{base}/v1"), "test-key").with_model("Hcompany/Holo-3.1-4B");
+    let model = NativeModel::Holo31;
+    let images = Images {
+        screenshot_jpeg: vec![0xff, 0xd8, 0xff],
+        crop_jpeg: None,
+    };
+    let schema = json!(null);
+    let system = model.system((1440, 900));
+    let req = ModelRequest {
+        observation_id: Some(3),
+        computer_result: None,
+        system: &system,
+        user_text: "Click the center",
+        images: &images,
+        schema: &schema,
+        max_tokens: 512,
+        temperature: 0.0,
+    };
+    let tool = model.tool_spec().unwrap();
+    let reply = client.decide_with_tool(&req, &tool).await.unwrap();
+    assert_eq!(reply.raw, args, "the adapter must see duplicate keys");
+    assert_eq!(reply.backend, Backend::Vllm);
+    assert!(model.decode(&reply.raw, 3, None, (1440, 900)).is_err());
+    let err = client.decide_with_tool(&req, &tool).await.unwrap_err();
+    assert!(matches!(err, ClientError::Incomplete(_)), "{err}");
+    let bodies = srv.bodies();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0].1["stream"], false);
+    assert!(bodies[0].1.get("stream_options").is_none());
+    assert!(bodies[0].1.get("response_format").is_none());
+    assert_eq!(bodies[0].1["tool_choice"], "required");
+    assert_eq!(bodies[0].1["tools"][0]["function"]["name"], "computer_use");
+    assert_eq!(
+        bodies[0].1["messages"][1]["content"][1]["type"],
+        "image_url"
+    );
+}
+
 fn completion(content: &str) -> serde_json::Value {
     json!({
         "choices": [{"index":0,"message":{"role":"assistant","content":content}}],

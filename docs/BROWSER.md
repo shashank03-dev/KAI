@@ -1,5 +1,11 @@
 # The browser lane
 
+Every active browser lane holds an OS-managed exclusive lock in its profile
+directory (`.kai-profile.lock`). A second lane using the same profile fails
+immediately with an `already in use` error, even when the Chromium build does
+not enforce single-profile ownership. The lock releases when the lane/browser
+closes or Kai exits; its empty file may remain safely on disk.
+
 `kai run --browser "…"` (or, in the app, Settings › "Do tasks in Kai's own
 browser") does a task in **Kai's own Chromium**, driven over the Chrome
 DevTools Protocol (CDP), instead of through the desktop. Why, and what was
@@ -94,6 +100,61 @@ Each case has a test against a live headless Chromium
   as root on a real desktop.
 - Page text is screen text: the existing rules (data, not instructions;
   pause on injection or phishing; `docs/SAFETY.md`) apply unchanged.
+
+## Experimental persistent browser JavaScript (not model-facing yet)
+
+`kai_os::web::script::BrowserScript` now provides a **restricted JavaScript
+procedure runner**. Each instance owns a persistent QuickJS realm with
+reusable variables and functions. Scripts can enqueue `kai.click(cssSelector)`,
+`kai.type(text)`, `kai.press(keys)`, `kai.open(url)`, `kai.wait(milliseconds)`
+and bounded `kai.log(...)` messages. Promise microtasks are supported with a
+finite job limit. The same `BrowserLane` is reused across code calls, so UI
+changes made by one call are visible to the next.
+
+The QuickJS realm has no host file/process/network modules, browser DOM, or
+direct CDP binding. It receives at most 16 KiB of script source, allocates at
+most 8 MiB of JavaScript heap, runs with a 256 KiB JS stack, and emits at
+most 32 actions with 16 KiB of serialized output per call. An instruction
+interrupt enforces the execution deadline and cancellation; a failed script
+realm is discarded so outstanding microtasks cannot act under a later call.
+Browsers themselves retain their existing download, profile, and navigation
+restrictions. Scripts are **not** evaluated in the authenticated page.
+
+The only page-side JavaScript is a fixed read-only DOM selector resolver. It
+checks visibility/occlusion, returns a point, and rechecks the page session,
+URL, document navigation epoch, Chromium DOM backend node ID, element signature
+and bounds **after**
+authorization. Typed text and keypresses also recheck page URL, document
+epoch and focused element, while navigation checks page URL and document epoch.
+Each script instance assigns increasing request IDs across calls. Every emitted
+operation becomes a canonical `ComputerAction` passed to `Dispatcher` with an
+**explicit `ComputerPolicy` argument**. The fixture's allow-all policy is
+strictly for testing. A denied action stops the procedure. The caller must
+use a policy that applies Kai's normal sensitive-domain and approval rules
+before enabling scripts in interactive sessions.
+
+The runner returns `ScriptOutcome.results` for dispatched actions. Policy,
+timeout and other per-action failures are recorded in each `ToolResult.error`
+and stop subsequent actions; callers must inspect these results. JavaScript
+planning, validation and selector failures return `ScriptError` directly.
+
+Real-browser acceptance (`crates/kai-os/tests/browser_script.rs`) uses two
+calls and a dynamically created button; browser title state independently
+checks the untouched, intermediate, and completed results. It also exercises
+denial, an unsafe navigation URL, absent selectors and an infinite JS loop.
+Additional required-Chromium tests cover external cancellation without a
+queued click, navigation or same-URL reload during authorization, stale typed
+text, identical-node replacement during approval, focus shifts, disabled
+controls and occluded controls.
+Run with `KAI_BROWSER=<chromium-path> KAI_REQUIRE_BROWSER=1 cargo test -p
+kai-os --test browser_script`.
+
+**Remaining boundaries:** This is a capability-limited JS executor inside
+the Kai process, not OS-level process isolation or unrestricted Playwright.
+It currently lacks a model-facing tool, screenshots in script results, and
+integration with the engine's full local safety checks and trace/ledger.
+Those integrations, OS-level sandbox hardening and real-model tests are
+required before promoting this facility to a production feature.
 
 ## Choosing the browser
 

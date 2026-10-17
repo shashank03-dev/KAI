@@ -294,15 +294,15 @@ async fn a_dead_browser_and_a_busy_profile_fail_clearly() {
         downloads: None,
     };
     let first = BrowserLane::launch(&opts, None).await.unwrap();
-    // A second browser on the same profile hands over to the first and
-    // exits; Kai must say so, not hang.
+    // The profile lock prevents a second browser from opening the same
+    // profile, including on Chromium builds without profile singletons.
     let t = Instant::now();
     let second = BrowserLane::launch(&opts, None).await;
     assert!(t.elapsed() < Duration::from_secs(20));
     let err = second
         .err()
         .expect("a second browser on one profile must fail");
-    assert!(err.to_string().contains("exited at start"), "{err}");
+    assert!(err.to_string().contains("already in use"), "{err}");
     drop(first);
 
     let lane = BrowserLane::launch(&opts, None).await.unwrap();

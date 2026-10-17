@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kai coordinate calibration</title>
+<style>
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  body { position: relative; background: #f1f1f1; }
+  .shape { position: absolute; width: 64px; height: 64px; }
+  #target { left: calc(75% - 32px); top: calc(60% - 32px); background: #e00000; }
+  #distractor-one { left: 12%; top: 18%; background: #236ec4; }
+  #distractor-two { left: 44%; top: 77%; background: #e0ce29; }
+</style>
+</head>
+<body>
+<div class="shape" id="distractor-one" aria-hidden="true"></div>
+<div class="shape" id="distractor-two" aria-hidden="true"></div>
+<div class="shape" id="target" aria-label="red square"></div>
+</body>
+</html>

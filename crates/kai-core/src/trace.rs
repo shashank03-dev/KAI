@@ -158,12 +158,15 @@ pub struct ExecutorStats {
 /// is optional and omitted when empty, so old traces read unchanged.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CallRecord {
-    /// Hex FNV-1a of the system prompt (its text is in the run's `system.txt`).
+    /// Hex FNV-1a of the system prompt (`systems/<hash>.txt` in the recording).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_system_hash: Option<String>,
     /// The exact user turn sent this step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_user: Option<String>,
+    /// Native function definition supplied with this step, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_spec: Option<serde_json::Value>,
     /// The exact raw reply text, before parsing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_raw: Option<String>,

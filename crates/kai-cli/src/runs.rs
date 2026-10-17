@@ -1,10 +1,40 @@
 //! `kai run` helpers: the browser lane switch (`--browser`, docs/BROWSER.md)
 //! and the training-data recorder (`--record`).
 
-use crate::backend::{self, BackendArg};
+use crate::backend::{self, BackendArg, BackendOpts};
 use crate::bench;
 use kai_core::settings::Settings;
 use std::path::Path;
+use std::process::ExitCode;
+
+/// Send real screenshots to one model and report model-call latency.
+pub async fn smoke(o: &BackendOpts, n: u32) -> anyhow::Result<ExitCode> {
+    let (b, mut s, keys) = super::live_settings(o)?;
+    let _local = local_server(b, &mut s).await?;
+    let (client, _) = s.clients(&keys)?;
+    let screen = kai_os::DesktopPerceptor::new();
+    let obs = kai_core::Perceptor::observe(&screen).await?;
+    let mut times = Vec::new();
+    for i in 0..n.max(1) {
+        let r = client.warm_up(&obs.images).await?;
+        eprintln!(
+            "  call {}: {} ms via {}",
+            i + 1,
+            r.total.as_millis(),
+            r.backend.label()
+        );
+        times.push(r.total.as_millis() as u64);
+    }
+    times.sort_unstable();
+    let p = |q: f64| times[((times.len() - 1) as f64 * q).round() as usize];
+    println!(
+        "p50 {} ms · p95 {} ms over {} calls",
+        p(0.5),
+        p(0.95),
+        times.len()
+    );
+    Ok(ExitCode::SUCCESS)
+}
 
 /// Where `kai run` acts.
 #[derive(clap::Args, Debug, Clone, Default)]

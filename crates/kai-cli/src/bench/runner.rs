@@ -3,11 +3,12 @@
 //! [`Metered`], which counts calls and sums the token usage each reply reports,
 //! because the trace itself does not record tokens.
 
+pub use super::meter::Call;
+use super::meter::Metered;
 use super::record::{self, Recording};
 use super::tasks::{Available, ReplayMode, Task};
 use crate::console::{Printer, TerminalApprover};
 use async_trait::async_trait;
-use kai_core::client::{Backend, ClientError, ModelReply, ModelRequest};
 use kai_core::engine::{Actuator, Engine, NullSink, Perceptor};
 use kai_core::executor::Decider;
 use kai_core::trace::Trace;
@@ -15,58 +16,10 @@ use kai_core::{
     Config, Decision, Element, Grounding, Images, MockClient, ModelClient, Observation, Rect, Role,
     Skill,
 };
-use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-/// One model call as seen from outside the client.
-#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq)]
-pub struct Call {
-    pub ms: u64,
-    pub ok: bool,
-    pub prompt_tokens: Option<u32>,
-    pub completion_tokens: Option<u32>,
-}
-
-/// Wraps a client and records every call into a shared log.
-pub struct Metered<'a> {
-    inner: &'a dyn ModelClient,
-    log: Arc<Mutex<Vec<Call>>>,
-}
-
-impl<'a> Metered<'a> {
-    pub fn new(inner: &'a dyn ModelClient, log: Arc<Mutex<Vec<Call>>>) -> Self {
-        Self { inner, log }
-    }
-}
-
-#[async_trait]
-impl ModelClient for Metered<'_> {
-    fn backend(&self) -> Backend {
-        self.inner.backend()
-    }
-
-    async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError> {
-        let started = Instant::now();
-        let r = self.inner.decide(req).await;
-        let call = match &r {
-            Ok(reply) => Call {
-                ms: reply.total.as_millis() as u64,
-                ok: true,
-                prompt_tokens: reply.prompt_tokens,
-                completion_tokens: reply.completion_tokens,
-            },
-            Err(_) => Call {
-                ms: started.elapsed().as_millis() as u64,
-                ..Default::default()
-            },
-        };
-        self.log.lock().unwrap().push(call);
-        r
-    }
-}
 
 /// What one task produced.
 pub struct Run {
@@ -95,6 +48,8 @@ pub struct MemoryOpts<'a> {
     pub procedures: Option<&'a kai_core::ProcedureStore>,
     /// Runs per task, back to back (at least 1).
     pub repeat: u32,
+    /// Record all attempts and defer score selection to the bench rollout judge.
+    pub rollouts: bool,
 }
 
 impl MemoryOpts<'_> {
@@ -292,6 +247,8 @@ pub struct Live<'a> {
     /// `None` replays each task's recorded replies on the real desktop.
     pub client: Option<&'a dyn ModelClient>,
     pub careful: Option<&'a dyn ModelClient>,
+    /// Independent opt-in screenshot injection monitor.
+    pub injection_monitor: Option<&'a dyn ModelClient>,
     /// `--grounder`: finds described targets on screens without marks.
     pub grounder: Option<kai_core::Grounder<'a>>,
     pub skills: &'a [Skill],
@@ -380,6 +337,7 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         let recorded = MockClient::new(t.mock.clone());
         let fast = Metered::new(live.client.unwrap_or(&recorded), log.clone());
         let careful = live.careful.map(|c| Metered::new(c, log.clone()));
+        let monitor = live.injection_monitor.map(|c| Metered::new(c, log.clone()));
         let engine = Engine {
             grounder: live.grounder,
             client: &fast,
@@ -399,8 +357,12 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
             skills: live.skills,
             config: live.config,
         };
-        let recorder = live.record.filter(|_| pass == 0).and_then(|r| r.start(t));
+        let recorder = live
+            .record
+            .filter(|_| pass == 0 || live.memory.rollouts)
+            .and_then(|r| r.start(t));
         let opts = kai_core::RunOptions {
+            injection_monitor: monitor.as_ref().map(|c| c as &dyn ModelClient),
             recorder: recorder.as_ref(),
             executor: live.executor,
             memory: live.memory.store,
@@ -412,7 +374,17 @@ pub async fn run_live(tasks: &[Task], live: &Live<'_>) -> anyhow::Result<Vec<Run
         };
         let started = Instant::now();
         let trace = match &live.native {
-            Some(cfg) => native_trace(cfg, &t.prompt, &screen, &hands, &kill).await,
+            Some(cfg) => {
+                native_trace(
+                    cfg,
+                    &t.prompt,
+                    &screen,
+                    &hands,
+                    &kill,
+                    monitor.as_ref().map(|c| c as &dyn ModelClient),
+                )
+                .await
+            }
             None => engine.run_with(&t.prompt, opts).await,
         };
         let took = started.elapsed();
@@ -454,6 +426,7 @@ async fn native_trace(
     screen: &kai_os::DesktopPerceptor,
     hands: &kai_os::DesktopActuator,
     kill: &kai_os::KillSwitch,
+    monitor: Option<&dyn ModelClient>,
 ) -> kai_core::Trace {
     let runner = kai_core::cua::CuaRunner {
         config: cfg.clone(),
@@ -465,7 +438,7 @@ async fn native_trace(
     // The bench desktop is a sandbox nobody watches: approve what the
     // native loop always did, never passwords or sensitive typing.
     match runner
-        .run_with_approver(task, Some(&kai_core::cua::Unattended))
+        .run_with_monitor(task, Some(&kai_core::cua::Unattended), monitor)
         .await
     {
         Ok(run) => {

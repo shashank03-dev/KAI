@@ -28,6 +28,40 @@ fn payment_check_ignores_the_thought_and_word_fragments() {
     assert!(is_payment_or_password(&d, &g));
 }
 
+#[test]
+fn shell_tip_filenames_and_window_titles_are_not_payment_transactions() {
+    let g = Grounding::Marks(vec![]);
+    for command in [
+        "echo 101.52 > ~/kai-bench/tip.txt",
+        "wmctrl -l | grep -q 'Tip of the Day' && xdotool key Escape",
+    ] {
+        let d = Decision::parse_checked(
+            &serde_json::json!({
+                "thought": "ordinary local task", "action": "shell", "text": command,
+                "risk": "low"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(!is_payment_or_password(&d, &g), "command: {command}");
+    }
+    let payment = Decision::parse_checked(
+        r#"{"thought":"pay","action":"shell","text":"pay now","risk":"low"}"#,
+    )
+    .unwrap();
+    assert!(is_payment_or_password(&payment, &g));
+    for command in ["tip 5", "sudo tip 10", "echo okay && tip 20"] {
+        let payment = Decision::parse_checked(
+            &serde_json::json!({
+                "thought": "gratuity", "action": "shell", "text": command, "risk": "low"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(is_payment_or_password(&payment, &g), "command: {command}");
+    }
+}
+
 use super::*;
 use crate::element::{Element, Rect};
 

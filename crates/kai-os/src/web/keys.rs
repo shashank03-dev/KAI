@@ -20,6 +20,32 @@ const CTRL: i64 = 2;
 const META: i64 = 4;
 const SHIFT: i64 = 8;
 
+/// CDP's mouse modifier mask and matching key events. The release for each
+/// key carries the mask after that key was removed, in reverse press order.
+pub(super) fn held_modifiers(keys: &[String]) -> (i64, Vec<(Value, Value)>) {
+    let mut mask = 0;
+    let mut events = Vec::with_capacity(keys.len());
+    for name in keys {
+        let (bit, key, code, virtual_key) = match name.as_str() {
+            "alt" => (ALT, "Alt", "AltLeft", 18),
+            "ctrl" => (CTRL, "Control", "ControlLeft", 17),
+            "cmd" => (META, "Meta", "MetaLeft", 91),
+            "shift" => (SHIFT, "Shift", "ShiftLeft", 16),
+            _ => unreachable!("computer-tool validation checked modifiers"),
+        };
+        let mask_before = mask;
+        mask |= bit;
+        let down = json!({"type":"rawKeyDown", "key":key, "code":code,
+            "windowsVirtualKeyCode":virtual_key, "modifiers":mask});
+        let mut up = key_up(&down);
+        up["modifiers"] = json!(mask_before);
+        events.push((down, up));
+    }
+    // CDP's bitmask on a mouse event represents all keys still held.
+    // Releases are sent in reverse order by the caller.
+    (mask, events)
+}
+
 /// `(key, code, windowsVirtualKeyCode, text)` for named keys.
 fn named(k: &str) -> Option<(&'static str, &'static str, i64, Option<&'static str>)> {
     Some(match k {
@@ -196,5 +222,15 @@ mod tests {
         assert!(chord(&s(&["f9"])).is_err());
         assert!(chord(&s(&["enter", "a"])).is_err());
         assert!(chord(&[]).is_err());
+    }
+
+    #[test]
+    fn held_modifiers_keep_the_full_mouse_mask_and_release_in_reverse() {
+        let (mask, events) = held_modifiers(&["shift".into(), "ctrl".into()]);
+        assert_eq!(mask, SHIFT | CTRL);
+        assert_eq!(events[0].0["modifiers"], SHIFT);
+        assert_eq!(events[1].0["modifiers"], SHIFT | CTRL);
+        assert_eq!(events[1].1["modifiers"], SHIFT);
+        assert_eq!(events[0].1["modifiers"], 0);
     }
 }

@@ -1,6 +1,7 @@
 //! Model backends behind one trait. The harness talks only to [`ModelClient`];
 //! swapping vLLM for Gemini for a mock changes nothing above this line.
 
+mod claude;
 mod codex;
 mod failover;
 mod gemini;
@@ -10,8 +11,10 @@ mod llm_verifier;
 mod mock;
 mod openai;
 pub mod stream;
+mod tool_call;
 mod vllm;
 
+pub use claude::ClaudeClient;
 pub use codex::CodexClient;
 pub use failover::FailoverClient;
 pub use gemini::GeminiClient;
@@ -77,6 +80,7 @@ pub enum Backend {
     Local,
     /// A model reached through the Codex CLI and the user's ChatGPT sign-in.
     Codex,
+    Claude,
     Mock,
 }
 
@@ -88,6 +92,7 @@ impl Backend {
             Backend::OpenAi => "OpenAI-compatible (Gateway/OpenAI)",
             Backend::OpenAiNative => "OpenAI computer use (native protocol)",
             Backend::Local => "This computer (local model)",
+            Backend::Claude => "Claude Code (provider sign-in)",
             Backend::Codex => "Codex (ChatGPT sign-in)",
             Backend::Mock => "Mock",
         }
@@ -104,6 +109,8 @@ pub enum ClientError {
     Timeout(Duration),
     #[error("empty or malformed response body")]
     EmptyBody,
+    #[error("incomplete model response: {0}")]
+    Incomplete(String),
     /// The model exists but this account may not use it (e.g. the AI
     /// Gateway's free tier answers 403 for larger models). Not retryable.
     #[error("model not available on this account: {0}")]
@@ -180,6 +187,30 @@ pub trait ModelClient: Send + Sync {
 
     /// One decision call. Returns the raw reply; the caller validates it.
     async fn decide(&self, req: &ModelRequest<'_>) -> Result<ModelReply, ClientError>;
+
+    /// One native OpenAI-compatible function call. Unsupported backends must
+    /// fail closed; pretending a plain text completion is a tool call can
+    /// bypass the native adapter's validation.
+    async fn decide_with_tool(
+        &self,
+        _req: &ModelRequest<'_>,
+        _tool: &serde_json::Value,
+    ) -> Result<ModelReply, ClientError> {
+        Err(ClientError::Incomplete(
+            "native function calling is unavailable on this backend".into(),
+        ))
+    }
+
+    /// Independent candidate decisions for the same observation. Backends
+    /// supporting multi-choice generation may send one request with `n = K`;
+    /// the default works for Gemini, local and other single-choice clients.
+    async fn sample(
+        &self,
+        req: &ModelRequest<'_>,
+        n: usize,
+    ) -> Vec<Result<ModelReply, ClientError>> {
+        futures::future::join_all((0..n).map(|_| self.decide(req))).await
+    }
 
     /// A cheap warm-up (used when the app opens / onboarding "Test" button).
     async fn warm_up(&self, images: &Images) -> Result<ModelReply, ClientError> {

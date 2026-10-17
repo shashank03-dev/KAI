@@ -87,6 +87,8 @@ pub(super) struct Run<'t> {
     pub(super) memo: crate::memo::Memo,
     /// Sites this run may act on without a local safety check.
     pub(super) domains: crate::safety_checks::RunDomains,
+    /// Optional independent screenshot injection classifier, selected by the caller.
+    pub(super) injection_monitor: Option<&'t dyn crate::client::ModelClient>,
     /// The rest of a multi-action turn (`--oai-batch`), the layout it was
     /// planned on, the turn's size and how many of it were handed out.
     pub(super) queued: std::collections::VecDeque<crate::computer::ComputerAction>,
@@ -187,6 +189,7 @@ impl<'t> Run<'t> {
             recoveries: 0,
             memo: Default::default(),
             domains: crate::safety_checks::RunDomains::new(task),
+            injection_monitor: opts.injection_monitor,
             queued: Default::default(),
             queued_on: None,
             queued_turn: (0, 0),

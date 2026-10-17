@@ -93,14 +93,23 @@ fn short(s: &str) -> String {
     }
 }
 
-/// Asks on the terminal. `auto_yes` approves everything except passwords and
-/// payments, which always ask.
+/// Asks on the terminal. `auto_yes` never auto-approves computer actions,
+/// passwords, payments, or local/provider safety checks.
 pub struct TerminalApprover {
     pub auto_yes: bool,
 }
 
 #[async_trait]
 impl Approver for TerminalApprover {
+    async fn approve_safety_check(&self, d: &Decision, g: &Grounding) -> ApprovalChoice {
+        // --yes is for ordinary steps. Safety checks need an actual person
+        // who can see the terminal, even when the run auto-approves actions.
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return ApprovalChoice::Stop;
+        }
+        TerminalApprover { auto_yes: false }.approve(d, g).await
+    }
+
     async fn approve(&self, d: &Decision, g: &Grounding) -> ApprovalChoice {
         if self.auto_yes
             && d.action != kai_core::Action::Computer

@@ -9,6 +9,11 @@ use crate::element::{Grounding, Role};
 use crate::schema::{Action, Decision, Risk};
 use serde::{Deserialize, Serialize};
 
+mod text;
+pub(crate) use text::has_phrase;
+pub use text::mark_is_secure_in_text;
+use text::split_camel;
+
 /// How much the user wants to be asked. Chosen in onboarding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -312,6 +317,15 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
         h.push_str(&el.name);
     }
     let h = h.to_ascii_lowercase();
+    // A shell filename or a quoted window title containing "tip" does not
+    // initiate a gratuity. Preserve approval for an actual `tip` command.
+    let shell_tip_command = h.split([';', '|', '&']).any(|part| {
+        let cmd = part
+            .trim_start()
+            .strip_prefix("sudo ")
+            .unwrap_or(part.trim_start());
+        cmd == "tip" || cmd.starts_with("tip ")
+    });
     [
         "pay",
         "payment",
@@ -337,7 +351,9 @@ pub fn is_payment_or_password(decision: &Decision, grounding: &Grounding) -> boo
         "cvv",
     ]
     .iter()
-    .any(|w| has_phrase(&h, w))
+    .any(|w| {
+        has_phrase(&h, w) && (*w != "tip" || decision.action != Action::Shell || shell_tip_command)
+    })
 }
 
 /// The kind of sensitive data a `type` step would enter, if any.
@@ -420,41 +436,6 @@ fn starts_word(hay: &str, prefix: &str) -> bool {
         } else {
             SUFFIXES.contains(&rest)
         }
-    })
-}
-
-/// `PlaceOrder` → `Place Order`: element names from web pages and apps are
-/// often camel case, and each part is a word.
-fn split_camel(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    let mut prev: Option<char> = None;
-    for c in s.chars() {
-        if c.is_uppercase() && prev.is_some_and(|p| p.is_lowercase() || p.is_ascii_digit()) {
-            out.push(' ');
-        }
-        out.push(c);
-        prev = Some(c);
-    }
-    out
-}
-
-/// `phrase` appears in `hay` on word boundaries.
-pub(crate) fn has_phrase(hay: &str, phrase: &str) -> bool {
-    hay.match_indices(phrase).any(|(i, _)| {
-        let before = hay[..i].chars().next_back();
-        let after = hay[i + phrase.len()..].chars().next();
-        !before.is_some_and(|c| c.is_alphanumeric()) && !after.is_some_and(|c| c.is_alphanumeric())
-    })
-}
-
-/// The text form of [`targets_secure`]: is mark `mark` a password/secure
-/// field in an element list as recorded in a trace (`#3 password "PIN"
-/// (secure)`)? Used where only the recorded text is left (experience memory).
-pub fn mark_is_secure_in_text(elements: &str, mark: u32) -> bool {
-    let prefix = format!("#{mark} ");
-    elements.lines().any(|l| {
-        l.starts_with(&prefix)
-            && (l[prefix.len()..].starts_with("password ") || l.trim_end().ends_with("(secure)"))
     })
 }
 

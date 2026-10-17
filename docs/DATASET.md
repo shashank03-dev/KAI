@@ -13,8 +13,9 @@ failures, export both, and train Gemma on them.
 | `kai run` | off | `kai run --record <dir> "task"` writes `<dir>/<YYYYmmdd-HHMMSS>-<task slug>/`. Not supported with `--team`. |
 | Desktop app | off | setting `record_traces` (`Settings::runs_dir()`, i.e. `<config dir>/Kai/runs/`). |
 
-`bench/runs/` is in `.gitignore`. Recording costs nothing extra on the model
-side: it writes what was already sent and received.
+`bench/runs/` is in `.gitignore`. Recording makes no additional model requests.
+Multi-candidate sampling, judging, and failed parse attempts are aggregated in
+the step's usage, but their separate replies are not yet saved.
 
 In code, recording is one optional field on the per-run options, and the
 `Engine` struct does not change:
@@ -32,10 +33,12 @@ rec.set_verdict(&trace, Some(check_passed), None)?;
 ```
 <root>/<run-id>/
   meta.json      what the run was and how it ended
-  trace.json     kai_core::Trace, steps carry the exact model call
-  system.txt     the system prompt (once per run)
+  trace.json     kai_core::Trace, steps carry the selected/accepted model reply
+  system.txt     first system prompt (legacy-compatible)
+  systems/
+    <hash>.txt         each distinct system prompt, by FNV-1a hash
   frames/
-    step-000.jpg       the exact marked JPEG sent at step 0
+    step-000.jpg       the exact JPEG sent at step 0 (marked or unmarked)
     step-004-crop.jpg  a zoom crop, when one was sent
 ```
 
@@ -83,17 +86,37 @@ out when empty, so old traces still load:
 
 | Field | Meaning |
 |---|---|
-| `prompt_system_hash` | hex FNV-1a (64-bit) of the system prompt; the text is in `system.txt` |
-| `prompt_user` | the exact user turn sent this step |
-| `reply_raw` | the exact raw reply text, before parsing (after a repair retry, the reply that decoded) |
+| `prompt_system_hash` | hex FNV-1a (64-bit) of the system prompt for this step; resolve via `systems/<hash>.txt`; `system.txt` contains the first prompt |
+| `prompt_user` | the user turn sent for the reply that decoded (the retry prompt after repair) |
+| `tool_spec` | the function definition sent in a native tool-calling request; omitted for ordinary text/JSON model calls |
+| `reply_raw` | the raw reply text selected for execution (after a repair retry, the reply that decoded) |
 | `model` | model id that answered (the careful model's id when Kai escalated) |
-| `prompt_tokens`, `completion_tokens` | usage the backend reported (summed over a repair retry) |
-| `screenshot` | `frames/step-NNN.jpg`, the marked JPEG sent; absent on tree-only steps |
+| `prompt_tokens`, `completion_tokens` | usage the backend reported (summed over repair, sampled candidates and an optional judge) |
+| `screenshot` | `frames/step-NNN.jpg`, the model-visible JPEG; marked for ordinary observations, unmarked for native/pixel-frame adapters; absent on tree-only steps |
 | `crop` | `frames/step-NNN-crop.jpg` when a zoom crop was sent |
 
 Steps with no model call (follow-ups from a reply's `then` list, plan-cache
 replays, skill steps) are recorded as steps without these fields. Their
 `backend` label says which kind they are.
+
+When a native model's screenshot size changes, its system prompt can change
+too. The recorder saves each prompt in `systems/` and preserves the corresponding
+unmarked image bytes in `frames/`. The `kai data export` command resolves the
+per-step hash, falling back to `system.txt` for legacy recordings with a
+matching hash. A missing or corrupted changed prompt fails export rather than
+silently attaching the first prompt to the wrong training example. A queued
+action from a prior model response creates no additional model-call row or
+JPEG. For older unhashed calls, a missing `system.txt` also fails export;
+an existing, deliberately empty `system.txt` remains valid. A hashed step
+can still use a valid `systems/<hash>.txt` copy when `system.txt` is absent.
+The `sft`/`all` step exports preserve a recorded `tool_spec` beside the
+system, user, images, and raw response. Native tool-call training examples
+still need their transport-specific tool-choice setting and model/server
+configuration when reconstructed into complete conversations.
+
+The trace format does **not** currently represent each candidate,
+tie-break judge request, or first invalid repair attempt as a separate call;
+tokens and latency can cover multiple requests behind one recorded step.
 
 The trace also has an `errors` list: model-call and observation errors that
 produced no step, for example `malformed reply at step 3: ...` or
@@ -152,7 +175,7 @@ Only steps that have `reply_raw` count:
 {
   "id": "<run-id>/<step>",
   "task": "...", "task_id": "write-note", "step": 0,
-  "system": "<system.txt>",
+  "system": "<systems/prompt_system_hash.txt (or legacy system.txt)>",
   "user": "<prompt_user>",
   "images": ["/abs/path/bench/runs/.../frames/step-000.jpg"],
   "reply": "<reply_raw>",

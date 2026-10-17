@@ -1,7 +1,8 @@
 //! Recording runs as training data (`kai-trajectory/1`, see `docs/DATASET.md`).
 //!
 //! A [`TraceRecorder`] owns one run directory:
-//! - `system.txt` — the system prompt, once;
+//! - `system.txt` — the first model system prompt;
+//! - `systems/<hash>.txt` — every unique prompt referred to by a step;
 //! - `frames/step-NNN.jpg` (+ `-crop.jpg`) — the exact JPEGs sent;
 //! - `trace.json` — the [`Trace`], with each step's model call filled in;
 //! - `meta.json` — [`RunMeta`]: task, outcome, check and failure label.
@@ -85,7 +86,7 @@ pub fn fnv1a_hex(s: &str) -> String {
 
 struct State {
     meta: RunMeta,
-    /// Hash of the system prompt already written.
+    /// Hash of the first system prompt written to `system.txt`.
     system_hash: Option<String>,
     /// Model id used for steps answered by the careful client.
     careful_model: Option<String>,
@@ -103,6 +104,7 @@ impl TraceRecorder {
     pub fn new(dir: impl Into<PathBuf>, meta: RunMeta) -> io::Result<Self> {
         let dir = dir.into();
         std::fs::create_dir_all(dir.join("frames"))?;
+        std::fs::create_dir_all(dir.join("systems"))?;
         Ok(Self {
             dir,
             state: Mutex::new(State {
@@ -133,15 +135,22 @@ impl TraceRecorder {
         f(&mut self.state.lock().unwrap().meta);
     }
 
-    /// Write `system.txt` (first call only) and return the prompt's hash.
+    /// Keep the first prompt in `system.txt`, and each unique prompt under its
+    /// hash. Dynamic screenshot sizes may produce different prompts per step.
     pub fn record_system(&self, system: &str) -> String {
         let hash = fnv1a_hex(system);
         let mut st = self.state.lock().unwrap();
-        if st.system_hash.as_deref() != Some(hash.as_str()) {
+        if st.system_hash.is_none() {
             if let Err(e) = std::fs::write(self.dir.join("system.txt"), system) {
                 log::warn!("recorder: could not write system.txt: {e}");
             }
             st.system_hash = Some(hash.clone());
+        }
+        let path = self.dir.join("systems").join(format!("{hash}.txt"));
+        if !path.exists()
+            && let Err(e) = std::fs::write(&path, system)
+        {
+            log::warn!("recorder: could not write {}: {e}", path.display());
         }
         hash
     }
@@ -240,6 +249,43 @@ pub struct RecordedRun {
     pub system: String,
 }
 
+impl RecordedRun {
+    /// Resolve the prompt associated with this step. Older recordings only
+    /// have `system.txt`; newer runs retain each distinct prompt by hash.
+    /// A missing or corrupt changed prompt must never become a mislabeled
+    /// supervised-training example.
+    pub fn system_for_step(&self, hash: Option<&str>) -> anyhow::Result<String> {
+        let Some(hash) = hash else {
+            anyhow::ensure!(
+                self.dir.join("system.txt").is_file(),
+                "recorded run {} has no system.txt for an unhashed model call",
+                self.dir.display()
+            );
+            return Ok(self.system.clone());
+        };
+        anyhow::ensure!(
+            hash.len() == 16 && hash.bytes().all(|c| c.is_ascii_hexdigit()),
+            "invalid recorded system prompt hash {hash:?}"
+        );
+        let system = if hash == fnv1a_hex(&self.system) && self.dir.join("system.txt").is_file() {
+            self.system.clone()
+        } else {
+            std::fs::read_to_string(self.dir.join(format!("systems/{hash}.txt"))).map_err(|e| {
+                anyhow::anyhow!(
+                    "cannot read system prompt {hash} in {}: {e}",
+                    self.dir.display()
+                )
+            })?
+        };
+        anyhow::ensure!(
+            fnv1a_hex(&system) == hash,
+            "recorded system prompt {hash} in {} has mismatched contents",
+            self.dir.display()
+        );
+        Ok(system)
+    }
+}
+
 /// Load every run under `root` (any depth): directories that hold both
 /// `meta.json` and `trace.json`. Sorted by path; unreadable runs are skipped
 /// with a warning.
@@ -299,6 +345,79 @@ mod tests {
     }
 
     #[test]
+    fn missing_unhashed_system_prompt_is_not_exported_as_empty() {
+        let root = tmp("missing-system");
+        std::fs::create_dir_all(&root).unwrap();
+        let run = RecordedRun {
+            dir: root.clone(),
+            meta: RunMeta::new("test", "task", "bench", "mock", "model"),
+            trace: Trace::new("task"),
+            system: String::new(),
+        };
+
+        assert!(run.system_for_step(None).is_err());
+        // A matching hash is no substitute for the prompt being present.
+        assert!(run.system_for_step(Some(&fnv1a_hex(""))).is_err());
+
+        // An intentionally empty system prompt is still a valid recording.
+        std::fs::write(root.join("system.txt"), "").unwrap();
+        assert_eq!(run.system_for_step(None).unwrap(), "");
+        assert_eq!(run.system_for_step(Some(&fnv1a_hex(""))).unwrap(), "");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolves_legacy_and_hashed_prompts_but_rejects_corruption() {
+        let root = tmp("resolve-system");
+        std::fs::create_dir_all(root.join("systems")).unwrap();
+        std::fs::write(root.join("system.txt"), "legacy prompt").unwrap();
+        let run = RecordedRun {
+            dir: root.clone(),
+            meta: RunMeta::new("test", "task", "bench", "mock", "model"),
+            trace: Trace::new("task"),
+            system: "legacy prompt".into(),
+        };
+
+        let first_hash = fnv1a_hex("legacy prompt");
+        assert_eq!(run.system_for_step(None).unwrap(), "legacy prompt");
+        assert_eq!(
+            run.system_for_step(Some(&first_hash)).unwrap(),
+            "legacy prompt"
+        );
+        for invalid in [
+            "",
+            "../../../etc/passwd",
+            "0123456789abcdef0",
+            "not_a_valid_hash",
+        ] {
+            assert!(run.system_for_step(Some(invalid)).is_err(), "{invalid}");
+        }
+
+        let updated = "new native screenshot size";
+        let changed_hash = fnv1a_hex(updated);
+        let changed_path = root.join(format!("systems/{changed_hash}.txt"));
+        assert!(run.system_for_step(Some(&changed_hash)).is_err());
+        std::fs::write(&changed_path, "corrupted").unwrap();
+        assert!(run.system_for_step(Some(&changed_hash)).is_err());
+        std::fs::write(&changed_path, updated).unwrap();
+        assert_eq!(run.system_for_step(Some(&changed_hash)).unwrap(), updated);
+
+        // A valid hash-indexed copy can recover a missing legacy shortcut.
+        std::fs::remove_file(root.join("system.txt")).unwrap();
+        assert!(run.system_for_step(Some(&first_hash)).is_err());
+        std::fs::write(
+            root.join(format!("systems/{first_hash}.txt")),
+            "legacy prompt",
+        )
+        .unwrap();
+        assert_eq!(
+            run.system_for_step(Some(&first_hash)).unwrap(),
+            "legacy prompt"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn writes_frames_system_trace_and_meta() {
         let root = tmp("write");
         let dir = root.join("batch").join("t1");
@@ -308,6 +427,20 @@ mod tests {
         let h = rec.record_system("SYSTEM");
         assert_eq!(h, fnv1a_hex("SYSTEM"));
         assert_eq!(h.len(), 16);
+        let changed = rec.record_system("SYSTEM with a new frame size");
+        assert_ne!(h, changed);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("system.txt")).unwrap(),
+            "SYSTEM"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(format!("systems/{h}.txt"))).unwrap(),
+            "SYSTEM"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(format!("systems/{changed}.txt"))).unwrap(),
+            "SYSTEM with a new frame size"
+        );
         let imgs = Images {
             screenshot_jpeg: vec![0xff, 0xd8, 0xff, 0xd9],
             crop_jpeg: Some(vec![1, 2, 3]),

@@ -106,30 +106,43 @@ impl BrowserLane {
         y: f64,
         button: &str,
         clicks: u32,
+        modifiers: i64,
     ) -> anyhow::Result<()> {
         self.page(
             "Input.dispatchMouseEvent",
-            mouse_event(kind, x, y, button, clicks),
+            mouse_event_mods(kind, x, y, button, clicks, modifiers),
         )
         .await
         .map(drop)
     }
 
     pub(super) async fn click(&self, at: (f64, f64), button: &str, k: u32) -> anyhow::Result<()> {
+        self.click_modified(at, button, k, 0).await
+    }
+
+    pub(super) async fn click_modified(
+        &self,
+        at: (f64, f64),
+        button: &str,
+        k: u32,
+        modifiers: i64,
+    ) -> anyhow::Result<()> {
         let (x, y) = at;
         self.file_chooser.store(false, Ordering::SeqCst);
-        self.mouse("mouseMoved", x, y, "none", 0).await?;
+        self.mouse("mouseMoved", x, y, "none", 0, modifiers).await?;
         for n in 1..=k {
             let release = super::release::Release::new(
                 &self.cdp,
                 &self.input_poisoned,
                 "Input.dispatchMouseEvent",
-                mouse_event("mouseReleased", x, y, button, n),
+                mouse_event_mods("mouseReleased", x, y, button, n, modifiers),
                 self.current().session,
             );
             super::release::guarded(release, async {
-                self.mouse("mousePressed", x, y, button, n).await?;
-                self.mouse("mouseReleased", x, y, button, n).await
+                self.mouse("mousePressed", x, y, button, n, modifiers)
+                    .await?;
+                self.mouse("mouseReleased", x, y, button, n, modifiers)
+                    .await
             })
             .await?;
         }
@@ -245,14 +258,25 @@ impl BrowserLane {
 /// One `Input.dispatchMouseEvent`. `buttons` is the mask of buttons held
 /// once the event happened, as Chromium's own DevTools sends it: pages that
 /// read it ignore a right press that claims no button is down.
+#[cfg(test)]
 fn mouse_event(kind: &str, x: f64, y: f64, button: &str, clicks: u32) -> Value {
+    mouse_event_mods(kind, x, y, button, clicks, 0)
+}
+fn mouse_event_mods(
+    kind: &str,
+    x: f64,
+    y: f64,
+    button: &str,
+    clicks: u32,
+    modifiers: i64,
+) -> Value {
     let held = match (kind, button) {
         ("mousePressed", "left") => 1,
         ("mousePressed", "right") => 2,
         ("mousePressed", "middle") => 4,
         _ => 0,
     };
-    json!({"type": kind, "x": x, "y": y, "button": button, "buttons": held, "clickCount": clicks})
+    json!({"type": kind, "x": x, "y": y, "button": button, "buttons": held, "clickCount": clicks, "modifiers": modifiers})
 }
 
 /// The option's own text from its mark name (`Billing (option)`).
@@ -416,23 +440,6 @@ impl Actuator for BrowserLane {
             Some(desktop) => desktop.shell(cmd).await,
             None => anyhow::bail!("the terminal is not available in browser-only mode"),
         }
-    }
-}
-
-impl BrowserLane {
-    /// Whether the focused element is a native `<select>`.
-    async fn focused_select(&self) -> Option<bool> {
-        let r = self
-            .page(
-                "Runtime.evaluate",
-                json!({
-                    "expression": "document.activeElement && document.activeElement.tagName === 'SELECT'",
-                    "returnByValue": true,
-                }),
-            )
-            .await
-            .ok()?;
-        r["result"]["value"].as_bool()
     }
 }
 

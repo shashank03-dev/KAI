@@ -202,6 +202,46 @@ async fn a_two_action_turn_costs_one_model_call() {
     assert!(model.seen()[0].system.contains("at most 3"));
 }
 
+#[tokio::test]
+async fn a_queued_action_does_not_record_a_fictitious_model_call() {
+    let model = Counting::new(&[TWO, DONE]);
+    let screen = Screen::marks();
+    let hands = Hands::default();
+    let (approve, stop) = (approve_all(), flag());
+    let mut e = engine(&model, &screen, &hands, &approve, &stop);
+    e.config.computer_tools_v1 = true;
+    e.config.oai_contract = Some(CoordFrame::Marks);
+    e.config.oai_batch = 3;
+    let root = std::env::temp_dir().join(format!(
+        "kai-queued-trace-{}-{}",
+        std::process::id(),
+        jiff::Timestamp::now().as_nanosecond()
+    ));
+    let recorder = TraceRecorder::new(
+        &root,
+        RunMeta::new("queued", "Open File then Edit", "test", "mock", "contract"),
+    )
+    .unwrap();
+    let trace = e
+        .run_with(
+            "Open File then Edit",
+            RunOptions {
+                recorder: Some(&recorder),
+                ..RunOptions::default()
+            },
+        )
+        .await;
+    assert_eq!(trace.outcome, Some(Outcome::Success));
+    assert_eq!(model.seen().len(), 2);
+    assert_eq!(trace.steps.len(), 3);
+    assert!(trace.steps[0].call.reply_raw.is_some());
+    assert!(trace.steps[2].call.reply_raw.is_some());
+    assert_eq!(trace.steps[1].call, kai_core::trace::CallRecord::default());
+    assert_eq!(trace.steps[1].screenshot, None);
+    assert!(!root.join("frames/step-001.jpg").exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// After the first click, element #1 has a new name: a different layout.
 struct Shifting<'a>(&'a Screen, &'a Hands);
 #[async_trait]

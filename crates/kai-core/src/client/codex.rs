@@ -15,7 +15,6 @@ use tokio::process::Command;
 
 /// The binary (`KAI_CODEX_BIN`, default `codex` on PATH) and its reasoning
 /// effort (`KAI_CODEX_EFFORT`, default `low`: Kai asks for one step).
-const BIN_ENV: &str = "KAI_CODEX_BIN";
 const EFFORT_ENV: &str = "KAI_CODEX_EFFORT";
 const TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -36,7 +35,9 @@ impl CodexClient {
         };
         Self {
             model: model.to_string(),
-            bin: env(BIN_ENV, "codex"),
+            bin: crate::connections::provider_binary("codex")
+                .to_string_lossy()
+                .into_owned(),
             effort: env(EFFORT_ENV, "low"),
             timeout: TIMEOUT,
         }
@@ -56,6 +57,10 @@ impl CodexClient {
             &self.model,
             "-c",
             &format!("model_reasoning_effort=\"{}\"", self.effort),
+            "-c",
+            "features.shell_tool=false",
+            "-c",
+            "features.unified_exec=false",
             "--output-schema",
         ]
         .iter()
@@ -67,6 +72,10 @@ impl CodexClient {
         if image {
             a.push("-i".into());
             a.push(dir.join("screen.jpg").display().to_string());
+            if dir.join("crop.jpg").is_file() {
+                a.push("-i".into());
+                a.push(dir.join("crop.jpg").display().to_string());
+            }
         }
         a.push("-".into());
         a
@@ -74,9 +83,9 @@ impl CodexClient {
 }
 
 /// A fresh, empty working folder for one call, removed when dropped.
-struct Scratch(PathBuf);
+pub(super) struct Scratch(pub(super) PathBuf);
 impl Scratch {
-    fn new() -> std::io::Result<Self> {
+    pub(super) fn new() -> std::io::Result<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         for _ in 0..16 {
             let dir = std::env::temp_dir().join(format!(
@@ -152,6 +161,9 @@ impl ModelClient for CodexClient {
         let image = !req.images.screenshot_jpeg.is_empty();
         if image {
             std::fs::write(dir.0.join("screen.jpg"), &req.images.screenshot_jpeg).map_err(io)?;
+        }
+        if let Some(crop) = req.images.crop_jpeg.as_ref().filter(|c| !c.is_empty()) {
+            std::fs::write(dir.0.join("crop.jpg"), crop).map_err(io)?;
         }
         let prompt = format!(
             "{}\n\n{}\n\nDo not run commands or read files: answer only from the screenshot and \

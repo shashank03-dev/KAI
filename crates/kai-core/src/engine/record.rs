@@ -2,7 +2,7 @@
 //! and got back, attached to the step it produced.
 
 use super::{Engine, Run, RunOptions};
-use crate::client::{ClientError, ModelClient, ModelReply, ModelRequest};
+use crate::client::{ClientError, Images, ModelClient, ModelReply, ModelRequest};
 use crate::ports::{EngineEvent, Observation};
 use crate::reply::StepReply;
 use crate::trace::{CallRecord, Outcome};
@@ -23,6 +23,18 @@ pub(super) struct Decided {
     pub completion_tokens: Option<u32>,
     /// Later actions of the same turn (`--oai-batch`).
     pub queued: Vec<crate::computer::ComputerAction>,
+    /// False for an action already returned in an earlier model response.
+    pub model_called: bool,
+    /// Captured only when tracing: the request that produced `raw` can use
+    /// a native system prompt and an image different from the observation.
+    pub recorded_request: Option<RecordedRequest>,
+}
+
+pub(super) struct RecordedRequest {
+    system: String,
+    user: String,
+    images: Images,
+    tool_spec: Option<serde_json::Value>,
 }
 
 impl Decided {
@@ -35,7 +47,38 @@ impl Decided {
             prompt_tokens: m.prompt_tokens,
             completion_tokens: m.completion_tokens,
             queued: Vec::new(),
+            model_called: true,
+            recorded_request: None,
         }
+    }
+
+    pub fn record_request(self, req: &ModelRequest<'_>, recording: bool) -> Self {
+        self.record_details(req.system, req.user_text, req.images, recording)
+    }
+
+    pub fn record_details(
+        mut self,
+        system: &str,
+        user: &str,
+        images: &Images,
+        recording: bool,
+    ) -> Self {
+        if recording {
+            self.recorded_request = Some(RecordedRequest {
+                system: system.to_owned(),
+                user: user.to_owned(),
+                images: images.clone(),
+                tool_spec: None,
+            });
+        }
+        self
+    }
+
+    pub fn record_tool_spec(mut self, tool: Option<&serde_json::Value>) -> Self {
+        if let Some(request) = self.recorded_request.as_mut() {
+            request.tool_spec = tool.cloned();
+        }
+        self
     }
 
     /// Fold in an earlier call of the same step (the one that failed to parse).
@@ -97,12 +140,21 @@ impl Engine<'_> {
         if let Some(sc) = obs.screen {
             rec.note_screen(sc.w, sc.h);
         }
-        let (shot, crop) = rec.record_frames(step, &obs.images);
+        if !d.model_called {
+            // The action was queued by an earlier response; there is no
+            // request, reply, or model-visible screenshot for this step.
+            return Some((None, CallRecord::default()));
+        }
+        let request = d.recorded_request.as_ref();
+        let (shot, crop) = rec.record_frames(step, request.map_or(&obs.images, |req| &req.images));
         Some((
             shot,
             CallRecord {
-                prompt_system_hash: r.system_hash.clone(),
-                prompt_user: Some(user_text.to_string()),
+                prompt_system_hash: request
+                    .map(|req| rec.record_system(&req.system))
+                    .or_else(|| r.system_hash.clone()),
+                prompt_user: Some(request.map_or(user_text, |req| &req.user).to_string()),
+                tool_spec: request.and_then(|req| req.tool_spec.clone()),
                 reply_raw: Some(d.raw.clone()),
                 model: rec.model_for(careful),
                 prompt_tokens: d.prompt_tokens,
@@ -117,6 +169,7 @@ pub(super) struct DecisionObservation<'a> {
     pub obs: &'a Observation,
     pub id: u64,
     pub result: Option<&'a crate::computer::ToolResult>,
+    pub recording: bool,
 }
 impl Engine<'_> {
     /// Returns the reply plus the model wall time and time-to-first-token.
@@ -129,6 +182,15 @@ impl Engine<'_> {
         schema: &serde_json::Value,
         max_tokens: u32,
     ) -> anyhow::Result<Decided> {
+        if let Some(native) = self.config.native_model {
+            anyhow::ensure!(
+                self.config.oai_contract.is_none(),
+                "native and OpenAI contracts are mutually exclusive"
+            );
+            return self
+                .decide_native(client, native, user_text, observed, max_tokens)
+                .await;
+        }
         if let Some(frame) = self.config.oai_contract {
             return self
                 .decide_oai(client, frame, user_text, observed, max_tokens)

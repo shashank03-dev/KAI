@@ -15,22 +15,30 @@ computer-use models without training them during a run? And can an open model
 `computer` tool contract (a `computer_call` with `actions[]`, screenshot
 outputs, safety checks) to open models and runs it through the same harness?
 
-**Implementation status (2026-10-16).** Phases 1 and 2 are built and tested
-with fixtures. Phase 3 has a planner/grounder split on grid screens:
-`--grounder` and `--grounder-frame` use a second model call to locate a
-described target. Grounded clicks and drags always ask for approval because
-grid observations cannot establish the target's accessibility identity.
-Phase 4 has `--step-candidates` with parallel samples and a deterministic
-cluster vote; it does not yet have a model judge, an `n=K` vLLM request, or
-bench-only trajectory rollouts. Phase 5 has opt-in off-task and sensitive-site
-checks; it does not have the proposed screenshot injection monitor. The
-`--oai-batch` path handles multiple actions with a fresh observation between
-them. A model's `mark` stays an accessibility element target. The browser
-lane lacks drag and held modifiers. The per-model catalog calibration fixture
-and Phase 6 remain unbuilt. Unit and engine tests cover these implemented
-paths; no two-runs-per-side accuracy or latency measurement exists yet.
-OpenAI native API wire parity still needs an `OPENAI_API_KEY`, while the Codex
-CLI backend uses the user's ChatGPT sign-in for limited comparison runs.
+**Implementation status (updated 2026-10-16).** Phases 1 and 2 include the
+native Responses protocol parser/serializer, safety acknowledgement, and
+bounded incomplete-response retry; their wire tests are local fixtures.
+Phase 3 has a planner/grounder split on grid screens: `--grounder` and
+`--grounder-frame` use a second model call to locate a described target.
+Grounded clicks and drags require approval when a grid observation cannot
+establish accessibility identity. Phase 4 now includes `--step-candidates`,
+pairwise-consistent cluster voting, optional model tie judging, vLLM `n=K`,
+and bench-only trajectory rollouts guarded by disposable-environment and
+interactive-approval requirements (see [Phase 4](PHASE4_BEST_OF_K.md)).
+Phase 5 has opt-in local domain checks, watch-mode confirmations and a
+screenshot injection monitor; native OpenAI calls can merge local and provider
+safety checks by code (see [Phase 5](PHASE5_SAFETY_MONITOR.md) and
+[native protocol](CUA_NATIVE_PROTOCOL.md)). The `--oai-batch` path refreshes
+the observation between actions; `mark` remains an accessibility element.
+Browser drag and held modifiers have local acceptance tests. The calibration
+fixture and scorer are implemented, but **no real Holo3.1 coordinate
+calibration** is complete, and Phase 6 remains unbuilt. Two real Gemma 4
+baseline trials passed their checked task; two contract trials stopped for
+required human approvals, rendering that A/B comparison **invalid** (see
+[calibration and experiments](CALIBRATION.md)). No valid two-runs-per-side
+accuracy improvement has been measured, so experimental flags remain off by
+default. Native OpenAI API validation still needs an `OPENAI_API_KEY` and a
+compatible GA computer-use model.
 
 Labels follow the earlier research docs: **[Vendor]** (the vendor's own docs or
 claims), **[Paper]**, **[Indep.]**, **[SDK]** (code generated from the vendor's

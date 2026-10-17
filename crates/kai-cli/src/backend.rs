@@ -36,6 +36,31 @@ pub enum BackendArg {
     Replay,
 }
 
+/// Reasoning is opt-in because model families support different effort levels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum CuaReasoningArg {
+    None,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl From<CuaReasoningArg> for kai_core::cua::ReasoningEffort {
+    fn from(value: CuaReasoningArg) -> Self {
+        use kai_core::cua::ReasoningEffort as R;
+        match value {
+            CuaReasoningArg::None => R::None,
+            CuaReasoningArg::Low => R::Low,
+            CuaReasoningArg::Medium => R::Medium,
+            CuaReasoningArg::High => R::High,
+            CuaReasoningArg::Xhigh => R::Xhigh,
+            CuaReasoningArg::Max => R::Max,
+        }
+    }
+}
+
 impl BackendArg {
     pub fn name(self) -> &'static str {
         match self {
@@ -67,10 +92,17 @@ pub struct BackendOpts {
     /// Used for both the fast and the careful slot.
     #[arg(long)]
     pub model: Option<String>,
+    /// Optional Responses reasoning effort for the GA OpenAI computer tool.
+    #[arg(long, value_enum)]
+    pub cua_reasoning_effort: Option<CuaReasoningArg>,
     /// A grounding model for screens without marks on the OpenAI contract:
     /// the planner describes a target and this model finds it.
     #[arg(long, value_name = "MODEL")]
     pub grounder: Option<String>,
+    /// Opt-in independent model for screenshot prompt-injection screening.
+    /// Uses the selected backend and credentials; off unless specified.
+    #[arg(long, value_name = "MODEL")]
+    pub injection_monitor: Option<String>,
     /// The grounder's coordinate frame (default: its catalog entry).
     #[arg(long, value_name = "FRAME", value_parser = grounder_frame)]
     pub grounder_frame: Option<kai_core::oai_contract::CoordFrame>,
@@ -193,6 +225,16 @@ pub fn config(s: &Settings, ab: &Ab) -> anyhow::Result<(Config, bool)> {
         ..Config::default()
     };
     let applied = apply_ab(&mut c, ab)?;
+    if ab.native_model.is_none() && ab.oai_contract.is_none() {
+        c.native_model = s.native_model;
+        if c.native_model.is_some() {
+            anyhow::ensure!(
+                s.oai_contract.is_none(),
+                "settings cannot select both native_model and oai_contract"
+            );
+            c.computer_tools_v1 = true;
+        }
+    }
     if ab.oai_contract == Some(crate::ab::OaiFrame::Auto) {
         let model = match s.backend {
             BackendChoice::Local => &s.local_model,
@@ -218,6 +260,7 @@ pub fn native_config(
     keys: &Keys,
     model: Option<&str>,
     config: &Config,
+    reasoning: Option<CuaReasoningArg>,
 ) -> anyhow::Result<kai_core::cua::CuaConfig> {
     let key = keys.openai.clone().ok_or_else(|| {
         anyhow::anyhow!(
@@ -228,9 +271,17 @@ pub fn native_config(
         !config.computer_tools_v1 || model.is_some(),
         "the current computer protocol needs an explicit compatible --model (the catalog is not auto-selected)"
     );
+    anyhow::ensure!(
+        reasoning.is_none()
+            || (config.computer_tools_v1
+                && model.is_some_and(|m| !m.contains("computer-use-preview"))),
+        "--cua-reasoning-effort needs --computer-tools-v1 and a GA --model (preview does not support it)"
+    );
     let mut c = kai_core::cua::CuaConfig {
         api_key: Some(key),
         computer_tools_v1: config.computer_tools_v1,
+        reasoning_effort: reasoning.map(Into::into),
+        local_safety_checks: config.local_safety_checks,
         max_steps: config.max_steps,
         max_time: config.max_time,
         ..Default::default()
@@ -337,13 +388,22 @@ mod tests {
         assert!(e.contains("kai key gateway") && e.contains("AI_GATEWAY_API_KEY"));
         assert!(require_key(BackendArg::Mock, &keys).is_ok());
         let c = Config::default();
-        let e = native_config(&keys, None, &c).unwrap_err().to_string();
+        let e = native_config(&keys, None, &c, None)
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("OPENAI_API_KEY"));
         let keys = Keys {
             openai: Some("x".into()),
             ..Default::default()
         };
-        let n = native_config(&keys, Some("openai/computer-use-preview"), &c).unwrap();
+        let n = native_config(&keys, Some("openai/computer-use-preview"), &c, None).unwrap();
         assert_eq!(n.model, "computer-use-preview");
+        assert!(!n.local_safety_checks);
+        let cfg = Config {
+            local_safety_checks: true,
+            ..Config::default()
+        };
+        let n = native_config(&keys, Some("openai/computer-use-preview"), &cfg, None).unwrap();
+        assert!(n.local_safety_checks);
     }
 }

@@ -32,6 +32,8 @@ pub struct StepRow {
     pub step: u32,
     pub system: String,
     pub user: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_spec: Option<serde_json::Value>,
     pub images: Vec<String>,
     pub reply: String,
     pub decision: kai_core::Decision,
@@ -79,25 +81,27 @@ fn per_os(p: &PerOs) -> Option<PerOsRow> {
 }
 
 /// The step rows of one run (only steps that carry a model call).
-pub fn step_rows(r: &RecordedRun) -> Vec<StepRow> {
+pub fn step_rows(r: &RecordedRun) -> anyhow::Result<Vec<StepRow>> {
     let abs = |rel: &str| r.dir.join(rel).display().to_string();
     r.trace
         .steps
         .iter()
-        .filter_map(|s| {
-            let reply = s.call.reply_raw.clone()?;
+        .filter(|s| s.call.reply_raw.is_some())
+        .map(|s| {
+            let reply = s.call.reply_raw.clone().unwrap();
             let images = [s.screenshot.as_deref(), s.call.crop.as_deref()]
                 .into_iter()
                 .flatten()
                 .map(abs)
                 .collect();
-            Some(StepRow {
+            Ok(StepRow {
                 id: format!("{}/{}", r.meta.run_id, s.index),
                 task: r.meta.task.clone(),
                 task_id: r.meta.task_id.clone(),
                 step: s.index,
-                system: r.system.clone(),
+                system: r.system_for_step(s.call.prompt_system_hash.as_deref())?,
                 user: s.call.prompt_user.clone().unwrap_or_default(),
+                tool_spec: s.call.tool_spec.clone(),
                 images,
                 reply,
                 decision: s.decision.clone(),
@@ -203,7 +207,7 @@ pub fn export(
         }
     } else {
         for r in &kept {
-            for row in step_rows(r) {
+            for row in step_rows(r)? {
                 lines.push(serde_json::to_string(&row)?);
             }
         }

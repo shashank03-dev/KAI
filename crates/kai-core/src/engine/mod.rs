@@ -34,8 +34,10 @@ mod execute;
 pub(crate) mod fresh;
 mod gate;
 mod human;
+mod injection_monitor;
 mod memory;
 mod model_step;
+mod native;
 mod oai;
 mod observe;
 mod privacy;
@@ -99,6 +101,9 @@ pub struct Grounder<'a> {
 /// Per-run extras that are not collaborators. `Default` is a plain run.
 #[derive(Clone, Copy, Default)]
 pub struct RunOptions<'a> {
+    /// Separate, explicitly supplied screenshot injection classifier.
+    /// `None` (default) leaves Phase 5b off with zero model calls.
+    pub injection_monitor: Option<&'a dyn ModelClient>,
     /// Replay a cached deterministic prefix for a known task, and record the
     /// prefix of this run if it succeeds.
     pub plan_cache: Option<&'a PlanCache>,
@@ -187,7 +192,14 @@ impl Engine<'_> {
         }
         let deadline = Instant::now() + self.config.max_time;
         r.deadline = deadline;
-        r.system_hash = r.recorder.map(|rec| rec.record_system(&system));
+        // Native/contract clients construct a different prompt per frame.
+        // Record their actual prompt only after the model has answered.
+        r.system_hash = if self.config.native_model.is_none() && self.config.oai_contract.is_none()
+        {
+            r.recorder.map(|rec| rec.record_system(&system))
+        } else {
+            None
+        };
 
         // A skill's deterministic steps, a stored procedure, or a cached
         // plan's prefix run first with no model call.

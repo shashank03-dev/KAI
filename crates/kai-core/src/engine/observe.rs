@@ -167,6 +167,7 @@ impl Engine<'_> {
     fn want_tree_only(&self, r: &Run<'_>) -> bool {
         let c = &self.config;
         c.tree_only
+            && c.native_model.is_none()
             && !r.force_full
             && r.last_rich
             && r.failure_streak == 0

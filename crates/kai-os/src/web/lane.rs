@@ -146,6 +146,9 @@ pub struct BrowserLane {
     pub(super) last_dialog: Mutex<Vec<kai_core::Element>>,
     /// The native dropdown whose options are listed as marks.
     pub(super) open_select: Mutex<Option<DomRef>>,
+    /// Exclusive ownership of this browser profile until the browser closes.
+    /// Keep after `cdp` so the child exits before the lock is released.
+    _profile_lock: std::fs::File,
 }
 
 impl BrowserLane {
@@ -159,6 +162,25 @@ impl BrowserLane {
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&opts.profile, std::fs::Permissions::from_mode(0o700))?;
+        }
+        // Some Chromium builds (notably Playwright's headless shell) allow
+        // simultaneous processes with the same profile. Require exclusive
+        // ownership ourselves, including across separate Kai processes.
+        // An OS-managed file lock is released on process exit or failed launch.
+        let profile_lock = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(opts.profile.join(".kai-profile.lock"))?;
+        match profile_lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                anyhow::bail!(
+                    "browser profile {} is already in use by another Kai browser",
+                    opts.profile.display()
+                );
+            }
+            Err(e) => return Err(e.into()),
         }
         let cdp = Cdp::launch(&opts.browser, &args(opts))?;
         let targets = match cdp.call("Target.getTargets", json!({}), None).await {
@@ -205,6 +227,7 @@ impl BrowserLane {
             input_poisoned: AtomicBool::new(false),
             last_dialog: Mutex::default(),
             open_select: Mutex::default(),
+            _profile_lock: profile_lock,
         })
     }
 
