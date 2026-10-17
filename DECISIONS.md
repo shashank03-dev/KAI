@@ -1065,3 +1065,22 @@ Research: `docs/RESEARCH_2026_10_OPENAI_PARITY.md` (sources dated 2026-10-16).
   splash window is removed at start (the 18:44 build logs them too).
 - **Not run:** live Codex/Claude sign-in, catalog fetches against real
   accounts, and the GPT-5.6 Luna computer-use evaluation (deferred).
+
+## Stack research and kai-ui (2026-10-17)
+
+- **Stack kept.** Research across agent architectures, grounding results,
+  macOS/Linux OS APIs, UI frameworks and local inference
+  (`docs/RESEARCH_2026_10_STACK.md`) found Kai's Rust engine, accessibility
+  marks plus screenshot, the llama.cpp sidecar and the CDP lane right for a
+  Mac-first, open-model agent. What blocks the Mac is the OS layer: ad hoc
+  signing drops permissions on every rebuild, and xcap captures through
+  `CGWindowListCreateImage`, obsoleted in the macOS 15 SDK
+  (ScreenCaptureKit next). Linux needs Wayland portal capture and libei input.
+- **Tauri, Electron and SwiftUI rejected** for the UI: WebKitGTK failures on
+  Linux and a TypeScript UI over IPC; size and a sidecar; no Linux UI.
+- **Ely is replaced by `crates/kai-ui`, written from scratch** on GPUI
+  (owner's call; design and plan in `docs/UI_KIT.md`). Ely is 251k unowned,
+  unlinted lines with no upstream and caused the one recorded Mac crash;
+  Kai uses about 100 of its types. Look: ChatGPT × Raycast × Linear on
+  Kai's graphite/ember identity. `vendor/` is deleted when the last page
+  moves.
