@@ -39,10 +39,13 @@ pub const PLAN_RULE: &str = "\n- When the steps after this one are predictable, 
 open_url, open_app, shell or done; name elements in words, not numbers). An \
 executor carries them out and calls you back on any doubt.";
 
-/// Added for eyes on a Mac (`Perceptor::mac`): models default to `ctrl`.
+/// Added for eyes on a Mac (`Perceptor::mac`): models default to `ctrl`,
+/// Linux and Windows app names, and GNU tool flags.
 pub const MAC_RULE: &str = "\n- This computer is a Mac: shortcuts use `cmd` where \
 Windows and Linux use `ctrl` (cmd+c, cmd+v, cmd+s, cmd+l, cmd+w, cmd+q); \
-cmd+space opens Spotlight.";
+cmd+space opens Spotlight. Apps have their Mac names (Finder, TextEdit, \
+System Settings, Terminal). Shell tools are the BSD ones: no GNU-only \
+flags (`sed -i ''`, `stat -f`, `date -v`).";
 
 const SYSTEM_BASE: &str = "\
 You are Kai, an agent that operates a computer for the user by looking at the \

@@ -58,5 +58,22 @@ got=$(doc_text)
 echo "document now: $got"
 [[ "$got" == "kai a11y ok" ]] || fail "AXValue fill did not stick (got: $got)"
 
+echo "== keys: a Windows shortcut acts as the Mac one (ctrl+a selects all)"
+open_doc keys
+"$probe" mouse @textfield "old words here" | tee "$out/keys.txt"
+"$probe" key ctrl+a | tee -a "$out/keys.txt"
+"$probe" type "kai keys ok" | tee -a "$out/keys.txt"
+got=$(doc_text)
+echo "document now: $got"
+lower=$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')
+[[ "$lower" == "kai keys ok" ]] || fail "ctrl+a did not select all (got: $got)"
+
+echo "== open: a Windows app name opens the Mac app (notepad is TextEdit)"
+osascript -e 'quit app "TextEdit" saving no' >/dev/null 2>&1 || true
+sleep 2
+"$probe" open notepad | tee "$out/open.txt"
+sleep 2
+pgrep -x TextEdit >/dev/null || fail "open notepad did not open TextEdit"
+
 osascript -e 'quit app "TextEdit" saving no' >/dev/null 2>&1 || true
 echo "all live checks passed"

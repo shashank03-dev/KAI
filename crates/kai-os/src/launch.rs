@@ -1,5 +1,6 @@
 //! Fast paths: open an app or a URL straight through the OS, no model needed.
 
+#[cfg(not(target_os = "macos"))]
 use std::process::{Command, Stdio};
 
 /// Normalise and check a URL: bare hosts get `https://`, only web and mail
@@ -116,20 +117,7 @@ fn platform_open_app(name: &str) -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn platform_open_app(name: &str) -> anyhow::Result<()> {
-    // Quiet: stdout is the protocol channel under `kai mcp`. `open -a`
-    // returns once Launch Services has started the app, and fails for an
-    // unknown name ("Unable to find application named …").
-    let out = Command::new("open")
-        .args(["-a", name])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()?;
-    if !out.status.success() {
-        let why = String::from_utf8_lossy(&out.stderr);
-        anyhow::bail!("could not open {name:?}: {}", why.trim());
-    }
-    Ok(())
+    crate::launch_mac::open_app(name)
 }
 
 #[cfg(target_os = "linux")]

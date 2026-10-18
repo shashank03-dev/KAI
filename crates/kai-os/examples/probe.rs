@@ -176,6 +176,24 @@ async fn act(a11y: bool, name: &str, text: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Press keys (`ctrl+a`), type at the focus, or open an app, as a model
+/// step would, through the real hands.
+async fn hands(action: &str, arg: &str) -> anyhow::Result<()> {
+    let json = match action {
+        "key" => {
+            serde_json::json!({"thought":"","action":"key","keys":arg.split('+').collect::<Vec<_>>(),"risk":"none"})
+        }
+        "type" => serde_json::json!({"thought":"","action":"type","text":arg,"risk":"none"}),
+        _ => serde_json::json!({"thought":"","action":"open_app","text":arg,"risk":"none"}),
+    };
+    let d = Decision::parse_checked(&json.to_string())?;
+    let hands = kai_os::DesktopActuator::new(kai_os::KillSwitch::default())?;
+    hands.act(&d, &Grounding::Marks(Vec::new())).await?;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    println!("{action} {arg}: ok");
+    Ok(())
+}
+
 /// Print the text a field holds now, as the accessibility tree reports it.
 async fn value(name: &str) -> anyhow::Result<()> {
     let p = kai_os::DesktopPerceptor::new();
@@ -212,6 +230,7 @@ async fn main() -> anyhow::Result<()> {
         Some("mouse") => act(false, arg(1).unwrap_or(""), arg(2)).await,
         Some("zoom") => zoom(arg(1).unwrap_or(""), arg(2).unwrap_or("zoom.jpg")).await,
         Some("value") => value(arg(1).unwrap_or("")).await,
-        _ => anyhow::bail!("usage: probe tree|frames|a11y|mouse|zoom|value ..."),
+        Some(a @ ("key" | "type" | "open")) => hands(a, arg(1).unwrap_or("")).await,
+        _ => anyhow::bail!("usage: probe tree|frames|a11y|mouse|zoom|value|key|type|open ..."),
     }
 }

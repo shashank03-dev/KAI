@@ -142,12 +142,26 @@ pub fn focused_window_rect() -> Option<Rect> {
 /// runs an AppKit event loop, which the `kai` command line does not (xcap
 /// reads it the same way). The system-wide `AXFocusedApplication` was seen
 /// failing on a Mac where Kai was trusted (GitHub's macos-15, 2026-10-15).
-#[allow(deprecated)]
 fn frontmost_pid() -> Option<i32> {
-    let key = NSString::from_str("NSApplicationProcessIdentifier");
-    let app = NSWorkspace::sharedWorkspace().activeApplication()?;
-    let pid = app.valueForKey(&key)?.downcast::<NSNumber>().ok()?;
+    let pid = active_app("NSApplicationProcessIdentifier")?
+        .downcast::<NSNumber>()
+        .ok()?;
     Some(pid.intValue())
+}
+
+/// The frontmost app's bundle id (`com.apple.Terminal`), read as above.
+pub fn frontmost_app_id() -> Option<String> {
+    let id = active_app("NSApplicationBundleIdentifier")?
+        .downcast::<NSString>()
+        .ok()?;
+    Some(id.to_string())
+}
+
+/// One entry of `activeApplication`'s description of the frontmost app.
+#[allow(deprecated)]
+fn active_app(key: &str) -> Option<objc2::rc::Retained<objc2::runtime::AnyObject>> {
+    let app = NSWorkspace::sharedWorkspace().activeApplication()?;
+    app.valueForKey(&NSString::from_str(key))
 }
 
 fn trusted() -> bool {

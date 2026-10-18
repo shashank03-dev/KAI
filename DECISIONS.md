@@ -1084,3 +1084,21 @@ Research: `docs/RESEARCH_2026_10_OPENAI_PARITY.md` (sources dated 2026-10-16).
   Kai uses about 100 of its types. Look: ChatGPT × Raycast × Linear on
   Kai's graphite/ember identity. `vendor/` is deleted when the last page
   moves.
+
+## macOS: Windows and Linux habits mapped to the Mac (2026-10-18)
+
+- **Shortcuts.** Gemma sends `ctrl+c`, `alt+tab` and `ctrl`-clicks on a Mac
+  despite `prompt::MAC_RULE`; they do nothing there, the screen does not
+  change and the model retries. The hands now press the Mac shortcut
+  (`kai-os/src/input/mac_keys.rs`), except in terminals, where `ctrl` is
+  meant. On by default on macOS only: it is a correctness fix (the model's
+  intent is unambiguous), not a heuristic; Linux and Windows are untouched.
+  Not yet measured with a live model on a Mac.
+- **App names.** When `open -a` does not know a name, the Mac app for a
+  common Linux/Windows name is tried (`kai-os/src/launch_mac.rs`).
+- **Prompt.** `MAC_RULE` names the Mac apps and says shell tools are BSD.
+  Mac-only, so other prompts stay byte for byte the same.
+- **App menu.** ⌘H, Hide Others and ⌘M.
+- **Checked:** unit tests on every OS, clippy for Linux, Windows and macOS
+  (from Linux, see CLAUDE.md), `scripts/macos/live_check.sh` extended with
+  `ctrl+a` in TextEdit and `open notepad`.

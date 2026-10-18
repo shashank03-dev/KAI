@@ -101,6 +101,12 @@ pub(crate) fn focused_window_rect() -> Option<Rect> {
     macos::focused_window_rect()
 }
 
+/// The bundle id of the app in front (macOS).
+#[cfg(target_os = "macos")]
+pub(crate) fn frontmost_app_id() -> Option<String> {
+    macos::frontmost_app_id()
+}
+
 /// A running count of accessibility events from the active app (Linux,
 /// AT-SPI); `None` where events are not wired (Windows) or not running.
 pub fn ui_events() -> Option<u64> {
