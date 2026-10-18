@@ -315,3 +315,51 @@ async fn skill_steps_run_without_the_model() {
     assert_eq!(trace.steps[1].decision.keys, vec!["ctrl", "l"]);
     assert_eq!(trace.steps[0].backend, "skill (no model call)");
 }
+
+/// Scripted replies, keeping each prompt the model was sent.
+struct Prompts(MockClient, Mutex<Vec<String>>);
+#[async_trait]
+impl ModelClient for Prompts {
+    fn backend(&self) -> kai_core::client::Backend {
+        kai_core::client::Backend::Mock
+    }
+    async fn decide(
+        &self,
+        req: &kai_core::client::ModelRequest<'_>,
+    ) -> Result<kai_core::client::ModelReply, kai_core::client::ClientError> {
+        self.1.lock().unwrap().push(req.user_text.to_string());
+        self.0.decide(req).await
+    }
+}
+
+#[tokio::test]
+async fn a_model_repeating_its_reasoning_is_told_to_look_again() {
+    // Seen live: the same thought step after step while each click changed
+    // the screen a little, so no other loop guard fired.
+    let lost = "The current screen is a file explorer. I need to find and open the text editor.";
+    let click = |t: &str| {
+        format!(r#"{{"thought":"{t}","action":"click","target":1,"risk":"low","expect":"editor"}}"#)
+    };
+    let client = Prompts(
+        MockClient::new([
+            click(lost),
+            click(lost),
+            r#"{"thought":"finished","action":"done","risk":"none"}"#.to_string(),
+        ]),
+        Mutex::default(),
+    );
+    let screen = FakeScreen {
+        frame: AtomicUsize::new(0),
+    };
+    let rec = RecordingHands::default();
+    let hands = Advancing(&screen, &rec);
+    let approver = Policy(ApprovalChoice::Approve, AtomicUsize::new(0));
+    let stop = Flag(AtomicBool::new(false));
+    engine(&client, &screen, &hands, &approver, &stop)
+        .run("save the doc")
+        .await;
+    let prompts = client.1.lock().unwrap().clone();
+    let told = |p: &String| p.contains("repeated the same reasoning");
+    assert!(!told(&prompts[1]), "one step is not a repeat");
+    assert!(told(&prompts[2]), "{}", prompts[2]);
+}

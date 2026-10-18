@@ -23,7 +23,7 @@ mod windows;
 mod windows_act;
 
 use kai_core::{Element, Grounding, Rect, Role};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A handle back to the live accessible object a node came from: bus name +
 /// object path on AT-SPI, the UI Automation element on Windows, the
@@ -57,6 +57,9 @@ pub struct RawNode {
 
 /// Budget for one tree read; a slow app yields what was read so far.
 pub const READ_BUDGET: Duration = Duration::from_millis(600);
+/// How long past the budget a reader may take to hand back its partial
+/// tree (one in-flight call) before the read is abandoned.
+const READ_GRACE: Duration = Duration::from_millis(400);
 /// Most marks drawn on one screen; past this the image is noise.
 pub const MAX_MARKS: usize = 150;
 /// Fewer interactive elements than this means the tree is not useful.
@@ -65,33 +68,47 @@ pub const MIN_USEFUL: usize = 2;
 /// Read the focused window's tree plus the taskbar/panel, within the budget.
 pub async fn read_tree() -> Vec<RawNode> {
     active::clear_title();
-    let fut = platform_read();
-    match tokio::time::timeout(READ_BUDGET, fut).await {
+    within_budget(READ_BUDGET, platform_read).await
+}
+
+/// Run `read` with a deadline `budget` from now. Readers stop at the
+/// deadline and return what they read; the timeout only catches one that
+/// cannot (a call hung past the grace). Seen live: a GTK save dialog on a
+/// busy CPU overran the budget, the whole tree was dropped for the grid,
+/// and the model lost its place.
+async fn within_budget<F>(budget: Duration, read: impl FnOnce(Instant) -> F) -> Vec<RawNode>
+where
+    F: std::future::Future<Output = anyhow::Result<Vec<RawNode>>>,
+{
+    let limit = budget + READ_GRACE;
+    match tokio::time::timeout(limit, read(Instant::now() + budget)).await {
         Ok(Ok(nodes)) => nodes,
         Ok(Err(e)) => {
             log::warn!("accessibility tree unavailable: {e}");
             Vec::new()
         }
         Err(_) => {
-            log::warn!("accessibility tree read exceeded {READ_BUDGET:?}; using grid");
+            log::warn!("accessibility tree read hung past {limit:?}; using grid");
             Vec::new()
         }
     }
 }
 
 #[cfg(target_os = "linux")]
-async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
-    linux::read().await
+async fn platform_read(deadline: Instant) -> anyhow::Result<Vec<RawNode>> {
+    linux::read(deadline).await
 }
 
+/// UI Automation reads the tree in one cached query, which cannot stop
+/// halfway: the timeout above bounds it.
 #[cfg(target_os = "windows")]
-async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
+async fn platform_read(_deadline: Instant) -> anyhow::Result<Vec<RawNode>> {
     tokio::task::spawn_blocking(windows::read).await?
 }
 
 #[cfg(target_os = "macos")]
-async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
-    tokio::task::spawn_blocking(macos::read).await?
+async fn platform_read(deadline: Instant) -> anyhow::Result<Vec<RawNode>> {
+    tokio::task::spawn_blocking(move || macos::read(deadline)).await?
 }
 
 /// The focused window of the app in front (macOS), for picking the display
@@ -122,7 +139,7 @@ pub fn ui_events() -> Option<u64> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-async fn platform_read() -> anyhow::Result<Vec<RawNode>> {
+async fn platform_read(_deadline: Instant) -> anyhow::Result<Vec<RawNode>> {
     anyhow::bail!("no accessibility reader on this OS; using the grid")
 }
 
@@ -330,6 +347,43 @@ fn clean(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn save_button() -> RawNode {
+        RawNode {
+            role: Role::Button,
+            name: "Save".into(),
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            enabled: true,
+            visible: true,
+            secure: false,
+            focused: false,
+            value: None,
+            handle: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_that_stops_at_its_deadline_keeps_what_it_read() {
+        // Like the readers: work until the deadline, then hand back the
+        // partial tree (which arrives just after the budget).
+        let nodes = within_budget(Duration::from_millis(50), |deadline| async move {
+            tokio::time::sleep_until((deadline + Duration::from_millis(5)).into()).await;
+            Ok(vec![save_button()])
+        })
+        .await;
+        assert_eq!(nodes.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_hung_read_falls_back_to_the_grid() {
+        let nodes = within_budget(Duration::from_millis(50), |_| async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(vec![save_button()])
+        })
+        .await;
+        assert!(nodes.is_empty());
+    }
+
     #[tokio::test]
     async fn cancelled_accessibility_work_is_rejected_before_live_resolution() {
         let ctx = kai_core::computer::ExecutionContext::new(std::time::Duration::from_secs(1));

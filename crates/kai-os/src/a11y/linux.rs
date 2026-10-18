@@ -40,7 +40,7 @@ pub(super) async fn conn() -> anyhow::Result<&'static AccessibilityConnection> {
     Ok(CONN.get_or_try_init(AccessibilityConnection::new).await?)
 }
 
-pub async fn read() -> anyhow::Result<Vec<RawNode>> {
+pub async fn read(deadline: std::time::Instant) -> anyhow::Result<Vec<RawNode>> {
     let a11y = conn().await?;
     let bus = a11y.connection();
     let root = a11y.root_accessible_on_registry().await?;
@@ -100,53 +100,77 @@ pub async fn read() -> anyhow::Result<Vec<RawNode>> {
             );
             break;
         }
-        let Ok(p) = obj.as_accessible_proxy(bus).await else {
+        // One node is several D-Bus calls; on a busy machine they alone can
+        // outlast the budget, so each visit is bounded by the deadline too.
+        let deadline = tokio::time::Instant::from_std(deadline);
+        let Ok(seen) = tokio::time::timeout_at(deadline, visit(bus, &obj, depth)).await else {
+            log::warn!(
+                "accessibility read reached its time budget; {} marks kept, the rest of the window is unread",
+                out.len()
+            );
+            break;
+        };
+        let Some((node, children)) = seen else {
             continue;
         };
-        let state = p.get_state().await.unwrap_or_default();
-        if !state.contains(State::Showing) {
-            continue; // nothing under a hidden node is on screen
-        }
-        let arole = p.get_role().await.unwrap_or(A::Invalid);
-        let role = map_role(arole);
-        if role != Role::Other
-            && let Some(bounds) = extents(&p).await
-        {
-            let name = label(&p).await;
-            // A web table cell or list item has no name; its text is what
-            // it says (seen live: Firefox opening hours read as `cell ""`,
-            // and the model misread the screenshot).
-            let shows_text = matches!(role, Role::Cell | Role::ListItem) && name.trim().is_empty();
-            out.push(RawNode {
-                role,
-                name,
-                bounds,
-                enabled: state.contains(State::Enabled) || state.contains(State::Sensitive),
-                visible: state.contains(State::Visible),
-                secure: arole == A::PasswordText,
-                focused: state.contains(State::Focused),
-                value: if role == Role::TextField && arole != A::Terminal {
-                    field_text(&p).await
-                } else if shows_text {
-                    field_text(&p).await.and_then(|t| content_text(&t))
-                } else {
-                    None
-                },
-                handle: Some(obj.clone()),
-            });
-        }
-        // Containers that manage their descendants (a spreadsheet grid, huge
-        // lists) report millions of children; enumerating them stalls the
-        // read past its budget, so they are kept as one node.
-        let manages = state.contains(State::ManagesDescendants);
-        let n = p.child_count().await.unwrap_or(0);
-        if depth < MAX_DEPTH && n > 0 && !(manages && n > MAX_MANAGED_CHILDREN) {
-            for c in p.get_children().await.unwrap_or_default() {
-                stack.push((c, depth + 1));
-            }
-        }
+        out.extend(node);
+        stack.extend(children.into_iter().map(|c| (c, depth + 1)));
     }
     Ok(out)
+}
+
+/// One node: its mark (if it is one) and the children to read next; `None`
+/// for a node that is gone or hidden (nothing under it is on screen).
+async fn visit(
+    bus: &zbus::Connection,
+    obj: &ObjectRefOwned,
+    depth: usize,
+) -> Option<(Option<RawNode>, Vec<ObjectRefOwned>)> {
+    let p = obj.as_accessible_proxy(bus).await.ok()?;
+    let state = p.get_state().await.unwrap_or_default();
+    if !state.contains(State::Showing) {
+        return None;
+    }
+    let arole = p.get_role().await.unwrap_or(A::Invalid);
+    let role = map_role(arole);
+    let mut node = None;
+    if role != Role::Other
+        && let Some(bounds) = extents(&p).await
+    {
+        let name = label(&p).await;
+        // A web table cell or list item has no name; its text is what
+        // it says (seen live: Firefox opening hours read as `cell ""`,
+        // and the model misread the screenshot).
+        let shows_text = matches!(role, Role::Cell | Role::ListItem) && name.trim().is_empty();
+        node = Some(RawNode {
+            role,
+            name,
+            bounds,
+            enabled: state.contains(State::Enabled) || state.contains(State::Sensitive),
+            visible: state.contains(State::Visible),
+            secure: arole == A::PasswordText,
+            focused: state.contains(State::Focused),
+            value: if role == Role::TextField && arole != A::Terminal {
+                field_text(&p).await
+            } else if shows_text {
+                field_text(&p).await.and_then(|t| content_text(&t))
+            } else {
+                None
+            },
+            handle: Some(obj.clone()),
+        });
+    }
+    // Containers that manage their descendants (a spreadsheet grid, huge
+    // lists) report millions of children; enumerating them stalls the
+    // read past its budget, so they are kept as one node.
+    let manages = state.contains(State::ManagesDescendants);
+    let n = p.child_count().await.unwrap_or(0);
+    let children = if depth < MAX_DEPTH && n > 0 && !(manages && n > MAX_MANAGED_CHILDREN) {
+        p.get_children().await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    Some((node, children))
 }
 
 /// Several windows can report `Active` (seen with dialogs and some

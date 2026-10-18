@@ -26,6 +26,7 @@ async-trait = "0.1"
 
 [dev-dependencies]
 env_logger.workspace = true
+http = "1"
 tokio = { workspace = true, features = ["full"] }
 
 [lints.clippy]

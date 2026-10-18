@@ -159,6 +159,9 @@ pub(crate) async fn wait_for_port(port: u16, limit: Duration) -> anyhow::Result<
 ///   recurrent state per checkpoint, up to 32 by default.
 /// - `--reasoning off`: Kai's replies are one short JSON object; thinking
 ///   took 64+ tokens per reply and ~9 s per step on that CPU, without it ~1 s.
+/// - `--reasoning-budget 0`: `off` only asks the template; Gemma 4 E4B still
+///   thought on some steps, spent the whole reply budget on it and answered
+///   nothing (2026-10-18). A budget of 0 ends any thinking at once.
 const LEAN: &[&str] = &[
     "--no-repack",
     "-np",
@@ -169,6 +172,8 @@ const LEAN: &[&str] = &[
     "2",
     "--reasoning",
     "off",
+    "--reasoning-budget",
+    "0",
 ];
 
 fn local_http() -> reqwest::Client {
@@ -447,6 +452,7 @@ mod tests {
         assert_eq!(after("-np"), "1");
         assert_eq!(after("--cache-ram"), "0");
         assert_eq!(after("--reasoning"), "off");
+        assert_eq!(after("--reasoning-budget"), "0");
         assert!(s.contains(&"--no-repack".to_string()));
         assert!(!s.iter().any(|x| x == "0.0.0.0"));
     }

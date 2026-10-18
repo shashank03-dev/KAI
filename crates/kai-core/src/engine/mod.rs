@@ -47,6 +47,7 @@ mod record;
 mod recover;
 pub use recover::RecoveryRecord;
 mod run;
+mod stuck;
 pub use procedure::PROCEDURE;
 use run::{Pending, Run};
 

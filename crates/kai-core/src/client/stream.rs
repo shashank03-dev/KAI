@@ -55,6 +55,11 @@ pub struct StreamOutcome {
     /// True when reading stopped as soon as the JSON object closed (usage and
     /// cost are then usually missing: they arrive in the last chunk).
     pub stopped_early: bool,
+    /// Text the server put in `reasoning_content` (or `reasoning`) rather
+    /// than `content`, e.g. llama.cpp's Gemma 4 thought channel.
+    pub reasoning: String,
+    /// Why generation stopped (`stop`, `length`), when the server said.
+    pub finish_reason: Option<String>,
 }
 
 impl StreamOutcome {
@@ -72,10 +77,44 @@ impl StreamOutcome {
             }
             self.content.push_str(t);
         }
+        let thought = ["delta", "message"]
+            .iter()
+            .flat_map(|k| ["reasoning_content", "reasoning"].map(|f| &choice[k][f]))
+            .find_map(serde_json::Value::as_str);
+        if let Some(t) = thought {
+            self.reasoning.push_str(t);
+        }
+        if let Some(f) = choice["finish_reason"].as_str() {
+            self.finish_reason = Some(f.to_string());
+        }
         let (p, c, cost) = usage(v);
         self.prompt_tokens = p.or(self.prompt_tokens);
         self.completion_tokens = c.or(self.completion_tokens);
         self.cost_usd = cost.or(self.cost_usd);
+    }
+
+    /// Make sure the reply has decision text. With no `content`, a complete
+    /// JSON object in the reasoning text is the decision (Gemma 4 can write
+    /// it in its thought channel); otherwise the reply is empty, and why is
+    /// logged so the cause shows in the run's log.
+    pub(crate) fn require_content(&mut self) -> Result<(), ClientError> {
+        if !self.content.trim().is_empty() {
+            return Ok(());
+        }
+        if let Some(end) = complete_json_prefix(&self.reasoning) {
+            log::warn!("reply came in the reasoning text, not content; using its decision");
+            let start = self.reasoning.find('{').unwrap_or(0);
+            self.content = self.reasoning[start..end].to_string();
+            return Ok(());
+        }
+        log::warn!(
+            "empty reply: finish_reason {}, {} characters of reasoning, {} tokens",
+            self.finish_reason.as_deref().unwrap_or("unknown"),
+            self.reasoning.len(),
+            self.completion_tokens
+                .map_or("unknown".to_string(), |n| n.to_string())
+        );
+        Err(ClientError::EmptyBody)
     }
 }
 
@@ -124,9 +163,11 @@ pub async fn read_chat_stream(
                 Line::More => {}
             }
             // Gemma sometimes streams a run of whitespace until max_tokens or the
-            // timeout; give up early so the step can be retried.
+            // timeout; give up early. A decision already complete before the run
+            // is kept (seen live: Gemma 4 closed its JSON, then padded with
+            // whitespace, and the whole step was retried); otherwise retry.
             if out.content.len() - out.content.trim_end().len() > WHITESPACE_RUN_MAX {
-                return Err(ClientError::EmptyBody);
+                return keep_complete(out);
             }
             if early_stop && complete_json_prefix(&out.content).is_some() {
                 out.stopped_early = true;
@@ -138,6 +179,21 @@ pub async fn read_chat_stream(
     if !buf.is_empty() {
         handle_line(&buf, &mut out, started)?;
     }
+    Ok(out)
+}
+
+/// The reply up to its complete JSON object, or `EmptyBody` without one.
+fn keep_complete(mut out: StreamOutcome) -> Result<StreamOutcome, ClientError> {
+    let Some(end) = complete_json_prefix(&out.content) else {
+        log::warn!(
+            "reply degenerated into whitespace after {} characters, with no complete decision",
+            out.content.trim_end().len()
+        );
+        return Err(ClientError::EmptyBody);
+    };
+    log::warn!("reply padded with whitespace after a complete decision; keeping the decision");
+    out.content.truncate(end);
+    out.stopped_early = true;
     Ok(out)
 }
 
@@ -175,6 +231,70 @@ fn handle_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A streamed reply whose content arrives in `deltas`.
+    async fn stream_of(deltas: &[&str]) -> Result<StreamOutcome, ClientError> {
+        let body: String = deltas
+            .iter()
+            .map(|d| {
+                let chunk = serde_json::json!({"choices": [{"delta": {"content": d}}]});
+                format!("data: {chunk}\n\n")
+            })
+            .chain(["data: [DONE]\n\n".to_string()])
+            .collect();
+        let resp = reqwest::Response::from(http::Response::new(body));
+        read_chat_stream(resp, Instant::now(), false).await
+    }
+
+    #[test]
+    fn a_decision_in_the_reasoning_text_is_used_when_content_is_empty() {
+        let mut out = StreamOutcome::default();
+        let chunk = |f: &str, t: &str| serde_json::json!({"choices": [{"delta": {f: t}}]});
+        out.apply(
+            &chunk("reasoning_content", "thinking {\"action\":"),
+            Instant::now(),
+        );
+        out.apply(
+            &chunk("reasoning_content", "\"done\"} tail"),
+            Instant::now(),
+        );
+        out.require_content().unwrap();
+        assert_eq!(out.content, r#"{"action":"done"}"#);
+        // Content wins when there is any.
+        let mut both = StreamOutcome::default();
+        both.apply(&chunk("content", "{\"a\":1}"), Instant::now());
+        both.apply(&chunk("reasoning", "{\"b\":2}"), Instant::now());
+        both.require_content().unwrap();
+        assert_eq!(both.content, r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn no_content_and_no_decision_is_empty() {
+        let mut out = StreamOutcome::default();
+        let v = serde_json::json!({"choices": [{"delta": {"reasoning_content": "hmm"}, "finish_reason": "length"}]});
+        out.apply(&v, Instant::now());
+        assert_eq!(out.finish_reason.as_deref(), Some("length"));
+        assert!(matches!(out.require_content(), Err(ClientError::EmptyBody)));
+    }
+
+    #[tokio::test]
+    async fn a_decision_padded_with_whitespace_is_kept() {
+        let pad = " ".repeat(WHITESPACE_RUN_MAX + 10);
+        let out = stream_of(&[r#"{"action":"done"}"#, "\n", &pad, "never read"])
+            .await
+            .unwrap();
+        assert_eq!(out.content, r#"{"action":"done"}"#);
+        assert!(out.stopped_early);
+    }
+
+    #[tokio::test]
+    async fn whitespace_without_a_complete_decision_is_empty() {
+        let pad = " ".repeat(WHITESPACE_RUN_MAX + 10);
+        let half = stream_of(&[r#"{"action":"#, &pad]).await;
+        assert!(matches!(half, Err(ClientError::EmptyBody)), "{half:?}");
+        let blank = stream_of(&[&pad]).await;
+        assert!(matches!(blank, Err(ClientError::EmptyBody)), "{blank:?}");
+    }
 
     #[test]
     fn json_prefix_closes_at_the_outer_brace() {

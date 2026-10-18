@@ -141,6 +141,7 @@ pub fn plan(d: &Decision, el: &Element) -> Option<Plan> {
         return None;
     }
     match d.action {
+        Action::Click if opens_dialog(&el.name) => None,
         Action::Click => matches!(
             el.role,
             Role::Button
@@ -161,6 +162,17 @@ pub fn plan(d: &Decision, el: &Element) -> Option<Plan> {
         }
         _ => None,
     }
+}
+
+/// A control named with a trailing ellipsis ("Save As...", "Open…") opens
+/// a dialog: the GNOME, Apple and Microsoft guidelines all say so. Pressed
+/// through accessibility, the app runs that modal dialog inside the call,
+/// and stops answering tree reads until it closes (reproduced with
+/// Mousepad's Save As on AT-SPI; `AXPress` times out the same way). The
+/// mouse opens it with the tree still readable.
+fn opens_dialog(name: &str) -> bool {
+    let name = name.trim_end();
+    name.ends_with('…') || name.ends_with("...")
 }
 
 #[cfg(test)]
@@ -194,6 +206,18 @@ mod tests {
         }
         assert_eq!(plan(&dec(CLICK), &el(Role::ListItem)), None);
         assert_eq!(plan(&dec(CLICK), &el(Role::TextField)), None);
+    }
+
+    #[test]
+    fn controls_that_open_a_dialog_use_the_mouse() {
+        for name in ["Save As...", "Open…", "Print… "] {
+            let mut e = el(Role::MenuItem);
+            e.name = name.into();
+            assert_eq!(plan(&dec(CLICK), &e), None, "{name}");
+        }
+        let mut e = el(Role::MenuItem);
+        e.name = "Save".into();
+        assert_eq!(plan(&dec(CLICK), &e), Some(Plan::Press));
     }
 
     #[test]

@@ -4018,6 +4018,7 @@ dependencies = [
  "base64 0.22.1",
  "env_logger",
  "futures",
+ "http",
  "jiff",
  "log",
  "psl",

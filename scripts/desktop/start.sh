@@ -90,6 +90,10 @@ _kai_start() {
   # at-spi2-registryd is D-Bus-activated on that a11y bus on first use.
   gsettings set org.gnome.desktop.interface toolkit-accessibility true \
     >/dev/null 2>&1 || true
+  # Bench setups end Mousepad with `pkill -9`; without this the next task
+  # starts behind its "restore the previous session?" prompt.
+  gsettings set org.xfce.mousepad.preferences.file session-restore never \
+    >/dev/null 2>&1 || true
 
   # 5. Window manager (focus, stacking, the "active" state AT-SPI reports).
   if ! _alive "$(_pid openbox)" openbox; then
