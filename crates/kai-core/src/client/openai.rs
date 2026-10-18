@@ -345,7 +345,7 @@ impl ModelClient for OpenAiClient {
                 }
                 return Err(ClientError::from_status(status.as_u16(), &txt));
             }
-            let out = if self.stream {
+            let mut out = if self.stream {
                 stream::read_chat_stream(resp, started, self.early_stop && !req.schema.is_null())
                     .await?
             } else {
@@ -358,9 +358,7 @@ impl ModelClient for OpenAiClient {
                 o.first_token = None; // not measurable without streaming
                 o
             };
-            if out.content.trim().is_empty() {
-                return Err(ClientError::EmptyBody);
-            }
+            out.require_content()?;
             return Ok(ModelReply {
                 raw: out.content,
                 prompt_tokens: out.prompt_tokens,

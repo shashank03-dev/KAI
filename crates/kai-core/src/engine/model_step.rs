@@ -148,6 +148,12 @@ impl Engine<'_> {
             log::warn!("memo refused at step {step}: it looks like {what}");
         }
         let decision = reply.decision;
+        if super::stuck::repeats(&r.trace.steps, &decision.thought) {
+            log::warn!("step {step}: the model repeated its last reasoning");
+            r.notes.push(super::stuck::NOTE.into());
+            r.force_full = true;
+            r.careful_next = true;
+        }
 
         let mut timings = seen.timings;
         timings.set_model(model_time, first_token);

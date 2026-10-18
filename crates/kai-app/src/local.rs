@@ -471,6 +471,10 @@ mod tests {
     #[test]
     fn one_tap_plans_only_what_is_missing() {
         let mut l = LocalState::new("");
+        // `new` reads this machine's model store: start from nothing, so
+        // the test does not depend on what the developer has installed.
+        l.installed.clear();
+        l.server = None;
         l.set_hardware(HardwareSummary {
             ram_gb: 16.0,
             cpu_threads: 8,

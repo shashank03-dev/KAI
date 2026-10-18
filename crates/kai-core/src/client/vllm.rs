@@ -200,7 +200,7 @@ impl ModelClient for VllmClient {
             let txt = resp.text().await.unwrap_or_default();
             return Err(ClientError::from_status(status.as_u16(), &txt));
         }
-        let out = if self.stream {
+        let mut out = if self.stream {
             stream::read_chat_stream(resp, started, self.early_stop && !req.schema.is_null())
                 .await?
         } else {
@@ -213,9 +213,7 @@ impl ModelClient for VllmClient {
             o.first_token = None;
             o
         };
-        if out.content.is_empty() {
-            return Err(ClientError::EmptyBody);
-        }
+        out.require_content()?;
         Ok(ModelReply {
             raw: out.content,
             prompt_tokens: out.prompt_tokens,

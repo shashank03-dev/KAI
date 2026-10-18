@@ -1102,3 +1102,64 @@ Research: `docs/RESEARCH_2026_10_OPENAI_PARITY.md` (sources dated 2026-10-16).
 - **Checked:** unit tests on every OS, clippy for Linux, Windows and macOS
   (from Linux, see CLAUDE.md), `scripts/macos/live_check.sh` extended with
   `ctrl+a` in TextEdit and `open notepad`.
+
+## Live Gemma 4 E4B on this CPU: loops found and fixed (2026-10-18)
+
+Gemma 4 E4B (`kai models install`, llama.cpp b11429, 4 CPU threads, about
+60–110 s per call) on the Xvfb desktop, four simple tasks (`write-note`,
+`open-folder`, `mousepad-write`, `close-app`), one run per build. What the
+runs showed, and the fix for each:
+
+- **The tree was dropped for the grid on a slow read.** `a11y::read_tree`
+  timed out at the same 600 ms as the readers' own budget, so a partial
+  tree was thrown away (on a Mac the walker's deadline always lost that
+  race). On `mousepad-write` the GTK save dialog came back as a bare grid,
+  and Gemma lost its place: "the current screen is a file explorer, I need
+  to open the text editor", four steps in a row, until the time limit.
+  Readers now get the deadline and return what they read (Linux bounds
+  each node's D-Bus calls by it); the timeout is only a safety net 400 ms
+  later. Test: `a_read_that_stops_at_its_deadline_keeps_what_it_read`.
+- **Root cause of the lost dialog: pressing "Save As..." through
+  accessibility.** Reproduced with the probe: opened by the AT-SPI action,
+  GTK runs the modal dialog inside that call and Mousepad stops answering
+  every tree read (and even Escape) until killed; opened by a mouse click,
+  the dialog reads in 240 ms (146 nodes; 450 ms with all 4 cores busy). A
+  control whose name ends in an ellipsis opens a dialog by every desktop's
+  guidelines, so it is now clicked with the mouse (`live::opens_dialog`).
+  On a Mac, `AXPress` on such a control returns "cannot complete" after the
+  messaging timeout although the press happened, and Kai then pressed it a
+  second time with the mouse; that answer now counts as pressed.
+- **Bench fixture:** setups end Mousepad with `pkill -9`, so the next task
+  began behind a "restore the previous session?" prompt; the desktop now
+  turns session restore off (`scripts/desktop/start.sh`).
+- **Repeated reasoning was not a loop to any guard.** Each grid click
+  changed the screen, so no-progress and A-B-A-B stayed quiet. When a
+  thought repeats the last step's (first 12 words), the next turn says so,
+  with a fresh screenshot and the careful model (`engine/stuck.rs`; test
+  `a_model_repeating_its_reasoning_is_told_to_look_again`). Seen firing
+  live; Gemma changed route on the next step.
+- **Cut replies.** 3 of the first 6 calls stopped at the 192-token budget
+  and paid a repair call each. The default is 320: a ceiling costs nothing
+  when a reply is shorter, and finishing is cheaper than a second call.
+- **Empty replies: Gemma 4 thought despite `--reasoning off`.** The new
+  log said it: `finish_reason length, 1448 characters of reasoning, 320
+  tokens`, i.e. the whole budget went to the thought channel and nothing
+  to the answer. The local server now also gets `--reasoning-budget 0`,
+  which ends any thinking at once. The client logs `finish_reason` and
+  reasoning length for an empty reply, uses a complete decision found in
+  `reasoning_content`, and keeps a decision that is padded with whitespace.
+- **Repairs say why** (`repairing malformed reply: <error>`).
+- **Measured (honestly), one run per build:** 2/4 before and 2/4 after on
+  the four tasks (10-minute limit, ~60–110 s per call), 24 calls for 17
+  steps before, 21 for 17 after. Tree reads lost to the grid: 9 → 0.
+  Empty replies: 3 → 0 on a 20-step run with the thinking budget at 0.
+  `mousepad-write` went from blind grid clicks on the save dialog to typing
+  the file name into its Name field; with a 25-minute limit E4B still did
+  not finish (it retyped names and wandered) and Kai stopped it as a loop.
+  That is the 4B model's limit, not a harness fault. `write-note` went from
+  3 steps and a repair to 2 steps. `open-folder` fails on the model's
+  choice: it lists the folder with `ls` (the known "show the folder" gap),
+  then asks Linux `open_app` for "File Manager", which only takes an exact
+  app name (a `GenericName` match is a possible follow-up; on a Mac it now
+  opens Finder). A live A/B with Gemma 4 26B on the Gemini API, two runs
+  per side, is still owed.

@@ -65,8 +65,7 @@ impl std::fmt::Debug for AxRef {
     }
 }
 
-pub fn read() -> anyhow::Result<Vec<RawNode>> {
-    let deadline = Instant::now() + super::READ_BUDGET;
+pub fn read(deadline: Instant) -> anyhow::Result<Vec<RawNode>> {
     // SAFETY: creating the system-wide element has no preconditions. A
     // timeout set on it applies to every element (Apple's documentation),
     // so no single call can wait on a hung app for long.

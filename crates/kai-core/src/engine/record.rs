@@ -227,7 +227,7 @@ impl Engine<'_> {
             Err(first) => {
                 // One repair retry (needed on the Gemini JSON-mode backend; a
                 // no-op improvement on vLLM structured outputs).
-                log::warn!("repairing malformed reply");
+                log::warn!("repairing malformed reply: {first}");
                 // A long command or text (e.g. a script) can overrun the
                 // short reply budget and arrive cut off: the retry gets room.
                 let hint = match &first {

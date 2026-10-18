@@ -222,7 +222,7 @@ backend. See [MEMORY.md](MEMORY.md).
 | MoE `gemma-4-26b-a4b-it` (~4B active) by default; `gemma-4-31b-it` only for the one step after a failure, then back | `Engine.careful`, `engine.rs` |
 | Stable system prompt and schema first, changing parts last → vLLM prefix-cache hits every step | `prompt.rs` |
 | Only the last 3 steps as text history (or 2 plus a summary with `--macro-history`); never old screenshots | `prompt::build_turn` |
-| `thought` ≤ 25 words, `max_tokens` 192, temperature 0 | `Config`, `schema.rs` |
+| `thought` ≤ 25 words, `max_tokens` 320, temperature 0 | `Config`, `schema.rs` |
 | One keep-alive HTTP/2 connection (ALPN), warmed when the app opens | `VllmClient`, `KaiApp::after_open` |
 | Fast paths that skip the model: `open_app`, `open_url`, and a skill's deterministic `steps` | `engine.rs`, `skill.rs` |
 | Capture and tree read in parallel; SIMD downscale; bitmap-font marks | `desktop.rs`, `frame.rs`, `marks.rs` |

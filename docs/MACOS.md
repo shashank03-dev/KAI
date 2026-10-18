@@ -85,7 +85,10 @@ restart: the app tries again every 2 seconds while it has no control.
   an element's attributes in one call (`AXUIElementCopyMultipleAttributeValues`),
   so each element costs one round trip to the app, the way Windows uses one
   cached UI Automation query. A 0.25 s messaging timeout per call and the
-  shared 600 ms read budget keep a hung app from stalling a step. Secure
+  shared 600 ms read budget keep a hung app from stalling a step; a big
+  tree (a browser page, Mail) stops at the budget and keeps what it read.
+  Until 2026-10-18 the outer timeout fired first and threw that partial
+  tree away for the grid. Secure
   text fields (`AXSecureTextField`) are password fields, and Kai never fills
   or presses them through the tree. Items of a closed menu are skipped,
   because they exist in the tree but are not on screen. A row scrolled out
@@ -96,7 +99,10 @@ restart: the app tries again every 2 seconds while it has no control.
 - **Accessibility-first actions** (`a11y/macos_act.rs`). A press is
   `AXPress`. A fill sets `AXValue` on an empty, settable field and reads it
   back. This is the same contract as UI Automation on Windows; anything
-  uncertain falls back to the mouse.
+  uncertain falls back to the mouse. A control named with an ellipsis
+  ("Save As…") opens a dialog and is clicked with the mouse, and an
+  `AXPress` that gets no answer in time (the app is showing a modal)
+  counts as pressed, so it is never pressed twice.
 - **Shortcuts use `cmd`.** Models default to `ctrl`. On a Mac the system
   prompt adds one rule saying shortcuts use `cmd` (`prompt::MAC_RULE`). It
   is added only when the eyes are on a Mac (`Perceptor::mac`), so the prompt

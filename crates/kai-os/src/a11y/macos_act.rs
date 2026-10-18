@@ -51,6 +51,13 @@ fn press(el: &AXUIElement, ctx: &kai_core::computer::ExecutionContext) -> anyhow
     ctx.check()?;
     // SAFETY: a plain action call on a live element.
     let err = unsafe { el.perform_action(&CFString::from_static_str("AXPress")) };
+    // A press that opens a modal (an alert, a sheet, a dialog) keeps the app
+    // from answering until the messaging timeout: the press was delivered,
+    // so the mouse must not press it a second time.
+    if err == AXError::CannotComplete {
+        log::debug!("AXPress got no answer in time; the app is likely showing a dialog");
+        return Ok(true);
+    }
     if err != AXError::Success {
         log::debug!("AXPress failed: {err:?}");
     }
