@@ -486,8 +486,6 @@ impl Default for Config {
             max_steps: 40,
             max_time: Duration::from_secs(600),
             approval: ApprovalLevel::HighRiskOnly,
-            // Room for a full reply: Gemma 4 E4B hit 192 on half its steps
-            // (2026-10-18), and each cut reply cost a repair call.
             max_tokens: 320,
             max_failures: 3,
             tree_only: true,
