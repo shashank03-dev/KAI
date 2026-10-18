@@ -102,6 +102,20 @@ restart: the app tries again every 2 seconds while it has no control.
   is added only when the eyes are on a Mac (`Perceptor::mac`), so the prompt
   on Linux and Windows stays byte for byte the same. Long text is pasted
   with cmd+v.
+- **Windows and Linux habits still work.** Gemma often sends `ctrl+c` or
+  `alt+tab` anyway; on a Mac those do nothing, the screen does not change,
+  and the model tries again. The hands press the Mac shortcut instead
+  (`input/mac_keys.rs`): `ctrl` + an editing or app letter (copy, paste,
+  cut, undo, select all, save, find, tabs, windows, reload, address bar,
+  quit, bold, zoom) becomes `cmd`, `ctrl+y` becomes `cmd+shift+z`, `alt+tab`
+  becomes `cmd+tab`, `alt+f4` closes the window (`cmd+w`), and a
+  `ctrl`-click (a right-click on a Mac) becomes a `cmd`-click. In a
+  terminal (Terminal, iTerm2, Warp, kitty, Alacritty, WezTerm, Hyper,
+  Ghostty) `ctrl` keeps its meaning, so `ctrl+c` still interrupts. App
+  names work the same way (`launch_mac.rs`): when `open -a` does not know
+  the name, "File Explorer" opens Finder, "Notepad" TextEdit, "System
+  Preferences" System Settings, "Task Manager" Activity Monitor. The Mac
+  prompt rule also names the Mac apps and warns that shell tools are BSD.
 - **Stopping.** In the app, `ctrl+alt+Escape` (Control-Option-Escape) works
   from any app. macOS delivers global hotkeys only through the main
   thread's event loop, which the `kai` command line does not run. So in the

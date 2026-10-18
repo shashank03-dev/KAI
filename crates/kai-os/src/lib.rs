@@ -12,6 +12,8 @@ pub mod gui_launch;
 pub mod input;
 pub mod kill;
 pub mod launch;
+#[cfg(any(target_os = "macos", test))]
+mod launch_mac;
 pub mod local;
 pub mod marks;
 pub mod notify;

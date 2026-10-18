@@ -6,6 +6,8 @@ use enigo::{Axis, Button, Coordinate, Direction as Press, Enigo, Key, Keyboard, 
 use kai_core::Direction;
 use kai_core::computer::ExecutionContext;
 mod execute;
+#[cfg(any(target_os = "macos", test))]
+mod mac_keys;
 use execute::run;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -188,6 +190,8 @@ impl Input {
     /// The same handle, holding `modifiers` (canonical names) around each
     /// command it sends.
     pub fn holding(&self, modifiers: &[String]) -> anyhow::Result<Self> {
+        #[cfg(target_os = "macos")]
+        let modifiers = &mac_keys::held_to_mac(modifiers);
         Ok(Self {
             tx: self.tx.clone(),
             context: self.context.clone(),
@@ -260,6 +264,10 @@ impl Input {
     }
 
     pub async fn keys(&self, names: &[String]) -> anyhow::Result<()> {
+        #[cfg(target_os = "macos")]
+        let mac = mac_shortcut(names);
+        #[cfg(target_os = "macos")]
+        let names = mac.as_deref().unwrap_or(names);
         let keys = names
             .iter()
             .map(|n| parse_key(n))
@@ -282,6 +290,20 @@ impl Input {
     pub async fn cursor(&self) -> anyhow::Result<(i32, i32)> {
         self.call(Cmd::Cursor).await
     }
+}
+
+/// The Mac form of a Windows/Linux shortcut (`mac_keys`), checked against
+/// the app in front so a terminal keeps its `ctrl`.
+#[cfg(target_os = "macos")]
+fn mac_shortcut(names: &[String]) -> Option<Vec<String>> {
+    let terminal = crate::a11y::frontmost_app_id().is_some_and(|id| mac_keys::is_terminal(&id));
+    let mapped = mac_keys::to_mac(names, terminal)?;
+    log::info!(
+        "pressing {} for {} (the Mac shortcut)",
+        mapped.join("+"),
+        names.join("+")
+    );
+    Some(mapped)
 }
 
 fn native_button(button: kai_core::computer::MouseButton) -> Button {

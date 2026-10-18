@@ -22,7 +22,10 @@ actions!(
         TogglePause,
         RetryRun,
         JumpToLatest,
-        Quit
+        Quit,
+        Hide,
+        HideOthers,
+        Minimize
     ]
 );
 
@@ -49,11 +52,32 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-r", RetryRun, Some("KaiRoot")),
         KeyBinding::new("secondary-down", JumpToLatest, Some("KaiRoot")),
     ]);
-    // A Mac app is quit from its menu bar (⌘Q), not by closing its window.
+    // A Mac app is quit from its menu bar (⌘Q), not by closing its window,
+    // and hides (⌘H) and minimizes (⌘M) like every other Mac app.
     if cfg!(target_os = "macos") {
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        cx.set_menus([Menu::new("Kai").items([MenuItem::action("Quit Kai", Quit)])]);
+        cx.on_action(|_: &Hide, cx| cx.hide());
+        cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+        cx.on_action(|_: &Minimize, cx| {
+            if let Some(w) = cx.active_window() {
+                let _ = w.update(cx, |_, window, _| window.minimize_window());
+            }
+        });
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-h", Hide, None),
+            KeyBinding::new("cmd-alt-h", HideOthers, None),
+            KeyBinding::new("cmd-m", Minimize, None),
+        ]);
+        cx.set_menus([
+            Menu::new("Kai").items([
+                MenuItem::action("Hide Kai", Hide),
+                MenuItem::action("Hide Others", HideOthers),
+                MenuItem::separator(),
+                MenuItem::action("Quit Kai", Quit),
+            ]),
+            Menu::new("Window").items([MenuItem::action("Minimize", Minimize)]),
+        ]);
     }
 }
 
