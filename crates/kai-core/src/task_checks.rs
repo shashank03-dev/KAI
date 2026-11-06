@@ -64,7 +64,20 @@ const PLACES: &[(&str, &str)] = &[
     ("in my documents", "~/Documents/"),
     ("in the documents", "~/Documents/"),
 ];
-const FILE_MANAGERS: &[&str] = &["file manager", "file explorer", "files app", "explorer"];
+const FILE_MANAGERS: &[&str] = &[
+    "file manager",
+    "file explorer",
+    "file browser",
+    "files app",
+    "explorer",
+    "nautilus",
+    "dolphin",
+    "thunar",
+    "pcmanfm",
+    "nemo",
+    "caja",
+    "finder",
+];
 
 /// The checks for `task`: (id, description, probe), at most one per path.
 pub fn derive(task: &str) -> Vec<(String, String, ProbeSpec)> {
@@ -160,25 +173,90 @@ fn output_paths(task: &str) -> Vec<String> {
 }
 
 /// The folder a task asks to see in the file manager, by its last name.
+///
+/// Covers the phrasings people and models actually use: "show the photos
+/// folder in the file manager", "open the folder called photos in Files",
+/// and "open kai-bench/photos in Nautilus". Anything without a file-manager
+/// name, or with only a generic folder ("the folder"), adds no check.
 fn shown_folder(task: &str) -> Option<String> {
     let lower = task.to_lowercase();
-    if !FILE_MANAGERS.iter().any(|f| lower.contains(f)) {
+    if !names_file_manager(&lower) {
         return None;
     }
     let w = words(task);
-    let verb = w
-        .iter()
-        .position(|x| matches!(x.to_lowercase().as_str(), "show" | "open"))?;
+    let verb = w.iter().position(|x| {
+        matches!(
+            x.to_lowercase().as_str(),
+            "show" | "open" | "display" | "browse"
+        )
+    })?;
     let folder = w[verb..]
         .iter()
-        .position(|x| x.eq_ignore_ascii_case("folder"))?
-        + verb;
-    let name = w.get(folder.checked_sub(1)?)?;
-    let last = name.rsplit(['/', '\\']).next().unwrap_or(name);
+        .position(|x| x.eq_ignore_ascii_case("folder"))
+        .map(|i| i + verb);
+    if let Some(folder) = folder {
+        // "show (me) the kai-bench/photos folder"
+        if let Some(name) = folder_name(w.get(folder.checked_sub(1)?)?, folder > verb + 1) {
+            return Some(name);
+        }
+        // "show the folder kai-bench/photos", "folder called photos"
+        for word in w.iter().skip(folder + 1).take(4) {
+            if is_folder_article(word) {
+                continue;
+            }
+            if is_folder_preposition(word) {
+                break;
+            }
+            return folder_name(word, true);
+        }
+        return None;
+    }
+    // "open kai-bench/photos in the file manager" (no "folder" word)
+    for word in w.iter().skip(verb + 1) {
+        if is_folder_article(word) {
+            continue;
+        }
+        if is_folder_preposition(word) {
+            break;
+        }
+        if is_path_like(word) {
+            return folder_name(word, true);
+        }
+    }
+    None
+}
+
+fn names_file_manager(lower: &str) -> bool {
+    FILE_MANAGERS.iter().any(|f| lower.contains(f))
+        || lower.contains(" in files")
+        || lower.contains("in the files app")
+}
+
+fn is_path_like(word: &str) -> bool {
+    let last = word.rsplit(['/', '\\']).next().unwrap_or(word);
+    (word.contains(['/', '\\']) || word.starts_with('~')) && !last.is_empty() && !last.contains('.')
+}
+
+fn is_folder_article(word: &str) -> bool {
+    matches!(
+        word.to_lowercase().as_str(),
+        "called" | "named" | "the" | "a" | "my" | "this" | "that"
+    )
+}
+
+fn is_folder_preposition(word: &str) -> bool {
+    matches!(
+        word.to_lowercase().as_str(),
+        "in" | "on" | "at" | "with" | "from" | "to"
+    )
+}
+
+fn folder_name(word: &str, named: bool) -> Option<String> {
+    let last = word.rsplit(['/', '\\']).next().unwrap_or(word);
     let generic = [
-        "the", "a", "my", "this", "that", "new", "me", "your", "home",
+        "the", "a", "my", "this", "that", "new", "me", "your", "home", "folder",
     ];
-    (folder > verb + 1 && !last.is_empty() && !generic.contains(&last.to_lowercase().as_str()))
+    (named && !last.is_empty() && !generic.contains(&last.to_lowercase().as_str()))
         .then(|| last.to_string())
 }
 

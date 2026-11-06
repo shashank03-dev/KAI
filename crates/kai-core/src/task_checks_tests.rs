@@ -72,6 +72,30 @@ fn show_in_the_file_manager_wants_that_window() {
         labels("Open my Downloads folder in the file manager"),
         ["window_title(Downloads)"]
     );
+    assert_eq!(
+        labels("Open the folder kai-bench/photos in the file manager"),
+        ["window_title(photos)"]
+    );
+    assert_eq!(
+        labels("Open kai-bench/photos in Nautilus"),
+        ["window_title(photos)"]
+    );
+    assert_eq!(
+        labels("Show me the folder called photos in Files"),
+        ["window_title(photos)"]
+    );
+    assert_eq!(
+        labels("Display the kai-bench/photos folder in Dolphin"),
+        ["window_title(photos)"]
+    );
+    assert_eq!(
+        labels("Open my Downloads folder in Finder"),
+        ["window_title(Downloads)"]
+    );
+    assert_eq!(
+        labels("Open the Downloads folder in the file browser"),
+        ["window_title(Downloads)"]
+    );
     // A folder named in a regex-looking way is matched literally.
     assert_eq!(
         labels("show the a.b+ folder in file explorer"),
@@ -94,6 +118,11 @@ fn ambiguous_or_input_only_tasks_add_nothing() {
         "Send the report to bob@example.com",
         "Show the folder in the file manager",
         "Show me the photos folder",
+        "Open the file manager",
+        "Open the report in the file manager",
+        "Open kai-bench/photos.txt in the file manager",
+        "Open /tmp/page.html in Internet Explorer",
+        "Show the weather in the file manager",
         "Tidy up kai-bench/mess - move every PDF into a subfolder called PDFs.",
         "Is my firewall turned on?",
     ] {

@@ -178,7 +178,12 @@ before any the model names:
   folder, or a file with at least one byte). The model's menu does not
   offer it.
 - **A folder shown in the file manager:** "show/open (the) X folder … file
-  manager / file explorer" → `window_title(X)`, matched literally.
+  manager / file explorer", "show the folder X …", or "open X … in
+  <file manager>" → `window_title(X)`, matched literally. The file manager
+  may be named (Files, Nautilus, Dolphin, Thunar, PCManFM, Nemo, Caja,
+  Finder) or described (file manager, file explorer, file browser, files
+  app). A generic "the folder" or a path with a file extension adds no
+  check.
 
 Everything else adds nothing. The rule is that a misread task must never
 refuse a correct `done`. So "In ~/projects, save it as notes.txt" (a bare
@@ -199,7 +204,7 @@ say what the content is, and the model's own `file_contains` covers it
 when `--outcomes` is on.
 
 **Tests.** `task_checks_tests.rs` runs on the bench's own prompts: 11
-outputs found, and 12 phrasings that must add nothing.
+outputs found, and 17 phrasings that must add nothing.
 `tests/task_checks_e2e.rs` drives the real engine: an early `done` is
 refused until the file exists and the model is told which file; with the
 switch off, `done` is accepted as before; a file that never appears ends
