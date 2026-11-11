@@ -262,10 +262,18 @@ async fn file_pickers_and_downloads_are_reported_without_writing_a_file() {
     assert!(err.to_string().contains("file picker"), "{err}");
     // Nothing is left blocking the page.
     let g = quick_look(&lane).await.grounding;
-    let notice = lane
+    // The download starts once the response headers arrive, which can be
+    // after the click returns on a loaded machine; the next look reports it.
+    let notice = match lane
         .act(&click(mark(&g, Role::Link, "Get the file")), &g)
         .await
-        .unwrap_err();
+    {
+        Err(e) => e,
+        Ok(()) => {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            lane.observe().await.unwrap_err()
+        }
+    };
     assert!(notice.to_string().contains("download"), "{notice}");
     let file = downloads.path().join("file.txt");
     assert!(!file.exists());
