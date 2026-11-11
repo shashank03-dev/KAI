@@ -3965,7 +3965,7 @@ dependencies = [
 
 [[package]]
 name = "kai-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3990,7 +3990,7 @@ dependencies = [
 
 [[package]]
 name = "kai-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4011,7 +4011,7 @@ dependencies = [
 
 [[package]]
 name = "kai-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4033,7 +4033,7 @@ dependencies = [
 
 [[package]]
 name = "kai-os"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
