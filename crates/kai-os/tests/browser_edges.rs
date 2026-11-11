@@ -181,8 +181,13 @@ async fn new_tabs_are_followed_and_a_closed_tab_hands_back() {
     )
     .await
     .unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let back = lane.observe().await.unwrap();
+    // The tab closes asynchronously; on a loaded machine that takes a while.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut back = lane.observe().await.unwrap();
+    while back.window_title.as_deref() != Some("Home") && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        back = lane.observe().await.unwrap();
+    }
     assert_eq!(back.window_title.as_deref(), Some("Home"), "handed back");
 }
 
@@ -270,8 +275,16 @@ async fn file_pickers_and_downloads_are_reported_without_writing_a_file() {
     {
         Err(e) => e,
         Ok(()) => {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            lane.observe().await.unwrap_err()
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match lane.observe().await {
+                    Err(e) => break e,
+                    Ok(_) if Instant::now() < deadline => {
+                        tokio::time::sleep(Duration::from_millis(100)).await
+                    }
+                    Ok(_) => panic!("the download was never reported"),
+                }
+            }
         }
     };
     assert!(notice.to_string().contains("download"), "{notice}");
