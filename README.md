@@ -74,7 +74,7 @@ Full explanation with a diagram: [docs/HARNESS.md](docs/HARNESS.md).
   step; the dense 31B only for the one step after a failure.
 - **Prefix caching.** Stable system prompt and schema first, the changing
   screenshot and last 3 steps last, so vLLM reuses the cached prefix.
-- **Small replies.** Thought ≤ 25 words, 192 max tokens, temperature 0,
+- **Small replies.** Thought ≤ 25 words, 320 max tokens, temperature 0,
   schema-constrained output on vLLM (no retries).
 - **Skip the model when possible.** `open_app`, `open_url` and skills'
   deterministic steps go straight to the OS.
