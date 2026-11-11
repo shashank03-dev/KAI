@@ -10,7 +10,7 @@ stop it instantly.
 Gemma 4 runs on your own DigitalOcean GPU Droplet (open weights, served by
 vLLM), with Google's Gemini API as an automatic fallback.
 
-MIT licensed · Rust · GPUI + [Ely GPUI Components](https://github.com/ZacharyZhang-NY/Ely-GPUI-Components)
+MIT licensed · Rust · GPUI + Ely GPUI Components ([vendored](vendor/README.md))
 
 ![What Kai sends the model: a real frame with numbered marks](docs/img/set-of-marks-gtk.jpg)
 
@@ -62,7 +62,7 @@ crates/
   kai-cli    `kai`: run tasks headless, validate skills, benchmark, doctor.
   kai-app    the desktop app (GPUI + Ely).
 deploy/digitalocean   one-command GPU Droplet with vLLM + Caddy TLS.
-skills/               9 shipped skills.   bench/   10 benchmark tasks.
+skills/               10 shipped skills.  bench/   30 benchmark tasks.
 ```
 
 The loop is **observe → ground → decide → act → verify**, one action per step.
@@ -188,7 +188,9 @@ Control-click Kai.app › Open ([docs/MACOS.md](docs/MACOS.md)).
 ```sh
 # Linux build deps (Ubuntu/Debian)
 sudo apt install libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-  libx11-xcb-dev libfontconfig-dev libdbus-1-dev libxdo-dev
+  libx11-xcb-dev libxcb-xfixes0-dev libxcb-randr0-dev libxcb-shape0-dev \
+  libfontconfig-dev libdbus-1-dev libxdo-dev libxtst-dev libxrandr-dev libxi-dev \
+  libgbm-dev libegl-dev libpipewire-0.3-dev libclang-dev
 cargo run --release -p kai-app          # the app
 cargo run --release -p kai-cli -- --help  # the CLI
 ```
@@ -249,6 +251,8 @@ optional deterministic steps in `metadata.kai`. Validate with
 - [docs/RESEARCH_2026_10_VENDORS.md](docs/RESEARCH_2026_10_VENDORS.md) — how Anthropic and OpenAI do computer use, and where Kai differs
 - [docs/DEMO.md](docs/DEMO.md) — the 3-minute demo
 - [DECISIONS.md](DECISIONS.md) — every assumption and deviation, and what was not run here
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test and send a change
+- [SECURITY.md](SECURITY.md) — reporting a vulnerability privately
 
 ## Credits and licences
 Kai: MIT. Gemma 4 by Google DeepMind (Apache 2.0, per Google's Gemma 4 announcement, March 2026). Ely GPUI Components
@@ -257,4 +261,4 @@ Kai: MIT. Gemma 4 by Google DeepMind (Apache 2.0, per Google's Gemma 4 announcem
 
 ### GUI account connections and Mac testing handoff
 
-Settings → Accounts & models connects provider-owned ChatGPT/Codex or Claude Code sign-in, refreshes supported model catalogs, and prepares a desktop-only run without starting it. Compatible cloud/local endpoints and exact model IDs are supported. See [the Mac GUI handoff](docs/MAC_GUI_TESTING.md) and [the architecture review](docs/ARCHITECTURE_REVIEW_2026_10_17.md). This build has not undergone the deferred live testing session.
+Settings → Accounts & models connects provider-owned ChatGPT/Codex or Claude Code sign-in, refreshes supported model catalogs, and prepares a desktop-only run without starting it. Compatible cloud/local endpoints and exact model IDs are supported. See [the Mac GUI handoff](docs/MAC_GUI_TESTING.md) and [the architecture review](docs/reviews/ARCHITECTURE_REVIEW_2026_10_17.md). This build has not undergone the deferred live testing session.

@@ -5,7 +5,7 @@ This document builds on [RESEARCH_2026_10_VENDORS.md](RESEARCH_2026_10_VENDORS.m
 (how the vendors do computer use), [RESEARCH.md](RESEARCH.md) (leaderboards,
 grounding models), [ROADMAP.md](ROADMAP.md) (training evidence),
 [COMPUTER_TOOLS.md](COMPUTER_TOOLS.md) (Kai's shared computer tools v1) and
-[AUDIT_2026_10_15.md](AUDIT_2026_10_15.md) (A05/A06/A07). It does not repeat
+[AUDIT_2026_10_15.md](reviews/AUDIT_2026_10_15.md) (A05/A06/A07). It does not repeat
 them.
 
 **The question.** How close can Kai get its open models (Gemma 4 26B-A4B/31B

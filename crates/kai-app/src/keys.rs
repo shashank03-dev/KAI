@@ -1,6 +1,6 @@
 //! API keys for a model call, read on the agent runtime's blocking pool and
 //! never on the UI thread: a keychain read can wait on an OS prompt (U06 in
-//! `docs/UI_UX_AUDIT_2026_10_16.md` sampled a 16.7 s macOS window stall).
+//! `docs/reviews/UI_UX_AUDIT_2026_10_16.md` sampled a 16.7 s macOS window stall).
 
 use kai_core::settings::Keys;
 

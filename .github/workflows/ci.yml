@@ -1,15 +1,15 @@
 name: CI
 
-# PAUSED (2026-10-13, at the owner's request): research and tests are in
-# progress, so pushes to main and pull requests do not start CI. Run it by
-# hand from the Actions tab (Run workflow). To resume, restore the `push`
-# and `pull_request` triggers from the commit before "CI: paused".
-# Validate locally meanwhile (fmt, clippy -D warnings, test, skill validate).
+# Runs on every push to main and every pull request (public repo: standard
+# runners are free). "Run workflow" by hand still works.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 # A newer push to the same branch cancels the older run instead of paying
-# for both (private-repo Actions minutes).
+# for both.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

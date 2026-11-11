@@ -951,7 +951,7 @@ Still no model key and no GPU in this session, so there are no live numbers.
   · N new" button (or ⌘/Ctrl+↓) returns. Rejected: always auto-scroll (yanks
   the reader), and deciding by the end position alone (a step card that
   grows would stop following). Pure policy in `kai-app/src/follow.rs`, unit
-  tested; live behaviour still unverified (`docs/UI_UX_AUDIT_2026_10_16.md`).
+  tested; live behaviour still unverified (`docs/reviews/UI_UX_AUDIT_2026_10_16.md`).
 - **Keys are read on the agent runtime.** The app read the keychain on its
   UI thread at start, at each run launch and at each connection test; one
   read was sampled stalling the window 16.7 s on macOS. A source guard test

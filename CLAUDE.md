@@ -33,9 +33,9 @@ MIT. Start with `README.md`; decisions and their evidence are in
    hardcoded paths, model names, keys or machine values (config or env).
    Files stay at **500 lines or fewer**: split by responsibility. English
    only.
-5. **Linux and Windows, CI paused.** CI (`.github/workflows/ci.yml`) is
-   **paused**: pushes and PRs do not run it (manual "Run workflow" only).
-   So you are the CI. Every change must build and pass clippy for **both**
+5. **Linux and Windows, checked before every push.** CI
+   (`.github/workflows/ci.yml`) runs on pushes to `main` and on pull
+   requests, but a red run after the push is too late. Every change must build and pass clippy for **both**
    targets before it is pushed (see Checks). Gate OS code with
    `#[cfg(target_os = "linux")]` / `#[cfg(target_os = "windows")]`, and make
    sure nothing is left unused on the other OS (CI uses `-D warnings`).

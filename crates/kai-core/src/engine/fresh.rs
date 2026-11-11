@@ -2,7 +2,7 @@
 //! outlive the screen, so the action's target is checked again just before
 //! acting. Only what the action depends on is compared: a clock, a ticker, a
 //! progress label or a field's typed value elsewhere on the page must not
-//! refuse every step (`docs/UI_UX_AUDIT_2026_10_16.md`, review of the
+//! refuse every step (`docs/reviews/UI_UX_AUDIT_2026_10_16.md`, review of the
 //! computer-use foundation).
 
 use crate::computer::{ComputerAction, Target};

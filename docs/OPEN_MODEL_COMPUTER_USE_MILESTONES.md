@@ -1,7 +1,7 @@
 # Open-model computer-use engineering milestones
 
 Updated 2026-10-17. This checklist tracks the objective in
-`OPEN_MODEL_COMPUTER_USE_SCORECARD_2026_10_16.md`. **An implemented feature is
+`reviews/OPEN_MODEL_COMPUTER_USE_SCORECARD_2026_10_16.md`. **An implemented feature is
 not a completed milestone until its acceptance tests and live evidence exist.**
 The historical 6/10 readiness estimate has not been superseded by a measured
 score.
@@ -10,7 +10,7 @@ score.
 
 - [x] Inspect existing computer control, safety, model backends, datasets and
   benchmark infrastructure; record the initial estimates and limitations in
-  `OPEN_MODEL_COMPUTER_USE_SCORECARD_2026_10_16.md`.
+  `reviews/OPEN_MODEL_COMPUTER_USE_SCORECARD_2026_10_16.md`.
 - [x] Prioritize native model integration, coordinate calibration, measured
   verification, browser-code execution and representative benchmarks.
 - [ ] Establish a reproducible **live** baseline for the installed Mac,

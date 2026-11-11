@@ -180,7 +180,7 @@ findings and their fixes:
 
 ### Validation (second pass, after review fixes)
 
-Host: Apple Silicon macOS, rustc 1.99.0, `CARGO_TARGET_DIR=/Users/shashank/KAI/target`.
+Host: Apple Silicon macOS, rustc 1.99.0, `CARGO_TARGET_DIR=<repo>/target`.
 
 - `cargo fmt --all -- --check`: passes.
 - `cargo clippy --workspace --all-targets -- -D warnings` (macOS host):

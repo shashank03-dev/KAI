@@ -22,7 +22,7 @@ silently approve canonical computer payloads.
 
 The model catalog has not changed. No runtime or model download is part of this
 feature. Public protocol references are in the
-[approved design](superpowers/specs/2026-10-15-computer-use-foundation-design.md).
+[approved design](design/specs/2026-10-15-computer-use-foundation-design.md).
 
 ## OpenAI's contract for open models (`--oai-contract`)
 
@@ -171,7 +171,7 @@ and a cancelled drag that poisons the lane until restart. This is browser
 driver acceptance only; cross-platform desktop and live-model accuracy still
 require their separate gates.
 
-See the [audit and remediation appendix](AUDIT_2026_10_15.md). Host fixtures are
+See the [audit and remediation appendix](reviews/AUDIT_2026_10_15.md). Host fixtures are
 not Windows/Linux desktop acceptance, mixed-DPI validation, live model accuracy,
 or approval-layout visual evidence. Keep the switch off until live benchmarks
 (two runs per side), browser contract acceptance and the OS release gates pass.
