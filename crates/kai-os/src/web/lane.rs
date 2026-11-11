@@ -358,6 +358,15 @@ pub(super) async fn attach(
             Some(&session),
         )
         .await?;
+        // A headless page has focus only some of the time (Chrome 153: half
+        // the runs), and the media completion check needs `hasFocus()`;
+        // the working tab is the focused one, as in a visible window.
+        cdp.call(
+            "Emulation.setFocusEmulationEnabled",
+            json!({"enabled": true}),
+            Some(&session),
+        )
+        .await?;
     }
     Ok(session)
 }

@@ -1178,3 +1178,10 @@ runs showed, and the fix for each:
   over 500 lines.
 - **Checked:** unit tests for the choice; the browser test 0 of 20 failed
   alone and 0 of 10 with all four cores busy (whole `browser_edges` file).
+- **Headless focus:** `web::look::tests::media_inspection_real_cdp_*`
+  failed 7 of 15 on `main` too: headless Chrome 153 gives a page focus only
+  some of the time, and the media completion check requires
+  `document.hasFocus()`, so a playing video could go unnoticed in headless
+  runs. Headless pages now get `Emulation.setFocusEmulationEnabled` (what
+  Puppeteer and Playwright do); 0 of 15 after. Which tab is the working one
+  is still checked separately (`playback_target_current`).
