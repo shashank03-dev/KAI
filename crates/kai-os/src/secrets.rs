@@ -3,6 +3,7 @@
 //! Environment variables win, for CI and the deploy scripts.
 
 use kai_core::settings::Keys;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const SERVICE: &str = "kai";
 pub const VLLM: &str = "vllm_api_key";
@@ -36,7 +37,16 @@ pub fn get(name: &str) -> Option<String> {
         Stored::Key(v) => Some(v),
         Stored::Missing => None,
         Stored::Unreadable(why) => {
-            log::error!("keychain read for {name} failed: {why}");
+            // Every key fails the same way when the keychain is missing or
+            // locked: say it once, not once per provider.
+            static TOLD: AtomicBool = AtomicBool::new(false);
+            if !TOLD.swap(true, Ordering::Relaxed) {
+                log::warn!(
+                    "keychain read for {name} failed: {why}. Keys in environment \
+                     variables (such as {}) still work",
+                    env_for(name)
+                );
+            }
             None
         }
     }
