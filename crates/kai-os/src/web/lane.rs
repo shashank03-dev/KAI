@@ -123,6 +123,9 @@ pub(super) struct Marked {
 pub(super) struct PageRef {
     pub target: String,
     pub session: String,
+    /// The tab that opened this one (`target=_blank`, `window.open`); it
+    /// takes over again when this one closes.
+    pub opener: Option<String>,
 }
 
 pub struct BrowserLane {
@@ -213,7 +216,11 @@ impl BrowserLane {
         let session = attach(&cdp, &target, opts.headless, opts.size).await?;
         Ok(Self {
             cdp,
-            page: Mutex::new(PageRef { target, session }),
+            page: Mutex::new(PageRef {
+                target,
+                session,
+                opener: None,
+            }),
             marked: Mutex::default(),
             fallback,
             headless: opts.headless,
@@ -266,71 +273,6 @@ impl BrowserLane {
         self.cdp.dialog(&self.current().session)
     }
 
-    /// Follow what happened between steps: a tab this page opened
-    /// (`target=_blank`, `window.open`) becomes the working tab, as it would
-    /// for a person; a closed working tab hands over to another one; a
-    /// crashed page is reloaded; a file picker is remembered for the action.
-    pub(super) async fn sync_tabs(&self) -> anyhow::Result<()> {
-        let now = self.current();
-        let (mut opened, mut closed, mut crashed) = (None, false, false);
-        for (method, p, session) in self.cdp.drain_events() {
-            let mine = session.as_deref() == Some(now.session.as_str());
-            match method.as_str() {
-                "Target.targetCreated"
-                    if p["targetInfo"]["type"] == "page"
-                        && p["targetInfo"]["openerId"] == now.target.as_str() =>
-                {
-                    opened = p["targetInfo"]["targetId"].as_str().map(str::to_string);
-                }
-                "Target.targetDestroyed" if p["targetId"] == now.target.as_str() => closed = true,
-                "Inspector.targetCrashed" if mine => crashed = true,
-                "Page.fileChooserOpened" if mine => self.file_chooser.store(true, Ordering::SeqCst),
-                "Browser.downloadWillBegin" => {
-                    let name = p["suggestedFilename"].as_str().unwrap_or("a file");
-                    anyhow::bail!(
-                        "the page tried to download {name:?}; Kai blocked the download. Ask the user to save it manually"
-                    );
-                }
-                _ => {}
-            }
-        }
-        let next = match (opened, closed) {
-            (Some(t), _) => Some(t),
-            (None, true) => Some(match self.any_page().await? {
-                Some(t) => t,
-                None => new_tab(&self.cdp).await?,
-            }),
-            _ => None,
-        };
-        if let Some(target) = next {
-            let session = attach(&self.cdp, &target, self.headless, self.size).await?;
-            let _ = self
-                .cdp
-                .call("Target.activateTarget", json!({"targetId": target}), None)
-                .await;
-            *self.page.lock().unwrap_or_else(|e| e.into_inner()) = PageRef { target, session };
-            *self.marked.lock().unwrap_or_else(|e| e.into_inner()) = Marked::default();
-            *self.answer.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            self.close_dropdown();
-            log::info!("browser lane: now working in the newly opened tab");
-        } else if crashed {
-            log::warn!("browser lane: the page crashed; reloading it");
-            let _ = self.page("Page.reload", json!({})).await;
-            self.wait_loaded(Duration::from_secs(10)).await;
-        }
-        Ok(())
-    }
-
-    /// The newest page tab still open, if any.
-    async fn any_page(&self) -> anyhow::Result<Option<String>> {
-        let t = self.cdp.call("Target.getTargets", json!({}), None).await?;
-        Ok(t["targetInfos"]
-            .as_array()
-            .and_then(|v| v.iter().rev().find(|t| t["type"] == "page"))
-            .and_then(|t| t["targetId"].as_str())
-            .map(str::to_string))
-    }
-
     pub(super) async fn ready_state(&self) -> Option<String> {
         let r = self
             .page(
@@ -371,7 +313,7 @@ async fn exited(cdp: &Cdp) -> bool {
 }
 
 /// A new blank tab; its target id.
-async fn new_tab(cdp: &Cdp) -> anyhow::Result<String> {
+pub(super) async fn new_tab(cdp: &Cdp) -> anyhow::Result<String> {
     Ok(cdp
         .call("Target.createTarget", json!({"url": "about:blank"}), None)
         .await?["targetId"]
@@ -382,7 +324,7 @@ async fn new_tab(cdp: &Cdp) -> anyhow::Result<String> {
 
 /// Attach to a tab and turn on what the lane reads. File pickers are
 /// intercepted so a native dialog can never block the browser.
-async fn attach(
+pub(super) async fn attach(
     cdp: &Cdp,
     target: &str,
     headless: bool,

@@ -14,5 +14,6 @@ mod look;
 mod release;
 pub mod script;
 pub mod snapshot;
+mod tabs;
 
 pub use lane::{BrowserLane, LaneOptions, default_profile, downloads_dir, find_browser};

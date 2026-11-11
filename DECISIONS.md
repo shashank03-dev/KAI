@@ -1163,3 +1163,18 @@ runs showed, and the fix for each:
   app name (a `GenericName` match is a possible follow-up; on a Mac it now
   opens Finder). A live A/B with Gemma 4 26B on the Gemini API, two runs
   per side, is still owed.
+
+## Browser lane: a closed tab hands back to its opener (2026-11-11)
+
+- **Found:** `browser_edges::new_tabs_are_followed_and_a_closed_tab_hands_back`
+  failed 5 of 10 runs alone on `main` (7 of 10 under load) with Chrome for
+  Testing 153. The close was seen, but the lane handed over to "the newest
+  page", and a fresh profile in that Chrome also lists its own pages (a
+  first-run notice). Kai then read a page with no tree, for good.
+- **Fix:** `web/tabs.rs::hand_back`: the tab that opened the closed one
+  takes over while it is open, else the newest web page; never the closed
+  tab (it can still be listed right after `window.close()`) and never a
+  `chrome://`-style page. Tab handling moved out of `lane.rs`, which was
+  over 500 lines.
+- **Checked:** unit tests for the choice; the browser test 0 of 20 failed
+  alone and 0 of 10 with all four cores busy (whole `browser_edges` file).
